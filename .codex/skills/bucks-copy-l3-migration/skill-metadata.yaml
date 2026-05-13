@@ -1,0 +1,6 @@
+interface:
+  display_name: "BucksCopy L3 Migration"
+  short_description: "Execute staged structural migrations"
+  default_prompt: "Use $bucks-copy-l3-migration for staged moves across App, Presentation, Domains, or Data."
+policy:
+  allow_implicit_invocation: true

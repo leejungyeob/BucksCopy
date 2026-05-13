@@ -1,0 +1,12 @@
+task_id: ""
+goal: ""
+task_type: "feature-change"
+primary_role: ""
+scope_in: []
+scope_out: []
+allowed_writes: []
+inputs: []
+checks: []
+risks: []
+done_when: []
+next_role: "none"

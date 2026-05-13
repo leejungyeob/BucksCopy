@@ -1,0 +1,54 @@
+name: CI / Codex Agent Rules
+
+on:
+  pull_request:
+    paths:
+      - ".codex/**"
+      - ".github/workflows/ci-codex-agent-rules.yml"
+      - "AGENTS.md"
+      - "README.md"
+      - "docs/**"
+      - "scripts/ci/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-codex-agent-rules-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  codex-agent-rules:
+    name: Codex Agent Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 01 / Checkout repository
+        uses: actions/checkout@v5
+
+      - name: 02 / Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 03 / Check Codex agent settings
+        run: python3 scripts/ci/check_agent_config.py
+
+      - name: 04 / Check skill-to-agent routing
+        run: python3 scripts/ci/check_agent_routing.py
+
+      - name: 05 / Check agent trace format
+        run: python3 scripts/ci/check_agent_trace.py
+
+      - name: 06 / Check agent trace writer
+        run: |
+          python3 scripts/ci/write_agent_trace.py \
+            --output-dir "${RUNNER_TEMP}/agent-traces" \
+            --date ci \
+            --task-id ci-agent-trace-smoke \
+            --request-summary "CI trace writer smoke." \
+            --direct-handle \
+            --used-skill bucks-copy-macos-structure
+          python3 scripts/ci/check_agent_trace.py "${RUNNER_TEMP}/agent-traces/ci"

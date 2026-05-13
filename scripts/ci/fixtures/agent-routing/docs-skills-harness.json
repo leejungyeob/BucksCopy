@@ -1,0 +1,12 @@
+{
+  "name": "docs-skills-harness",
+  "prompt": "AGENTS.md와 docs/40-agents, skill catalog, harness fixture를 최신 정책에 맞게 갱신해줘.",
+  "expected_direct_handle": false,
+  "expected_agents": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l3-doc-writer",
+    "bucks-copy-l2-code-reviewer"
+  ],
+  "expected_write_owner": "bucks-copy-l3-doc-writer",
+  "expected_agent_creation": "runtime-permitting"
+}

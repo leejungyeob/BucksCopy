@@ -1,0 +1,8 @@
+{
+  "name": "direct-handle-small-doc",
+  "prompt": "짧은 문서 오타 하나만 수정해줘.",
+  "expected_direct_handle": true,
+  "expected_agents": [],
+  "expected_write_owner": null,
+  "expected_agent_creation": "none"
+}

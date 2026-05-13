@@ -1,0 +1,6 @@
+interface:
+  display_name: "BucksCopy L2 Code Reviewer"
+  short_description: "Review bugs, regressions, and test gaps"
+  default_prompt: "Use $bucks-copy-l2-code-reviewer for bug-risk, regression, trading-safety, or test-gap review."
+policy:
+  allow_implicit_invocation: true

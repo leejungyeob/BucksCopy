@@ -1,0 +1,6 @@
+interface:
+  display_name: "BucksCopy L3 Doc Writer"
+  short_description: "Update canonical docs without duplication"
+  default_prompt: "Use $bucks-copy-l3-doc-writer to update canonical docs, skills, metadata, and harness fixtures without duplicates."
+policy:
+  allow_implicit_invocation: true

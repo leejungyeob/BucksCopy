@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+Derived/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+.tuist-cache/
+.codex/runs/**/*.json

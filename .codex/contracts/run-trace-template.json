@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "task_id": "YYYY-MM-DD-short-task-id",
+  "request_summary": "One-line user request summary.",
+  "direct_handle": false,
+  "used_skills": [
+    "bucks-copy-l1-planner-orchestrator"
+  ],
+  "route": [
+    "bucks-copy-l1-planner-orchestrator"
+  ],
+  "spawned_agents": [],
+  "fallback_reason": "runtime did not permit agent creation",
+  "write_owner": null,
+  "checks": [],
+  "max_threads": 3
+}

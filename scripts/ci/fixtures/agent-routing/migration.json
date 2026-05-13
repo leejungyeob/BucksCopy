@@ -1,0 +1,16 @@
+{
+  "name": "migration",
+  "prompt": "App 내부 Bitget 구현을 Data adapter와 Domains contract 경계로 이동하는 migration 작업을 해줘.",
+  "expected_direct_handle": false,
+  "expected_agents": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l2-architect",
+    "bucks-copy-l3-migration",
+    "bucks-copy-l3-build-fixer",
+    "bucks-copy-l2-code-reviewer",
+    "bucks-copy-l2-security",
+    "bucks-copy-l2-tdd-guide"
+  ],
+  "expected_write_owner": "bucks-copy-l3-migration",
+  "expected_agent_creation": "runtime-permitting"
+}

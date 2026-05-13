@@ -1,0 +1,12 @@
+{
+  "name": "build-break",
+  "prompt": "tuist generate 후 import error가 나서 Xcode 빌드 복구가 필요해.",
+  "expected_direct_handle": false,
+  "expected_agents": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l3-build-fixer",
+    "bucks-copy-l2-code-reviewer"
+  ],
+  "expected_write_owner": "bucks-copy-l3-build-fixer",
+  "expected_agent_creation": "runtime-permitting"
+}

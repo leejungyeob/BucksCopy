@@ -1,0 +1,99 @@
+# Decision Log
+
+## 한글 요약
+
+- 이 문서는 `BucksCopy`의 구조/정책 결정을 짧게 기록하는 ADR-lite 문서입니다.
+- 세부 설계서보다 “왜 이 방향을 정했는지”를 남기는 데 집중합니다.
+
+## 기록 형식
+
+```markdown
+## 000X. 제목
+- Status: proposed | accepted | deprecated
+- Date: YYYY-MM-DD
+- Context:
+- Decision:
+- Consequences:
+```
+
+## 0001. Codex Foundation v1 도입
+
+- Status: accepted
+- Date: 2026-05-13
+- Context:
+  - 저장소가 거의 빈 상태에서 macOS 자동매매 앱 개발을 시작합니다.
+  - 안정적인 코드 생성을 위해 repo-local 규칙, 스킬, 에이전트, 하네스를 먼저 고정해야 합니다.
+- Decision:
+  - SwiftUI 네이티브 macOS + Tuist/Xcode + Bitget USDT Futures + Paper trading 우선을 기본값으로 둡니다.
+  - `AGENTS.md`와 `docs/`를 canonical 문서 세트로 둡니다.
+  - `.codex/skills`, `.codex/agents`, `scripts/ci`로 스킬/에이전트/trace 하네스를 구성합니다.
+- Consequences:
+  - 이후 구현 작업은 레이어 경계와 Paper-first 안전 규칙을 기준으로 판단합니다.
+  - live trading은 별도 decision log와 보안 리뷰 전까지 기본 차단입니다.
+
+## 0002. Paper Trading First
+
+- Status: accepted
+- Date: 2026-05-13
+- Context:
+  - 자동매매 프로그램은 credential, 주문, 손실 가능성이 직접 연결되는 고위험 도메인입니다.
+  - 초기에는 candle/strategy/order intent가 재현 가능하게 검증되는 것이 live execution보다 중요합니다.
+- Decision:
+  - v1 문서와 하네스는 Paper trading을 기본 실행 모드로 둡니다.
+  - live order execution은 명시적인 future policy switch, security review, acceptance test 없이는 구현하지 않습니다.
+- Consequences:
+  - Strategy와 order execution은 paper/live boundary contract를 분리해야 합니다.
+  - UI에 API credential 입력이 있어도 즉시 live 주문을 허용하지 않습니다.
+
+## 0003. USDT-M Futures Watchlist Scope
+
+- Status: accepted
+- Date: 2026-05-13
+- Context:
+  - 사용자는 Bitget USDT-M Futures에 있는 코인들을 거래 대상으로 삼습니다.
+  - 전체 USDT-M Futures를 자동 구독/매매하면 WebSocket 안정성, 리스크 관리, 전략 검증 범위가 급격히 커집니다.
+- Decision:
+  - v1 상품 범위는 Bitget Classic Futures v2 mix API의 `productType=USDT-FUTURES`로 고정합니다.
+  - 전체 contract catalog는 `GET /api/v2/mix/market/contracts`로 가져오되, 실제 자동매매 대상은 사용자 Watchlist로 제한합니다.
+  - Watchlist 후보는 `symbolStatus=normal`이고 `supportMarginCoins`에 `USDT`가 있는 심볼로 제한합니다.
+  - WebSocket 구독은 Watchlist 심볼만 대상으로 하며, 한 연결당 50개 이하 채널을 기본 제한으로 둡니다.
+- Consequences:
+  - Symbol catalog와 Watchlist는 Domain contract와 Data repository 경계로 분리합니다.
+  - Watchlist에 없는 심볼은 strategy 실행이나 paper order intent 생성 대상이 아닙니다.
+  - live order endpoint는 계속 disabled 상태로 유지합니다.
+
+## 0004. Layer Simplification and Local Market History
+
+- Status: accepted
+- Date: 2026-05-13
+- Context:
+  - 초기 앱 구현 전에는 과한 레이어 수가 코드 생성과 파일 배치를 더 어렵게 만들 수 있습니다.
+  - Bitget candle API는 현재 시점 기준으로 조회 가능한 기간과 요청 수량에 제한이 있으므로, 앱이 장기간 안정적으로 전략을 평가하려면 로컬 히스토리 누적이 필요합니다.
+- Decision:
+  - 필수 레이어는 `App / Presentation / Domains / Data`로 단순화합니다.
+  - 기존 `Features` 명칭은 SwiftUI 화면/상태 책임을 더 명확히 하기 위해 `Presentation`으로 바꿉니다.
+  - `Service`, `Platform`, `Core`, `UIShared`는 별도 최상위 레이어로 만들지 않고 필요 시 네 레이어 내부의 하위 폴더/타입으로 둡니다.
+  - Watchlist 심볼의 closed candle은 SQLite-backed local market history store에 지속 저장합니다.
+  - 앱 재시작 시 로컬 마지막 closed candle 이후의 gap만 Bitget REST로 보충하고, 이후 WebSocket으로 계속 누적합니다.
+- Consequences:
+  - API credential은 Keychain-facing Data adapter만 소유하고, 로컬 market history DB에는 비밀정보를 저장하지 않습니다.
+  - 거래 의사결정의 핵심 장기 데이터는 거래소에서 매번 다시 받는 데이터가 아니라 로컬에 누적된 closed candle history입니다.
+  - 이전 paper/live 거래기록은 전략 디버깅과 감사 목적의 최소 기록으로 남길 수 있지만, candle history와 별도 정책으로 관리합니다.
+
+## 0005. Dashboard v1 and Paper-Only Execution
+
+- Status: accepted
+- Date: 2026-05-13
+- Context:
+  - 사용자는 로그인보다 API credential 입력, candle chart, 현재 포지션, 자동매매 로그, 전략 설정을 한 화면에서 확인하길 원합니다.
+  - 실제 주문은 아직 위험하므로 UI가 붙어도 주문 실행은 Paper로 제한해야 합니다.
+- Decision:
+  - Dashboard v1은 통합 SwiftUI 화면으로 구성합니다.
+  - Bitget private API credential은 `APIKey`, `SecretKey`, `Passphrase` 세 값을 받고 Keychain-facing Data adapter에만 저장합니다.
+  - Candle chart는 SwiftUI Canvas로 구현하고 `15m`, `1H`, `4H`, `12H`, `1D` 선택을 지원합니다.
+  - 현재 포지션은 `GET /api/v2/mix/position/all-position`을 통해 읽기 전용으로 표시합니다.
+  - 자동매매 시작은 Paper runner만 실행하며, `NoopStrategy`와 strategy registry를 먼저 둡니다.
+- Consequences:
+  - 모든 실제 내장 전략은 signal 생성 시 `entryPrice`, `stopLoss`, `takeProfit`을 함께 제공해야 합니다.
+  - `POST /api/v2/mix/order/place-order`와 TPSL order API는 계속 disabled 상태입니다.
+  - Bot event, signal, paper order, risk decision 로그는 SQLite local DB에 영구 저장합니다.

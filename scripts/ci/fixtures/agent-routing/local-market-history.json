@@ -1,0 +1,14 @@
+{
+  "name": "local-market-history",
+  "prompt": "Watchlist candle을 SQLite local DB market history에 저장하고 앱 시작 시 gap fill 하도록 설계해줘.",
+  "expected_direct_handle": false,
+  "expected_agents": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l2-architect",
+    "bucks-copy-l2-security",
+    "bucks-copy-l2-tdd-guide",
+    "bucks-copy-l2-code-reviewer"
+  ],
+  "expected_write_owner": null,
+  "expected_agent_creation": "runtime-permitting"
+}

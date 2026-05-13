@@ -1,0 +1,13 @@
+{
+  "name": "candle-strategy-engine",
+  "prompt": "15분, 1시간, 4시간, 12시간, 1일 봉 candle aggregation과 strategy 자동매매 signal을 구현해줘.",
+  "expected_direct_handle": false,
+  "expected_agents": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l2-architect",
+    "bucks-copy-l2-tdd-guide",
+    "bucks-copy-l2-code-reviewer"
+  ],
+  "expected_write_owner": null,
+  "expected_agent_creation": "runtime-permitting"
+}

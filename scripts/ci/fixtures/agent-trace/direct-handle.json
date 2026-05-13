@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "task_id": "2026-05-13-direct-handle-example",
+  "request_summary": "Answer a simple macOS structure question.",
+  "direct_handle": true,
+  "used_skills": [
+    "bucks-copy-macos-structure"
+  ],
+  "route": [],
+  "spawned_agents": [],
+  "fallback_reason": null,
+  "write_owner": null,
+  "checks": [],
+  "max_threads": 3
+}

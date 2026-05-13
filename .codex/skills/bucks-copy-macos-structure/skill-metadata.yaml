@@ -1,0 +1,4 @@
+interface:
+  display_name: "BucksCopy macOS Structure"
+  short_description: "Explain macOS app structure and placement rules"
+  default_prompt: "Use $bucks-copy-macos-structure for macOS structure, module placement, Tuist/Xcode target, or file location questions."

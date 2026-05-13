@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "task_id": "2026-05-13-runtime-fallback-example",
+  "request_summary": "Plan Bitget credential storage security review when agent creation is unavailable.",
+  "direct_handle": false,
+  "used_skills": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l2-security"
+  ],
+  "route": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l2-architect",
+    "bucks-copy-l2-security",
+    "bucks-copy-l2-tdd-guide",
+    "bucks-copy-l2-code-reviewer"
+  ],
+  "spawned_agents": [],
+  "fallback_reason": "runtime did not permit agent creation",
+  "write_owner": null,
+  "checks": [
+    "manual security checklist review"
+  ],
+  "max_threads": 3
+}

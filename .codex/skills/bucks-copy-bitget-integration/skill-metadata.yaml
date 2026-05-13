@@ -1,0 +1,4 @@
+interface:
+  display_name: "BucksCopy Bitget Integration"
+  short_description: "Guide Bitget REST/WS integration safely"
+  default_prompt: "Use $bucks-copy-bitget-integration for Bitget REST/WebSocket auth, DTO, reconnect, rate-limit, or no-secret logging work."

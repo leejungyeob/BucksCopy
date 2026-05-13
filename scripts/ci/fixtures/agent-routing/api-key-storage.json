@@ -1,0 +1,14 @@
+{
+  "name": "api-key-storage",
+  "prompt": "API key, secret, passphrase를 Keychain에 저장하는 credential storage 작업을 해줘.",
+  "expected_direct_handle": false,
+  "expected_agents": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l2-architect",
+    "bucks-copy-l2-security",
+    "bucks-copy-l2-tdd-guide",
+    "bucks-copy-l2-code-reviewer"
+  ],
+  "expected_write_owner": null,
+  "expected_agent_creation": "runtime-permitting"
+}

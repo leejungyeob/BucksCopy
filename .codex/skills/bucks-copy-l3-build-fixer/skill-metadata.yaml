@@ -1,0 +1,6 @@
+interface:
+  display_name: "BucksCopy L3 Build Fixer"
+  short_description: "Restore build and target health"
+  default_prompt: "Use $bucks-copy-l3-build-fixer to restore Tuist, import, target, script, or build health."
+policy:
+  allow_implicit_invocation: true

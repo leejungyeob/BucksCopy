@@ -1,0 +1,6 @@
+interface:
+  display_name: "BucksCopy L2 TDD Guide"
+  short_description: "Turn requirements into tests and acceptance checks"
+  default_prompt: "Use $bucks-copy-l2-tdd-guide for acceptance cases, edge cases, and minimum safe validation."
+policy:
+  allow_implicit_invocation: true

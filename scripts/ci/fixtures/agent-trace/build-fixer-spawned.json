@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "task_id": "2026-05-13-build-fixer-example",
+  "request_summary": "Fix Tuist generate import failure.",
+  "direct_handle": false,
+  "used_skills": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l3-build-fixer"
+  ],
+  "route": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l3-build-fixer",
+    "bucks-copy-l2-code-reviewer"
+  ],
+  "spawned_agents": [
+    "bucks-copy-l3-build-fixer"
+  ],
+  "fallback_reason": null,
+  "write_owner": "bucks-copy-l3-build-fixer",
+  "checks": [
+    "tuist generate"
+  ],
+  "max_threads": 3
+}

@@ -1,0 +1,14 @@
+{
+  "name": "usdtm-watchlist",
+  "prompt": "Bitget USDT-M Futures contract catalog에서 normal 심볼만 Watchlist 후보로 만들고 Watchlist 심볼만 WebSocket 구독하게 해줘.",
+  "expected_direct_handle": false,
+  "expected_agents": [
+    "bucks-copy-l1-planner-orchestrator",
+    "bucks-copy-l2-architect",
+    "bucks-copy-l2-security",
+    "bucks-copy-l2-tdd-guide",
+    "bucks-copy-l2-code-reviewer"
+  ],
+  "expected_write_owner": null,
+  "expected_agent_creation": "runtime-permitting"
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "BucksCopy L1 Planner Orchestrator"
+  short_description: "Break down work and route specialists"
+  default_prompt: "Use $bucks-copy-l1-planner-orchestrator to route complex work and prepare minimal handoff."
