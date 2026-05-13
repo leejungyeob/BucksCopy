@@ -8,12 +8,17 @@ final class BitgetSymbolCatalogRepository: SymbolCatalogRepository {
     }
 
     func fetchUSDTFuturesSymbols() async throws -> [ContractSpec] {
-        let contracts: [BitgetContractConfigDTO] = try await client.sendPublicGET(
-            path: "/api/v2/mix/market/contracts",
-            queryItems: [
-                URLQueryItem(name: "productType", value: ProductType.usdtFutures.rawValue)
-            ]
-        )
+        var contracts: [BitgetContractConfigDTO] = []
+        for symbol in Self.dashboardSymbols {
+            let symbolContracts: [BitgetContractConfigDTO] = try await client.sendPublicGET(
+                path: "/api/v2/mix/market/contracts",
+                queryItems: [
+                    URLQueryItem(name: "productType", value: ProductType.usdtFutures.rawValue),
+                    URLQueryItem(name: "symbol", value: symbol.rawValue)
+                ]
+            )
+            contracts.append(contentsOf: symbolContracts)
+        }
 
         return contracts
             .compactMap(\.domain)
@@ -28,10 +33,14 @@ final class BitgetSymbolCatalogRepository: SymbolCatalogRepository {
             }
     }
 
+    private static let dashboardSymbols: [FuturesSymbol] = [
+        FuturesSymbol("BTCUSDT"),
+        FuturesSymbol("ETHUSDT")
+    ]
+
     private static func priorityRank(_ symbol: FuturesSymbol) -> Int {
         let priority = [
-            "BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT",
-            "ADAUSDT", "BCHUSDT", "LTCUSDT", "LINKUSDT", "AVAXUSDT", "TRXUSDT"
+            "BTCUSDT", "ETHUSDT"
         ]
         return priority.firstIndex(of: symbol.rawValue) ?? priority.count
     }

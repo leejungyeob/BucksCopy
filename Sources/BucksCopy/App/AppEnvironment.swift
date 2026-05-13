@@ -96,6 +96,7 @@ final class InMemoryTradeEventLogStore: TradeEventLogStore {
 }
 
 final class InMemoryCandleRepository: CandleRepository, CandleHistoryStateStore {
+    private let lock = NSLock()
     private var candles: [Candle] = []
     private var historyStates: [String: CandleHistorySyncState] = [:]
 
@@ -112,7 +113,9 @@ final class InMemoryCandleRepository: CandleRepository, CandleHistoryStateStore 
         timeframe: CandleTimeframe,
         limit: Int
     ) throws -> [Candle] {
-        Array(candles
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(candles
             .filter { $0.symbol == symbol && $0.timeframe == timeframe }
             .suffix(limit))
     }
@@ -121,13 +124,17 @@ final class InMemoryCandleRepository: CandleRepository, CandleHistoryStateStore 
         symbol: FuturesSymbol,
         timeframe: CandleTimeframe
     ) throws -> Date? {
-        candles
+        lock.lock()
+        defer { lock.unlock() }
+        return candles
             .filter { $0.symbol == symbol && $0.timeframe == timeframe }
             .map(\.openTime)
             .min()
     }
 
     func upsertCandles(_ candles: [Candle]) throws {
+        lock.lock()
+        defer { lock.unlock() }
         for candle in candles {
             if let index = self.candles.firstIndex(where: { $0.id == candle.id }) {
                 self.candles[index] = candle
@@ -142,10 +149,14 @@ final class InMemoryCandleRepository: CandleRepository, CandleHistoryStateStore 
         symbol: FuturesSymbol,
         timeframe: CandleTimeframe
     ) throws -> CandleHistorySyncState? {
-        historyStates[historyKey(symbol: symbol, timeframe: timeframe)]
+        lock.lock()
+        defer { lock.unlock() }
+        return historyStates[historyKey(symbol: symbol, timeframe: timeframe)]
     }
 
     func saveHistorySyncState(_ state: CandleHistorySyncState) throws {
+        lock.lock()
+        defer { lock.unlock() }
         historyStates[historyKey(symbol: state.symbol, timeframe: state.timeframe)] = state
     }
 

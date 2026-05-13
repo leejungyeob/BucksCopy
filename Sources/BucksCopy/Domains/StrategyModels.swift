@@ -102,7 +102,7 @@ struct NoopStrategy: TradingStrategy {
 struct StrategyRegistry {
     private let strategies: [String: any TradingStrategy]
 
-    init(strategies: [any TradingStrategy] = [NoopStrategy()]) {
+    init(strategies: [any TradingStrategy] = StrategyRegistry.defaultStrategies) {
         self.strategies = Dictionary(uniqueKeysWithValues: strategies.map { ($0.definition.id, $0) })
     }
 
@@ -112,6 +112,24 @@ struct StrategyRegistry {
 
     func strategy(id: String) -> (any TradingStrategy)? {
         strategies[id]
+    }
+
+    func definition(id: String) -> StrategyDefinition? {
+        strategies[id]?.definition
+    }
+
+    private static var defaultStrategies: [any TradingStrategy] {
+        [
+            NoopStrategy(),
+            TrendPullbackStrategy(),
+            VWMAReclaimStrategy(),
+            BollingerRSIReversionStrategy(),
+            VolumeBreakoutStrategy(),
+            RSITrendContinuationStrategy(),
+            KeltnerATRPullbackStrategy(),
+            DonchianTrendBreakoutStrategy(),
+            SuperTrendATRContinuationStrategy()
+        ]
     }
 }
 

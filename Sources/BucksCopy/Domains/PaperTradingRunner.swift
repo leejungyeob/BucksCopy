@@ -41,11 +41,27 @@ final class PaperTradingRunner {
         case .noSignal:
             break
         case .signal(let signal):
+            let riskDecision = StrategyRiskPolicy.decision(
+                for: signal,
+                leverage: config.leverage,
+                decidedAt: clock.now
+            )
+            guard riskDecision.isAllowed else {
+                try logStore.append(TradeEventLog(
+                    timestamp: clock.now,
+                    category: .risk,
+                    severity: .warning,
+                    symbol: signal.symbol,
+                    message: riskDecision.reason
+                ))
+                return .noSignal
+            }
+
             try logStore.append(TradeEventLog(
                 timestamp: clock.now,
                 category: .paperOrder,
                 symbol: signal.symbol,
-                message: "Paper \(signal.side.rawValue) order created by \(signal.strategyID). Entry \(signal.entryPrice), stop loss \(signal.stopLoss), take profit \(signal.takeProfit), leverage \(config.leverage)x. Reason: \(signal.reason)"
+                message: "Paper \(signal.side.rawValue) order created by \(signal.strategyID). Entry \(signal.entryPrice), stop loss \(signal.stopLoss), take profit \(signal.takeProfit), leverage \(config.leverage)x, reward/risk \(signal.plannedRewardRiskRatio?.riskText ?? "-"):1, leveraged stop risk \(signal.leveragedStopLossPercent(leverage: config.leverage)?.riskText ?? "-")%. Reason: \(signal.reason)"
             ))
         }
 

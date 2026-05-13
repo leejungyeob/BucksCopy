@@ -18,6 +18,7 @@ final class DashboardViewModel: ObservableObject {
     private let candleStreamService: CandleStreamService?
     private let logStore: TradeEventLogStore
     private let paperRunner: PaperTradingRunner
+    private let backtestEngine: BacktestEngine
     private let clock: Clock
     private let historyBackfillPolicy: CandleHistoryBackfillPolicy
     private var candleRefreshTask: Task<Void, Never>?
@@ -25,6 +26,7 @@ final class DashboardViewModel: ObservableObject {
     private var candleStreamTask: Task<Void, Never>?
     private var positionStreamTask: Task<Void, Never>?
     private var positionPollingTask: Task<Void, Never>?
+    private var backtestTask: Task<Void, Never>?
     private let initialCandleDisplayLimit = 2_500
     private var candleDisplayLimit = 2_500
     private let maxCandleDisplayLimit = 50_000
@@ -44,6 +46,7 @@ final class DashboardViewModel: ObservableObject {
         candleStreamService: CandleStreamService? = nil,
         logStore: TradeEventLogStore,
         paperRunner: PaperTradingRunner,
+        backtestEngine: BacktestEngine? = nil,
         strategyRegistry: StrategyRegistry,
         clock: Clock = SystemClock(),
         historyBackfillPolicy: CandleHistoryBackfillPolicy = .live
@@ -60,6 +63,7 @@ final class DashboardViewModel: ObservableObject {
         self.candleStreamService = candleStreamService
         self.logStore = logStore
         self.paperRunner = paperRunner
+        self.backtestEngine = backtestEngine ?? BacktestEngine(strategyRegistry: strategyRegistry)
         self.strategyRegistry = strategyRegistry
         self.clock = clock
         self.historyBackfillPolicy = historyBackfillPolicy
@@ -71,6 +75,7 @@ final class DashboardViewModel: ObservableObject {
         candleStreamTask?.cancel()
         positionStreamTask?.cancel()
         positionPollingTask?.cancel()
+        backtestTask?.cancel()
     }
 
     var strategyDefinitions: [StrategyDefinition] {
@@ -204,8 +209,16 @@ final class DashboardViewModel: ObservableObject {
         do {
             let specs = try await symbolCatalogRepository.fetchUSDTFuturesSymbols()
             guard !specs.isEmpty else { return }
-            state.symbolCatalog = specs
-            state.watchlist = specs.map(\.symbol)
+            let dashboardSpecs = dashboardContractSpecs(from: specs)
+            guard !dashboardSpecs.isEmpty else { return }
+            state.symbolCatalog = dashboardSpecs
+            state.watchlist = dashboardSpecs.map(\.symbol)
+
+            if !state.watchlist.contains(state.backtestConfiguration.symbol),
+               let firstSymbol = state.watchlist.first {
+                state.backtestConfiguration.symbol = firstSymbol
+                resetBacktest()
+            }
 
             if !state.watchlist.contains(state.selectedSymbol),
                let firstSymbol = state.watchlist.first {
@@ -221,6 +234,10 @@ final class DashboardViewModel: ObservableObject {
             state.strategyConfig.leverage = clampedLeverage(
                 state.strategyConfig.leverage,
                 for: state.selectedSymbol
+            )
+            state.backtestConfiguration.strategyConfig.leverage = clampedLeverage(
+                state.backtestConfiguration.strategyConfig.leverage,
+                for: state.backtestConfiguration.symbol
             )
         } catch {
             appendSessionLogOnce(key: "symbols.failed", .init(
@@ -255,11 +272,52 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func updateStrategy(_ strategyID: String) {
-        state.strategyConfig.strategyID = strategyID
+        guard let definition = strategyRegistry.definition(id: strategyID) else { return }
+        var nextConfig = state.strategyConfig
+        nextConfig.strategyID = definition.id
+        nextConfig.parameters = definition.defaultConfig.parameters
+        nextConfig.leverage = clampedLeverage(nextConfig.leverage, for: state.selectedSymbol)
+        state.strategyConfig = nextConfig
     }
 
     func updateLeverage(_ leverage: Int) {
         state.strategyConfig.leverage = clampedLeverage(leverage, for: state.selectedSymbol)
+    }
+
+    func selectBacktestSymbol(_ symbol: FuturesSymbol) {
+        guard state.watchlist.contains(symbol) else { return }
+        state.backtestConfiguration.symbol = symbol
+        state.backtestConfiguration.strategyConfig.leverage = clampedLeverage(
+            state.backtestConfiguration.strategyConfig.leverage,
+            for: symbol
+        )
+        resetBacktest()
+    }
+
+    func selectBacktestTimeframe(_ timeframe: CandleTimeframe) {
+        state.backtestConfiguration.timeframe = timeframe
+        resetBacktest()
+    }
+
+    func updateBacktestStrategy(_ strategyID: String) {
+        guard let definition = strategyRegistry.definition(id: strategyID) else { return }
+        var nextConfiguration = state.backtestConfiguration
+        nextConfiguration.strategyConfig.strategyID = definition.id
+        nextConfiguration.strategyConfig.parameters = definition.defaultConfig.parameters
+        nextConfiguration.strategyConfig.leverage = clampedLeverage(
+            nextConfiguration.strategyConfig.leverage,
+            for: nextConfiguration.symbol
+        )
+        state.backtestConfiguration = nextConfiguration
+        resetBacktest()
+    }
+
+    func updateBacktestLeverage(_ leverage: Int) {
+        state.backtestConfiguration.strategyConfig.leverage = clampedLeverage(
+            leverage,
+            for: state.backtestConfiguration.symbol
+        )
+        resetBacktest()
     }
 
     func updateLogLanguage(_ language: TradeLogLanguage) {
@@ -285,6 +343,43 @@ final class DashboardViewModel: ObservableObject {
                 symbol: state.selectedSymbol,
                 message: sanitizedError(error)
             ))
+        }
+    }
+
+    func runBacktest() {
+        backtestTask?.cancel()
+
+        let configuration = state.backtestConfiguration
+        let candleRepository = self.candleRepository
+        let backtestEngine = self.backtestEngine
+        let candleLimit = maxCandleDisplayLimit
+        let startedAt = clock.now
+
+        state.backtestStatus = .running(startedAt: startedAt)
+        state.backtestResult = nil
+
+        backtestTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                try Task.checkCancellation()
+                let candles = try candleRepository.loadCandles(
+                    symbol: configuration.symbol,
+                    timeframe: configuration.timeframe,
+                    limit: candleLimit
+                )
+                try Task.checkCancellation()
+                let result = try backtestEngine.run(
+                    symbol: configuration.symbol,
+                    timeframe: configuration.timeframe,
+                    candles: candles,
+                    config: configuration.strategyConfig
+                )
+                try Task.checkCancellation()
+                await self?.completeBacktest(result, configuration: configuration)
+            } catch is CancellationError {
+                await self?.cancelBacktestIfCurrent(configuration)
+            } catch {
+                await self?.failBacktest(error, configuration: configuration)
+            }
         }
     }
 
@@ -616,20 +711,81 @@ final class DashboardViewModel: ObservableObject {
     }
 
     var selectedLeverageRange: ClosedRange<Int> {
-        let minLeverage = selectedContractSpec?.minLeverage ?? 1
-        let maxLeverage = selectedContractSpec?.maxLeverage ?? 150
-        return minLeverage...max(maxLeverage, minLeverage)
+        leverageRange(for: state.selectedSymbol)
     }
 
-    private var selectedContractSpec: ContractSpec? {
-        state.symbolCatalog.first { $0.symbol == state.selectedSymbol }
+    var backtestLeverageRange: ClosedRange<Int> {
+        leverageRange(for: state.backtestConfiguration.symbol)
+    }
+
+    private func leverageRange(for symbol: FuturesSymbol) -> ClosedRange<Int> {
+        let spec = state.symbolCatalog.first { $0.symbol == symbol }
+        let rawMinLeverage = spec?.minLeverage ?? 1
+        let rawMaxLeverage = spec?.maxLeverage ?? StrategyRiskPolicy.maximumAutoTradingLeverage
+        let minLeverage = min(
+            max(rawMinLeverage, 1),
+            StrategyRiskPolicy.maximumAutoTradingLeverage
+        )
+        let maxLeverage = max(
+            min(rawMaxLeverage, StrategyRiskPolicy.maximumAutoTradingLeverage),
+            minLeverage
+        )
+        return minLeverage...maxLeverage
+    }
+
+    private func dashboardContractSpecs(from specs: [ContractSpec]) -> [ContractSpec] {
+        let allowedSymbols = DashboardState.defaultWatchlist
+        return allowedSymbols.compactMap { symbol in
+            specs.first { $0.symbol == symbol }
+        }
     }
 
     private func clampedLeverage(_ leverage: Int, for symbol: FuturesSymbol) -> Int {
-        let spec = state.symbolCatalog.first { $0.symbol == symbol }
-        let minimum = spec?.minLeverage ?? 1
-        let maximum = max(spec?.maxLeverage ?? 150, minimum)
-        return min(max(leverage, minimum), maximum)
+        let range = leverageRange(for: symbol)
+        return min(max(leverage, range.lowerBound), range.upperBound)
+    }
+
+    private func completeBacktest(
+        _ result: BacktestResult,
+        configuration: BacktestConfiguration
+    ) {
+        guard state.backtestConfiguration == configuration else { return }
+        state.backtestResult = result
+        state.backtestStatus = .complete
+        appendSessionLog(.init(
+            timestamp: clock.now,
+            category: .bot,
+            symbol: configuration.symbol,
+            message: "Backtest complete: \(result.totalTrades) trade(s), win rate \(result.winRatePercent.riskText)%, net \(result.netReturnPercent.riskText)%."
+        ))
+    }
+
+    private func failBacktest(
+        _ error: Error,
+        configuration: BacktestConfiguration
+    ) {
+        guard state.backtestConfiguration == configuration else { return }
+        state.backtestResult = nil
+        state.backtestStatus = .failed(message: sanitizedError(error))
+        appendSessionLog(.init(
+            timestamp: clock.now,
+            category: .bot,
+            severity: .warning,
+            symbol: configuration.symbol,
+            message: sanitizedError(error)
+        ))
+    }
+
+    private func cancelBacktestIfCurrent(_ configuration: BacktestConfiguration) {
+        guard state.backtestConfiguration == configuration else { return }
+        state.backtestStatus = .idle
+    }
+
+    private func resetBacktest() {
+        backtestTask?.cancel()
+        backtestTask = nil
+        state.backtestStatus = .idle
+        state.backtestResult = nil
     }
 
     private func sanitizedError(_ error: Error) -> String {
@@ -646,6 +802,8 @@ final class DashboardViewModel: ObservableObject {
             return "Strategy not found: \(id)"
         case TradingDomainError.selectedSymbolNotInWatchlist(let symbol):
             return "\(symbol.rawValue) is not in Watchlist."
+        case BacktestEngineError.insufficientCandles(let required, let actual):
+            return "백테스트에 필요한 캔들이 부족합니다. 최소 \(required)개 필요, 현재 \(actual)개입니다."
         default:
             return "Operation failed: \(String(describing: type(of: error)))."
         }

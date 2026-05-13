@@ -10,19 +10,38 @@ struct StrategySettingsPanel: View {
     var body: some View {
         DashboardPanel {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Strategy")
+                Text("자동매매 전략")
                     .font(.headline)
 
-                Picker("Method", selection: Binding(
-                    get: { config.strategyID },
-                    set: onSelect
-                )) {
-                    ForEach(definitions) { definition in
-                        Text(definition.name)
-                            .tag(definition.id)
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(definitions) { definition in
+                            Button {
+                                guard definition.id != config.strategyID else { return }
+                                onSelect(definition.id)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(definition.name)
+                                        .font(.callout)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    if definition.id == config.strategyID {
+                                        Image(systemName: "checkmark")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.green)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 26)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(definition.id == config.strategyID ? Color.accentColor.opacity(0.14) : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
-                .pickerStyle(.menu)
+                .frame(minHeight: 86, idealHeight: 104, maxHeight: 122)
 
                 Stepper(
                     value: Binding(
@@ -32,7 +51,7 @@ struct StrategySettingsPanel: View {
                     in: leverageRange
                 ) {
                     HStack {
-                        Text("Leverage")
+                        Text("레버리지")
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text("\(config.leverage)x")
@@ -42,17 +61,17 @@ struct StrategySettingsPanel: View {
 
                 Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
                     GridRow {
-                        Text("Stop")
+                        Text("손절")
                             .foregroundStyle(.secondary)
-                        Text("Strategy")
+                        Text("전략 기준")
                     }
                     GridRow {
-                        Text("Take")
+                        Text("익절")
                             .foregroundStyle(.secondary)
-                        Text("Strategy")
+                        Text("전략 기준")
                     }
                     GridRow {
-                        Text("Mode")
+                        Text("모드")
                             .foregroundStyle(.secondary)
                         Text("Paper")
                     }

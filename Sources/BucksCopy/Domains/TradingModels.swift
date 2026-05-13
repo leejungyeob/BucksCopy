@@ -168,6 +168,104 @@ enum StrategyRunState: Equatable {
     case runningPaper(startedAt: Date)
 }
 
+struct BacktestConfiguration: Codable, Equatable {
+    var symbol: FuturesSymbol
+    var timeframe: CandleTimeframe
+    var strategyConfig: StrategyConfig
+
+    static let `default` = BacktestConfiguration(
+        symbol: FuturesSymbol("BTCUSDT"),
+        timeframe: .fifteenMinutes,
+        strategyConfig: TrendPullbackStrategy().definition.defaultConfig
+    )
+}
+
+enum BacktestStatus: Equatable {
+    case idle
+    case running(startedAt: Date)
+    case complete
+    case failed(message: String)
+}
+
+enum BacktestTradeOutcome: String, Codable, Equatable {
+    case win
+    case loss
+}
+
+struct BacktestTrade: Codable, Equatable, Identifiable {
+    let id: UUID
+    let symbol: FuturesSymbol
+    let side: TradeSide
+    let entryTime: Date
+    let exitTime: Date
+    let entryPrice: Decimal
+    let stopLoss: Decimal
+    let takeProfit: Decimal
+    let exitPrice: Decimal
+    let outcome: BacktestTradeOutcome
+    let rewardRiskRatio: Decimal
+    let leveragedReturnPercent: Decimal
+    let leveragedStopLossPercent: Decimal
+    let reason: String
+
+    init(
+        id: UUID = UUID(),
+        symbol: FuturesSymbol,
+        side: TradeSide,
+        entryTime: Date,
+        exitTime: Date,
+        entryPrice: Decimal,
+        stopLoss: Decimal,
+        takeProfit: Decimal,
+        exitPrice: Decimal,
+        outcome: BacktestTradeOutcome,
+        rewardRiskRatio: Decimal,
+        leveragedReturnPercent: Decimal,
+        leveragedStopLossPercent: Decimal,
+        reason: String
+    ) {
+        self.id = id
+        self.symbol = symbol
+        self.side = side
+        self.entryTime = entryTime
+        self.exitTime = exitTime
+        self.entryPrice = entryPrice
+        self.stopLoss = stopLoss
+        self.takeProfit = takeProfit
+        self.exitPrice = exitPrice
+        self.outcome = outcome
+        self.rewardRiskRatio = rewardRiskRatio
+        self.leveragedReturnPercent = leveragedReturnPercent
+        self.leveragedStopLossPercent = leveragedStopLossPercent
+        self.reason = reason
+    }
+}
+
+struct BacktestResult: Codable, Equatable {
+    let symbol: FuturesSymbol
+    let timeframe: CandleTimeframe
+    let strategyID: String
+    let leverage: Int
+    let totalCandles: Int
+    let totalTrades: Int
+    let winningTrades: Int
+    let losingTrades: Int
+    let skippedSignals: Int
+    let blockedSignals: Int
+    let openSignals: Int
+    let netReturnPercent: Decimal
+    let maxDrawdownPercent: Decimal
+    let averageRewardRiskRatio: Decimal
+    let profitFactor: Decimal
+    let trades: [BacktestTrade]
+    let completedAt: Date
+
+    var winRatePercent: Decimal {
+        guard totalTrades > 0 else { return 0 }
+        return Decimal(winningTrades) / Decimal(totalTrades) * 100
+    }
+}
+
 struct DashboardState: Equatable {
     var credentialStatus: CredentialStatus = .disconnected
     var logLanguage: TradeLogLanguage = .korean
@@ -182,6 +280,9 @@ struct DashboardState: Equatable {
     var positions: [PositionSnapshot] = []
     var strategyConfig: StrategyConfig = .default
     var runState: StrategyRunState = .stopped
+    var backtestConfiguration: BacktestConfiguration = .default
+    var backtestStatus: BacktestStatus = .idle
+    var backtestResult: BacktestResult?
     var recentLogs: [TradeEventLog] = []
 
     var isConnected: Bool {
@@ -192,10 +293,7 @@ struct DashboardState: Equatable {
     }
 
     static let defaultWatchlist: [FuturesSymbol] = [
-        "BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT",
-        "ADAUSDT", "BCHUSDT", "LTCUSDT", "LINKUSDT", "AVAXUSDT", "TRXUSDT",
-        "DOTUSDT", "SUIUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "NEARUSDT",
-        "ETCUSDT", "FILUSDT", "ATOMUSDT", "PEPEUSDT", "WIFUSDT"
+        "BTCUSDT", "ETHUSDT"
     ].map(FuturesSymbol.init)
 }
 

@@ -54,8 +54,8 @@
   - 전체 USDT-M Futures를 자동 구독/매매하면 WebSocket 안정성, 리스크 관리, 전략 검증 범위가 급격히 커집니다.
 - Decision:
   - v1 상품 범위는 Bitget Classic Futures v2 mix API의 `productType=USDT-FUTURES`로 고정합니다.
-  - 전체 contract catalog는 `GET /api/v2/mix/market/contracts`로 가져오되, 실제 자동매매 대상은 사용자 Watchlist로 제한합니다.
-  - Watchlist 후보는 `symbolStatus=normal`이고 `supportMarginCoins`에 `USDT`가 있는 심볼로 제한합니다.
+  - contract config 요청은 BTCUSDT/ETHUSDT 각각의 `symbol` 파라미터로 호출하고, 앱 catalog와 Watchlist에도 두 심볼만 보관합니다.
+  - Watchlist 후보는 `symbolStatus=normal`이고 `supportMarginCoins`에 `USDT`가 있는 BTCUSDT/ETHUSDT로 제한합니다.
   - WebSocket 구독은 Watchlist 심볼만 대상으로 하며, 한 연결당 50개 이하 채널을 기본 제한으로 둡니다.
 - Consequences:
   - Symbol catalog와 Watchlist는 Domain contract와 Data repository 경계로 분리합니다.
@@ -97,3 +97,22 @@
   - 모든 실제 내장 전략은 signal 생성 시 `entryPrice`, `stopLoss`, `takeProfit`을 함께 제공해야 합니다.
   - `POST /api/v2/mix/order/place-order`와 TPSL order API는 계속 disabled 상태입니다.
   - Bot event, signal, paper order, risk decision 로그는 SQLite local DB에 영구 저장합니다.
+
+## 0006. Manual Background Backtesting and Risk-Gated Built-In Strategies
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 백테스트 UI를 추가한 뒤 앱 시작/전략 선택 UI에서 체감 렉이 발생했습니다.
+  - 사용자는 BTCUSDT/ETHUSDT, 전략, 시간봉을 직접 고르고, 결과를 한국어 지표로 이해하길 원합니다.
+  - 백테스트는 많은 로컬 candle을 읽고 전략을 반복 평가하므로 SwiftUI 메인 스레드에서 실행하면 안 됩니다.
+- Decision:
+  - 백테스트는 앱 시작 시 자동 실행하지 않고, 사용자가 버튼을 누를 때만 실행합니다.
+  - candle 로드와 전략 평가는 `Task.detached` 백그라운드 작업에서 수행하고, 결과 반영만 MainActor에서 처리합니다.
+  - 백테스트 설정 UI는 menu picker 대신 버튼/리스트 기반 선택 컨트롤을 사용합니다.
+  - 자동매매/백테스트 공통 risk policy는 최대 레버리지 `10x`, 최소 손익비 `2:1`, 레버리지 반영 손절 위험 `< 30%`를 강제합니다.
+  - 내장 전략은 EMA 눌림목, VWMA 회복, Bollinger/RSI 반등, 거래량 돌파, RSI 추세 지속, Keltner/ATR 눌림목, Donchian 추세 돌파, SuperTrend/ATR 지속으로 구성합니다.
+- Consequences:
+  - 백테스트 결과는 실제 로컬 candle 상태에 따라 달라지며, 50% 승률은 보장값이 아니라 앱에서 검증해야 하는 결과 기준입니다.
+  - live order는 계속 비활성화하며, risk policy 통과는 Paper/backtest 허용 조건일 뿐 실거래 승인 조건이 아닙니다.
+  - UI 패널 증가는 왼쪽 ScrollView와 compact BTC/ETH Watchlist로 흡수합니다.

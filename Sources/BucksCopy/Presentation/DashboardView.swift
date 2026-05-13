@@ -7,19 +7,20 @@ struct DashboardView: View {
     var body: some View {
         HSplitView {
             leftColumn
-                .frame(minWidth: 260, idealWidth: 310, maxWidth: 420)
+                .frame(minWidth: 248, idealWidth: 292, maxWidth: 350)
                 .padding(.trailing, 6)
 
             centerColumn
-                .frame(minWidth: 520, idealWidth: 760)
+                .frame(minWidth: 500, idealWidth: 760)
                 .padding(.horizontal, 6)
 
             rightColumn
-                .frame(minWidth: 380, idealWidth: 480, maxWidth: 680)
+                .frame(minWidth: 340, idealWidth: 460, maxWidth: 640)
                 .padding(.leading, 6)
         }
         .padding(14)
-        .frame(minWidth: 1180, minHeight: 760)
+        .padding(.top, 20)
+        .frame(minWidth: 1100, minHeight: 680)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             guard !didBootstrap else { return }
@@ -29,31 +30,47 @@ struct DashboardView: View {
     }
 
     private var leftColumn: some View {
-        VStack(spacing: 12) {
-            if viewModel.state.isConnected {
-                AccountSummaryPanel(viewModel: viewModel)
-            } else {
-                CredentialPanel(viewModel: viewModel)
+        ScrollView {
+            VStack(spacing: 10) {
+                if viewModel.state.isConnected {
+                    AccountSummaryPanel(viewModel: viewModel)
+                } else {
+                    CredentialPanel(viewModel: viewModel)
+                }
+                WatchlistPanel(
+                    symbols: viewModel.state.watchlist,
+                    selectedSymbol: viewModel.state.selectedSymbol,
+                    onSelect: viewModel.selectSymbol
+                )
+                StrategySettingsPanel(
+                    definitions: viewModel.strategyDefinitions,
+                    config: viewModel.state.strategyConfig,
+                    leverageRange: viewModel.selectedLeverageRange,
+                    onSelect: viewModel.updateStrategy,
+                    onLeverageChange: viewModel.updateLeverage
+                )
+                BotControlPanel(
+                    runState: viewModel.state.runState,
+                    onStart: viewModel.startPaperBot,
+                    onStop: viewModel.stopPaperBot
+                )
+                BacktestPanel(
+                    definitions: viewModel.strategyDefinitions,
+                    symbols: viewModel.state.watchlist,
+                    configuration: viewModel.state.backtestConfiguration,
+                    leverageRange: viewModel.backtestLeverageRange,
+                    status: viewModel.state.backtestStatus,
+                    result: viewModel.state.backtestResult,
+                    onSymbolChange: viewModel.selectBacktestSymbol,
+                    onTimeframeChange: viewModel.selectBacktestTimeframe,
+                    onStrategyChange: viewModel.updateBacktestStrategy,
+                    onLeverageChange: viewModel.updateBacktestLeverage,
+                    onRun: viewModel.runBacktest
+                )
             }
-            WatchlistPanel(
-                symbols: viewModel.state.watchlist,
-                selectedSymbol: viewModel.state.selectedSymbol,
-                onSelect: viewModel.selectSymbol
-            )
-            StrategySettingsPanel(
-                definitions: viewModel.strategyDefinitions,
-                config: viewModel.state.strategyConfig,
-                leverageRange: viewModel.selectedLeverageRange,
-                onSelect: viewModel.updateStrategy,
-                onLeverageChange: viewModel.updateLeverage
-            )
-            BotControlPanel(
-                runState: viewModel.state.runState,
-                onStart: viewModel.startPaperBot,
-                onStop: viewModel.stopPaperBot
-            )
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .scrollIndicators(.visible)
     }
 
     private var centerColumn: some View {

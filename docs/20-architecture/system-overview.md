@@ -5,10 +5,10 @@
 - `BucksCopy`는 SwiftUI 네이티브 macOS 앱으로 시작합니다.
 - 초기 거래소는 Bitget, 상품 범위는 USDT-M Futures, 실행 모드는 Paper trading입니다.
 - Bitget API product line은 v1에서 `productType=USDT-FUTURES` 단일값으로 고정합니다.
-- 전체 USDT-M Futures catalog는 불러오되, 실제 구독/자동매매는 Watchlist 심볼만 대상으로 합니다.
+- Dashboard v1 심볼 catalog와 Watchlist는 BTCUSDT/ETHUSDT만 앱 상태에 보관하고 노출합니다.
 - 레이어는 `App / Presentation / Domains / Data` 네 축으로 단순하게 둡니다.
 - Bitget candle 조회 한계를 보완하기 위해 Watchlist 시장 데이터는 로컬 DB에 누적 저장합니다.
-- Dashboard v1은 Connect-only API credential 입력, 연결 후 계정 요약, Watchlist, interactive Bitget-backed SwiftUI Canvas candle chart, read-only 실계정 포지션, Paper bot 로그를 한 화면에 둡니다.
+- Dashboard v1은 Connect-only API credential 입력, 연결 후 계정 요약, BTC/ETH Watchlist, interactive Bitget-backed SwiftUI Canvas candle chart, 백그라운드 백테스트, read-only 실계정 포지션, Paper bot 로그를 한 화면에 둡니다.
 - 실거래 주문은 v1에서 기본 차단이며, future live policy가 명시되기 전까지 live execution을 구현하지 않습니다.
 
 ## 구조 원칙
@@ -75,6 +75,8 @@ flowchart LR
 - Credential entry has one primary `Connect` action. It saves `APIKey`, `SecretKey`, and `Passphrase` through Keychain-facing Data code and immediately validates Bitget private REST access.
 - When a saved credential exists at app launch, the dashboard attempts auto-connect before showing account-dependent data.
 - After connection, the top-left credential form is replaced by a user/account summary showing equity, available balance, unrealized PnL, and read-only position count.
+- The left column is scrollable because strategy, bot, and backtest controls can exceed the compact macOS window height.
+- BTCUSDT/ETHUSDT are the only Dashboard v1 symbols, so the Watchlist panel does not include symbol search.
 - The candle chart uses one price pane. Volume is not drawn as a separate chart until the UI explicitly labels and designs it.
 - The chart includes a right-side price axis, latest-price line, zoom controls, reset, horizontal drag pan, and vertical drag pan.
 - Chart zoom uses continuous candle spacing instead of a fixed visible-count jump. As spacing changes, candle width and visible candle count change together.
@@ -82,8 +84,9 @@ flowchart LR
 
 ## Watchlist Rules
 
-- Load the symbol universe from `GET /api/v2/mix/market/contracts?productType=USDT-FUTURES`.
+- Load Dashboard v1 symbols with `GET /api/v2/mix/market/contracts?productType=USDT-FUTURES&symbol=BTCUSDT` and the same request for `ETHUSDT`.
 - A symbol can be selected only when `symbolStatus=normal` and `supportMarginCoins` contains `USDT`.
+- Dashboard v1 keeps only BTCUSDT and ETHUSDT from the tradable contract response.
 - Watchlist symbols drive WebSocket subscription, strategy execution, and paper order intent generation.
 - Watchlist overflow must either split WebSocket connections or fail validation before subscribe.
 - The first implementation should prefer validation failure over silent partial subscription.
@@ -147,5 +150,20 @@ References:
 - Supported planning timeframes: `15m`, `1H`, `4H`, `12H`, `1D`.
 - Strategy logic consumes closed candle data unless a future feature explicitly models in-progress candles.
 - Built-in strategies must emit `entryPrice`, `stopLoss`, and `takeProfit` together when they produce a signal.
+- Built-in strategy inputs are limited to local closed OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget.
+- Built-in strategy set: EMA trend pullback, VWMA reclaim, Bollinger/RSI reversion, volume breakout, RSI trend continuation, Keltner/ATR pullback, Donchian trend breakout, and SuperTrend/ATR continuation.
+- Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
+- Risk policy blocks signals below `2:1` reward/risk, invalid entry/stop/take layouts, and signals whose stop-loss percent multiplied by leverage is `>= 30%`.
+- Backtesting is manual-only from the UI. It loads local candles and runs the strategy engine on a detached background task, then publishes only the summary result to SwiftUI.
+- Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
 - Paper execution records intent, simulated fill, rejected order, and risk decision separately.
 - Live execution requires a future accepted decision log entry, security review, and explicit UI switch.
+
+## Strategy Research Notes
+
+- RSI is used as a momentum/overbought-oversold filter, but trend ranges are considered so oversold is not treated as a standalone buy signal.
+- Bollinger Bands are used as a volatility envelope around a moving average; the mean-reversion strategy requires re-entry into the band.
+- ATR is used to scale stops to current volatility instead of using a fixed absolute price gap.
+- VWMA is used where volume should affect the moving average, and volume breakout requires current volume above its recent average.
+- Keltner channels and SuperTrend both depend on ATR, so they are used only with the common risk policy that rejects oversized leveraged stop risk.
+- Donchian breakout is retained as a lower-frequency trend candidate and should be ranked by actual local backtest results before enabling automation.

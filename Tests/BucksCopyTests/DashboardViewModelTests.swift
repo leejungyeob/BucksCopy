@@ -174,11 +174,12 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(syncState?.isComplete, true)
     }
 
-    func testSymbolCatalogReplacesFallbackListAndClampsLeverage() async throws {
+    func testSymbolCatalogKeepsOnlyBitcoinAndEthereumInWatchlist() async throws {
         var state = DashboardState()
         state.strategyConfig.leverage = 120
         let specs = [
             makeContractSpec(symbol: FuturesSymbol("BTCUSDT"), maxLeverage: 150),
+            makeContractSpec(symbol: FuturesSymbol("ETHUSDT"), maxLeverage: 8),
             makeContractSpec(symbol: FuturesSymbol("SUIUSDT"), maxLeverage: 50),
             makeContractSpec(symbol: FuturesSymbol("PEPEUSDT"), maxLeverage: 25)
         ]
@@ -198,11 +199,63 @@ final class DashboardViewModelTests: XCTestCase {
         )
 
         await viewModel.loadSymbolCatalog()
-        viewModel.selectSymbol(FuturesSymbol("SUIUSDT"))
 
-        XCTAssertEqual(viewModel.state.watchlist, specs.map(\.symbol))
-        XCTAssertEqual(viewModel.state.strategyConfig.leverage, 50)
-        XCTAssertEqual(viewModel.selectedLeverageRange, 1...50)
+        XCTAssertEqual(viewModel.state.symbolCatalog, Array(specs.prefix(2)))
+        XCTAssertEqual(viewModel.state.watchlist, [FuturesSymbol("BTCUSDT"), FuturesSymbol("ETHUSDT")])
+        XCTAssertEqual(viewModel.state.selectedSymbol, FuturesSymbol("BTCUSDT"))
+        XCTAssertEqual(viewModel.state.strategyConfig.leverage, 10)
+
+        viewModel.selectSymbol(FuturesSymbol("SUIUSDT"))
+        XCTAssertEqual(viewModel.state.selectedSymbol, FuturesSymbol("BTCUSDT"))
+
+        viewModel.selectSymbol(FuturesSymbol("ETHUSDT"))
+        XCTAssertEqual(viewModel.state.selectedSymbol, FuturesSymbol("ETHUSDT"))
+        XCTAssertEqual(viewModel.state.strategyConfig.leverage, 8)
+        XCTAssertEqual(viewModel.selectedLeverageRange, 1...8)
+    }
+
+    func testBacktestRunsManuallyForConfiguredSymbolAndTimeframe() async throws {
+        var state = DashboardState()
+        state.watchlist = [FuturesSymbol("BTCUSDT"), FuturesSymbol("ETHUSDT")]
+        state.selectedSymbol = FuturesSymbol("ETHUSDT")
+        state.selectedTimeframe = .oneHour
+        state.backtestConfiguration = BacktestConfiguration(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyConfig: TrendPullbackStrategy().definition.defaultConfig
+        )
+
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry()
+        let viewModel = DashboardViewModel(
+            state: state,
+            credentialStore: InMemoryCredentialStore(),
+            accountRepository: nil,
+            positionRepository: nil,
+            candleRepository: candleRepository,
+            candleBackfillRepository: nil,
+            logStore: logStore,
+            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            strategyRegistry: registry
+        )
+
+        XCTAssertEqual(viewModel.state.backtestStatus, .idle)
+
+        viewModel.runBacktest()
+
+        try await waitUntil {
+            if case .complete = viewModel.state.backtestStatus {
+                return true
+            }
+            return false
+        }
+
+        XCTAssertEqual(viewModel.state.selectedSymbol, FuturesSymbol("ETHUSDT"))
+        XCTAssertEqual(viewModel.state.selectedTimeframe, .oneHour)
+        XCTAssertEqual(viewModel.state.backtestResult?.symbol, FuturesSymbol("BTCUSDT"))
+        XCTAssertEqual(viewModel.state.backtestResult?.timeframe, .fifteenMinutes)
+        XCTAssertLessThanOrEqual(viewModel.backtestLeverageRange.upperBound, 10)
     }
 
     func testConnectStartsPositionStreamAndAppliesLivePositions() async throws {
