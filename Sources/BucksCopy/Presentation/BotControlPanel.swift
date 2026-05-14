@@ -2,8 +2,10 @@ import SwiftUI
 
 struct BotControlPanel: View {
     let runState: StrategyRunState
+    let isConnected: Bool
     let onStart: () -> Void
     let onStop: () -> Void
+    @State private var isArmed = false
 
     var body: some View {
         DashboardPanel {
@@ -15,11 +17,15 @@ struct BotControlPanel: View {
                     Badge(text: statusText, color: statusColor)
                 }
 
+                Toggle("실거래 동의", isOn: $isArmed)
+                    .toggleStyle(.checkbox)
+                    .disabled(isRunning)
+
                 HStack {
-                    Button("Start Paper") {
+                    Button("Start Live") {
                         onStart()
                     }
-                    .disabled(isRunning)
+                    .disabled(isRunning || !isConnected || !isArmed)
 
                     Button("Stop") {
                         onStop()
@@ -31,7 +37,7 @@ struct BotControlPanel: View {
     }
 
     private var isRunning: Bool {
-        if case .runningPaper = runState { return true }
+        if case .runningLive = runState { return true }
         return false
     }
 
@@ -39,8 +45,8 @@ struct BotControlPanel: View {
         switch runState {
         case .stopped:
             return "Stopped"
-        case .runningPaper:
-            return "Paper"
+        case .runningLive:
+            return "Live"
         }
     }
 

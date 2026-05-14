@@ -97,6 +97,12 @@ enum PositionSide: String, Codable, Equatable {
     case unknown
 }
 
+enum PositionMode: String, Codable, Equatable {
+    case hedge = "hedge_mode"
+    case oneWay = "one_way_mode"
+    case unknown
+}
+
 struct PositionSnapshot: Codable, Equatable, Identifiable {
     let symbol: FuturesSymbol
     let side: PositionSide
@@ -107,6 +113,7 @@ struct PositionSnapshot: Codable, Equatable, Identifiable {
     let unrealizedProfitLoss: Decimal
     let leverage: Int
     let marginMode: String
+    let positionMode: PositionMode
     let liquidationPrice: Decimal?
     let takeProfit: Decimal?
     let stopLoss: Decimal?
@@ -114,6 +121,40 @@ struct PositionSnapshot: Codable, Equatable, Identifiable {
     let updatedAt: Date?
 
     var id: String { "\(symbol.rawValue):\(side.rawValue)" }
+
+    init(
+        symbol: FuturesSymbol,
+        side: PositionSide,
+        total: Decimal,
+        available: Decimal,
+        openPriceAverage: Decimal,
+        markPrice: Decimal,
+        unrealizedProfitLoss: Decimal,
+        leverage: Int,
+        marginMode: String,
+        positionMode: PositionMode = .unknown,
+        liquidationPrice: Decimal?,
+        takeProfit: Decimal?,
+        stopLoss: Decimal?,
+        createdAt: Date?,
+        updatedAt: Date?
+    ) {
+        self.symbol = symbol
+        self.side = side
+        self.total = total
+        self.available = available
+        self.openPriceAverage = openPriceAverage
+        self.markPrice = markPrice
+        self.unrealizedProfitLoss = unrealizedProfitLoss
+        self.leverage = leverage
+        self.marginMode = marginMode
+        self.positionMode = positionMode
+        self.liquidationPrice = liquidationPrice
+        self.takeProfit = takeProfit
+        self.stopLoss = stopLoss
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 
     var priceMovePercent: Decimal? {
         guard openPriceAverage > 0 else { return nil }
@@ -165,7 +206,7 @@ enum CredentialStatus: Equatable {
 
 enum StrategyRunState: Equatable {
     case stopped
-    case runningPaper(startedAt: Date)
+    case runningLive(startedAt: Date)
 }
 
 struct BacktestConfiguration: Codable, Equatable {
@@ -504,6 +545,21 @@ private struct BacktestComparisonTradeKey: Hashable {
     }
 }
 
+struct LiveAutomationSession: Codable, Equatable {
+    let startedAt: Date
+    var stoppedAt: Date?
+    let seedEquity: Decimal?
+    let seedAvailable: Decimal?
+    var latestEquity: Decimal?
+    var latestAvailable: Decimal?
+    var latestUnrealizedProfitLoss: Decimal?
+    var lastUpdatedAt: Date?
+
+    var isRunning: Bool {
+        stoppedAt == nil
+    }
+}
+
 struct DashboardState: Equatable {
     var credentialStatus: CredentialStatus = .disconnected
     var logLanguage: TradeLogLanguage = .korean
@@ -523,6 +579,8 @@ struct DashboardState: Equatable {
     var backtestStatus: BacktestStatus = .idle
     var backtestResult: BacktestResult?
     var backtestComparisonResult: BacktestComparisonResult?
+    var liveAutomationSession: LiveAutomationSession?
+    var automationLogs: [TradeEventLog] = []
     var recentLogs: [TradeEventLog] = []
 
     var isConnected: Bool {

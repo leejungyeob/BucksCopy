@@ -29,6 +29,6 @@
 - 목표 경계가 `system-overview.md`와 일치함
 - credential, Bitget DTO, trading execution 책임이 올바른 레이어에 있음
 - Watchlist-only subscription/trading 원칙이 유지됨
-- paper/live boundary가 흐려지지 않음
+- live execution boundary가 흐려지지 않음
 - 필요한 harness checks 또는 build checks가 실행됨
 - canonical docs가 최신 상태임

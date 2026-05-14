@@ -11,7 +11,7 @@ description: >
 ## 기본 원칙
 
 - Use local closed candle history from SQLite. Current default scope is 15m and 1H latest 20,000 candles, with 4H/12H/1D full history.
-- Treat Paper/backtest validation as mandatory before judging any strategy as usable.
+- Treat backtest validation as mandatory before judging any strategy as usable for live monitoring.
 - Keep auxiliary indicators out of the primary result unless the user explicitly asks to test them.
 - Current validated built-in portfolio is six routed combinations: 4H Donchian, 12H VWMA100, 12H Donchian, 12H Time-Series, 1D VWMA100, and 1D Donchian. The in-progress 15m X strategy is also routed, but must be reported separately until validated.
 - Report practical metrics, not just final balance: final balance, net return, win rate, trade count, MDD, PF, TP1/TP2/profit-lock stop counts.

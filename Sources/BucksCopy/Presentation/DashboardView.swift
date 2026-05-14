@@ -5,22 +5,34 @@ struct DashboardView: View {
     @State private var didBootstrap = false
 
     var body: some View {
-        HSplitView {
-            leftColumn
-                .frame(minWidth: 248, idealWidth: 292, maxWidth: 350)
-                .padding(.trailing, 6)
+        VStack(spacing: 12) {
+            HSplitView {
+                leftColumn
+                    .frame(minWidth: 248, idealWidth: 292, maxWidth: 350)
+                    .padding(.trailing, 6)
 
-            centerColumn
-                .frame(minWidth: 500, idealWidth: 760)
-                .padding(.horizontal, 6)
+                centerColumn
+                    .frame(minWidth: 500, idealWidth: 760)
+                    .padding(.horizontal, 6)
 
-            rightColumn
-                .frame(minWidth: 340, idealWidth: 460, maxWidth: 640)
-                .padding(.leading, 6)
+                rightColumn
+                    .frame(minWidth: 340, idealWidth: 460, maxWidth: 640)
+                    .padding(.leading, 6)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            AutoTradingPerformancePanel(
+                session: viewModel.state.liveAutomationSession,
+                account: dashboardAccount,
+                positions: viewModel.state.positions,
+                logs: viewModel.state.automationLogs,
+                runState: viewModel.state.runState
+            )
+            .frame(minHeight: 150, idealHeight: 170, maxHeight: 210)
         }
         .padding(14)
         .padding(.top, 20)
-        .frame(minWidth: 1100, minHeight: 680)
+        .frame(minWidth: 1100, minHeight: 760)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             guard !didBootstrap else { return }
@@ -46,8 +58,8 @@ struct DashboardView: View {
             onMaximumRiskPerTradeChange: viewModel.updateMaximumRiskPerTrade,
             onMaximumPositionMarginChange: viewModel.updateMaximumPositionMargin,
             onSignalConfirmationModeChange: viewModel.updateSignalConfirmationMode,
-            onStartPaper: viewModel.startPaperBot,
-            onStopPaper: viewModel.stopPaperBot
+            onStartLive: viewModel.startLiveBot,
+            onStopLive: viewModel.stopLiveBot
         )
         .equatable()
     }
@@ -117,6 +129,11 @@ struct DashboardView: View {
 
     private var chartPositions: [PositionSnapshot] {
         viewModel.state.positions.filter { $0.symbol == viewModel.state.selectedSymbol }
+    }
+
+    private var dashboardAccount: AccountSnapshot? {
+        viewModel.state.accounts.first { $0.marginCoin.uppercased() == "USDT" } ??
+            viewModel.state.accounts.first
     }
 
     private var activeStrategyRoutes: [ActiveStrategyRoute] {
@@ -212,8 +229,8 @@ private struct DashboardLeftColumn: View, Equatable {
     let onMaximumRiskPerTradeChange: (Decimal) -> Void
     let onMaximumPositionMarginChange: (Decimal) -> Void
     let onSignalConfirmationModeChange: (SignalConfirmationMode) -> Void
-    let onStartPaper: () -> Void
-    let onStopPaper: () -> Void
+    let onStartLive: () -> Void
+    let onStopLive: () -> Void
 
     static func == (lhs: DashboardLeftColumn, rhs: DashboardLeftColumn) -> Bool {
         lhs.snapshot == rhs.snapshot
@@ -250,8 +267,9 @@ private struct DashboardLeftColumn: View, Equatable {
                 )
                 BotControlPanel(
                     runState: snapshot.runState,
-                    onStart: onStartPaper,
-                    onStop: onStopPaper
+                    isConnected: snapshot.isConnected,
+                    onStart: onStartLive,
+                    onStop: onStopLive
                 )
                 ActiveStrategyPortfolioPanel(routes: snapshot.activeStrategyRoutes)
             }

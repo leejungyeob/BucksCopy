@@ -175,6 +175,129 @@ final class BitgetMappingTests: XCTestCase {
         XCTAssertEqual(stopLossDTO.productType, ProductType.usdtFutures.rawValue)
     }
 
+    func testTPSLRequestUsesOneWayHoldSideAndContractPrecision() throws {
+        let signal = StrategySignal(
+            id: UUID(),
+            strategyID: "fixture",
+            symbol: FuturesSymbol("ETHUSDT"),
+            side: .buy,
+            entryPrice: Decimal(string: "100.123")!,
+            stopLoss: Decimal(string: "90.126")!,
+            takeProfit: Decimal(string: "120.128")!,
+            reason: "fixture",
+            generatedAt: Date()
+        )
+        let plan = ExchangeProtectionPlan(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000654")!,
+            signal: signal,
+            size: Decimal(string: "0.1234")!,
+            positionMode: .oneWay,
+            contractSpec: ContractSpec(
+                symbol: FuturesSymbol("ETHUSDT"),
+                baseCoin: "ETH",
+                quoteCoin: "USDT",
+                symbolStatus: "normal",
+                supportMarginCoins: ["USDT"],
+                minTradeNum: Decimal(string: "0.0001")!,
+                minTradeUSDT: 5,
+                sizeMultiplier: Decimal(string: "0.01")!,
+                pricePlace: 2,
+                volumePlace: 2,
+                minLeverage: 1,
+                maxLeverage: 10
+            ),
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+
+        let firstTakeProfitDTO = BitgetTPSLOrderRequestDTO(order: plan.orders[0])
+        let stopLossDTO = BitgetTPSLOrderRequestDTO(order: plan.orders[2])
+
+        XCTAssertEqual(firstTakeProfitDTO.holdSide, "buy")
+        XCTAssertEqual(firstTakeProfitDTO.triggerPrice, "110.13")
+        XCTAssertEqual(firstTakeProfitDTO.executePrice, "110.13")
+        XCTAssertEqual(firstTakeProfitDTO.size, "0.06")
+        XCTAssertEqual(stopLossDTO.holdSide, "buy")
+        XCTAssertEqual(stopLossDTO.triggerPrice, "90.13")
+        XCTAssertEqual(stopLossDTO.executePrice, "0")
+        XCTAssertEqual(stopLossDTO.size, "0.12")
+    }
+
+    func testLiveMarketOrderRequestMapsToBitgetOpenOrderPayload() {
+        let request = LiveOrderRequest(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000111")!,
+            symbol: FuturesSymbol("BTCUSDT"),
+            side: .buy,
+            purpose: .open,
+            size: Decimal(string: "0.25")!,
+            leverage: 10,
+            marginMode: "isolated",
+            clientOid: "client-1"
+        )
+
+        let dto = BitgetPlaceOrderRequestDTO(request: request)
+
+        XCTAssertEqual(dto.symbol, "BTCUSDT")
+        XCTAssertEqual(dto.productType, ProductType.usdtFutures.rawValue)
+        XCTAssertEqual(dto.marginMode, "isolated")
+        XCTAssertEqual(dto.marginCoin, "USDT")
+        XCTAssertEqual(dto.size, "0.25")
+        XCTAssertEqual(dto.side, "buy")
+        XCTAssertEqual(dto.tradeSide, "open")
+        XCTAssertEqual(dto.orderType, "market")
+        XCTAssertEqual(dto.clientOid, "client-1")
+        XCTAssertEqual(dto.reduceOnly, "NO")
+    }
+
+    func testLiveOrderDetailMapsBitgetFillAliasesToFilledReceipt() throws {
+        let json = """
+        {
+          "orderId": "order-1",
+          "clientOid": "client-1",
+          "state": "full-fill",
+          "baseVolume": "0.25",
+          "priceAvg": "100.5"
+        }
+        """.data(using: .utf8)!
+
+        let dto = try JSONDecoder().decode(BitgetOrderDetailDTO.self, from: json)
+        let receipt = dto.receipt(
+            symbol: FuturesSymbol("BTCUSDT"),
+            fallbackClientOid: "fallback-client"
+        )
+
+        XCTAssertEqual(receipt.orderID, "order-1")
+        XCTAssertEqual(receipt.clientOid, "client-1")
+        XCTAssertEqual(receipt.status, .filled)
+        XCTAssertEqual(receipt.filledSize, Decimal(string: "0.25"))
+        XCTAssertEqual(receipt.averagePrice, Decimal(string: "100.5"))
+    }
+
+    func testClosePositionRequestKeepsHedgeHoldSide() {
+        let dto = BitgetClosePositionRequestDTO(
+            symbol: "BTCUSDT",
+            productType: ProductType.usdtFutures.rawValue,
+            holdSide: "long"
+        )
+
+        XCTAssertEqual(dto.symbol, "BTCUSDT")
+        XCTAssertEqual(dto.productType, ProductType.usdtFutures.rawValue)
+        XCTAssertEqual(dto.holdSide, "long")
+    }
+
+    func testSetLeverageRequestUsesUSDTFuturesScope() {
+        let dto = BitgetSetLeverageRequestDTO(
+            symbol: "BTCUSDT",
+            productType: ProductType.usdtFutures.rawValue,
+            marginCoin: "USDT",
+            leverage: "10"
+        )
+
+        XCTAssertEqual(dto.symbol, "BTCUSDT")
+        XCTAssertEqual(dto.productType, ProductType.usdtFutures.rawValue)
+        XCTAssertEqual(dto.marginCoin, "USDT")
+        XCTAssertEqual(dto.leverage, "10")
+    }
+
     func testCandleRowMappingUsesBitgetArrayOrder() throws {
         let json = """
         [

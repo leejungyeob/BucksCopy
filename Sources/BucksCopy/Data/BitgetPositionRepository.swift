@@ -28,6 +28,7 @@ struct BitgetPositionDTO: Decodable, Equatable {
     let leverage: String?
     let openPriceAvg: String?
     let marginMode: String?
+    let posMode: String?
     let unrealizedPL: String?
     let liquidationPrice: String?
     let markPrice: String?
@@ -46,6 +47,7 @@ struct BitgetPositionDTO: Decodable, Equatable {
         case leverage
         case openPriceAvg
         case marginMode
+        case posMode
         case unrealizedPL
         case liquidationPrice
         case markPrice
@@ -67,6 +69,7 @@ struct BitgetPositionDTO: Decodable, Equatable {
         leverage = Self.stringValue(container, forKey: .leverage)
         openPriceAvg = Self.stringValue(container, forKey: .openPriceAvg)
         marginMode = Self.stringValue(container, forKey: .marginMode)
+        posMode = Self.stringValue(container, forKey: .posMode)
         unrealizedPL = Self.stringValue(container, forKey: .unrealizedPL)
         liquidationPrice = Self.stringValue(container, forKey: .liquidationPrice)
         markPrice = Self.stringValue(container, forKey: .markPrice)
@@ -87,6 +90,7 @@ struct BitgetPositionDTO: Decodable, Equatable {
             unrealizedProfitLoss: DecimalText.parse(unrealizedPL),
             leverage: Int(leverage ?? "") ?? 0,
             marginMode: marginMode ?? "",
+            positionMode: PositionMode(rawValue: posMode ?? "") ?? .unknown,
             liquidationPrice: DecimalText.optional(liquidationPrice),
             takeProfit: DecimalText.optional(takeProfit),
             stopLoss: DecimalText.optional(stopLoss),

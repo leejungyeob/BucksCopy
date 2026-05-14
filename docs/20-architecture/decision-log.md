@@ -333,3 +333,61 @@
   - 같은 closed candle 주기에서 여러 전략이 동시에 신호를 내도 Paper order는 하나만 생성됩니다.
   - TP/SL 정보가 없는 기존 포지션은 남은 손익비를 증명할 수 없으므로 최저 비교 우선순위로 취급합니다.
   - 실제 시장가 청산 및 신규 live 진입은 여전히 비활성화입니다. live 전환 전에는 보호주문 해제/재등록, 부분체결, 수량 반올림, 실패 시 fail-closed 절차가 추가 검증되어야 합니다.
+
+## 0020. Explicit-Consent Live Auto Trading
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 사용자가 Paper 경로를 제거하고 실제 Bitget API 연결 기반 자동매매 구현을 요청했습니다.
+  - 이전 결정(0002, 0005, 0019)은 live execution 승인 전까지 Paper-only를 기본값으로 두었지만, 이제 실거래 전환 정책을 명시적으로 수락해야 합니다.
+  - live 전환은 credential, 주문 API, 보호주문, 포지션 청산, 로컬 로그 보안에 직접 영향을 줍니다.
+- Decision:
+  - Dashboard 자동매매 실행 상태는 `runningLive`로 전환합니다.
+  - UI는 Bitget credential 연결 상태와 `실거래 동의` 체크박스가 모두 충족될 때만 `Start Live`를 허용합니다.
+  - Live monitor는 Watchlist의 모든 추천 `strategy × timeframe × symbol` 후보를 모은 뒤 포트폴리오 중재 정책으로 단일 후보만 선택합니다.
+  - 신규 진입 순서는 `set-leverage -> place-order market -> order detail fill confirmation -> TP1/TP2/SL TPSL registration`입니다.
+  - 진행 중 포지션보다 새 후보가 우위이면 `close-positions`로 기존 포지션을 먼저 정리한 뒤 신규 진입을 시도합니다.
+  - 보호주문 등록은 실패한 주문별 최소 5회 재시도하며, 진입 체결 후 보호주문 설치가 끝나지 않으면 unprotected로 간주합니다.
+  - 보호주문 재시도 소진 시 high-severity risk log를 남기고 `close-positions`로 fail-closed 청산을 시도합니다.
+  - 로컬 로그에는 raw credential, raw private response, raw order ID/clientOid를 남기지 않고 주문 식별자는 마스킹합니다.
+- Consequences:
+  - `POST /api/v2/mix/order/place-order`, `GET /api/v2/mix/order/detail`, `POST /api/v2/mix/account/set-leverage`, `POST /api/v2/mix/order/close-positions`, `POST /api/v2/mix/order/place-tpsl-order`가 active live path에 포함됩니다.
+  - Paper-only decision과 Paper monitor 문구는 현행 정책이 아니며, historical decision으로만 유지됩니다.
+  - TP1 체결 후 기존 SL을 profit-lock 가격으로 이동하는 주문 상태 머신은 다음 live-hardening 단계의 잔여 리스크입니다.
+  - 실제 운용 전에는 소액/테스트 credential로 endpoint 권한, position mode, minimum size rounding, protection order 체결/취소 흐름을 별도 스모크해야 합니다.
+
+## 0021. Verify Position Before Protection And Fail-Closed Close
+
+- Status: accepted
+- Date: 2026-05-15
+- Context:
+  - 실거래 로그에서 TP/SL 보호주문 실패 후 실제로 닫을 포지션이 확인되지 않았는데도 fail-closed 시장가 청산 요청이 이어지는 흐름이 발견됐습니다.
+  - Bitget `place-order`/`order detail` 응답만으로는 현재 계정에 닫을 포지션이 존재한다고 단정하면 안 됩니다.
+- Decision:
+  - Live entry는 market order fill receipt 이후 `GET /api/v2/mix/position/all-position`으로 같은 symbol/side의 실제 open position을 확인한 뒤 보호주문을 설치합니다.
+  - fill receipt는 있지만 현재 포지션이 확인되지 않으면 보호주문과 fail-closed 청산을 모두 생략하고 warning risk log를 남깁니다.
+  - 보호주문 재시도 소진 후에도 `close-positions` 호출 직전에 포지션을 다시 확인하고, 포지션이 없으면 시장가 청산을 보내지 않습니다.
+  - TPSL 주문은 position mode에 맞춰 hedge mode에서는 `long/short`, one-way mode에서는 `buy/sell` holdSide를 사용하고 contract precision에 맞춰 가격/수량을 정규화합니다.
+  - 보호주문 실패 로그는 raw private response를 저장하지 않고 sanitized Bitget code/message를 원인 필드에 보존합니다.
+- Consequences:
+  - “던질 포지션이 없는데 시장가 청산”하는 오작동을 차단합니다.
+  - 포지션 조회 API가 일시 실패하면 자동 청산을 보내지 않고 수동 확인 로그를 우선 남깁니다.
+  - live smoke test는 fill receipt, position snapshot, TPSL registration, fail-closed skip/close 경로를 함께 확인해야 합니다.
+
+## 0022. Arm Live Monitor Before First Entry
+
+- Status: accepted
+- Date: 2026-05-15
+- Context:
+  - Start Live 직후 이미 저장되어 있던 최신 closed candle 신호가 즉시 실주문으로 이어질 수 있는 흐름이 확인됐습니다.
+  - 사용자는 실시간 자동매매 시작 후 새로 확정되는 신호만 진입 대상으로 삼는지 확인을 요구했습니다.
+- Decision:
+  - Live monitor 시작 시 Watchlist의 각 `symbol × timeframe × recommended strategy` 최신 closed candle key를 먼저 priming 처리합니다.
+  - Priming된 candle은 이미 평가된 것으로 간주하므로 첫 실행에서 주문 후보로 쓰지 않습니다.
+  - 실주문 후보는 Start Live 이후 새로 닫힌 candle에서 발생한 strategy signal만 허용합니다.
+  - Live log에는 priming 완료 route 수와 “다음 closed candle부터 신규 진입” 상태를 남깁니다.
+- Consequences:
+  - 앱 시작/Live 시작 직후 과거 신호로 즉시 포지션을 잡는 오작동을 차단합니다.
+  - 사용자는 Start Live 후 다음 캔들 close까지 신규 진입이 없을 수 있으며, 이는 의도된 안전 대기 상태입니다.
+  - Live monitor 테스트는 startup priming과 다음 closed candle 진입을 분리해 검증해야 합니다.

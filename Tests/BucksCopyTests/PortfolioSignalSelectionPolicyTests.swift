@@ -116,7 +116,7 @@ private func candidate(
     stopLoss: Decimal,
     takeProfit: Decimal,
     positionMarginRatio: Decimal
-) throws -> PaperTradeCandidate {
+) throws -> TradeCandidate {
     let signal = try StrategySignalDraft(
         strategyID: strategyID,
         symbol: FuturesSymbol("BTCUSDT"),
@@ -137,7 +137,7 @@ private func candidate(
         decidedAt: Date(timeIntervalSince1970: 1)
     )
 
-    return PaperTradeCandidate(
+    return TradeCandidate(
         signal: signal,
         timeframe: .fifteenMinutes,
         candleOpenTime: Date(timeIntervalSince1970: 1),

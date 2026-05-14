@@ -3,7 +3,7 @@
 ## 한글 요약
 
 - Bitget API key, secret, passphrase, order/account data는 고위험 민감정보입니다.
-- v1은 Paper trading 우선이며 live order는 명시 정책 전까지 차단합니다.
+- v1은 명시 동의 기반 Live trading이며 live order는 연결된 credential, UI 동의, risk policy, portfolio arbitration을 통과해야만 호출됩니다.
 - Security 역할은 auth, token, Keychain, logging, URLSession/WebSocket, order boundary를 중점 검토합니다.
 
 ## 기본 원칙
@@ -12,7 +12,7 @@
 2. Keychain 외 저장소에 credential을 넣지 않습니다.
 3. 로그는 원인 파악에 필요한 최소 metadata만 남깁니다.
 4. 외부 응답은 DTO 경계에서 검증/매핑한 뒤 사용합니다.
-5. live execution은 명시 정책 전까지 구현/활성화하지 않습니다.
+5. live execution은 명시 동의, 보호주문, fail-closed 경로 없이는 활성화하지 않습니다.
 
 ## 체크리스트
 
@@ -26,9 +26,9 @@
 
 - credential 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
 - 로그아웃/credential 삭제 시 관련 local state가 정리되는가
-- Paper execution record와 민감 주문/account data가 구분되는가
+- Live execution record와 민감 주문/account data가 구분되는가
 - local market history DB에 API key, secret, passphrase, signature, raw private response가 저장되지 않는가
-- local market history DB는 public candle/ticker/trade 기반 데이터와 최소 paper audit 데이터만 저장하는가
+- local market history DB는 public candle/ticker/trade 기반 데이터와 최소 live audit metadata만 저장하는가
 
 ### Bitget REST / WebSocket
 
@@ -42,27 +42,31 @@
 
 ### Trading Safety
 
-- live order path가 기본 비활성화되어 있는가
+- live order path가 credential 연결 + UI 실거래 동의 + Start Live 전에는 비활성화되어 있는가
 - strategy가 order API를 직접 호출하지 않는가
 - Watchlist에 없는 심볼로 order intent가 만들어지지 않는가
-- 다중 전략/시간봉이 동시에 signal을 만들 때 포트폴리오 중재 정책이 Paper order를 1개로 제한해 중복 주문과 과다 노출을 차단하는가
-- 진행 중 포지션을 새 신호로 교체하는 판단이 live order API 호출이 아니라 Paper decision 로그에만 남는가
+- 다중 전략/시간봉이 동시에 signal을 만들 때 포트폴리오 중재 정책이 live order를 1개로 제한해 중복 주문과 과다 노출을 차단하는가
+- 진행 중 포지션을 새 신호로 교체할 때 기존 포지션 시장가 정리와 신규 진입 순서가 deterministic하고 실패 시 중단되는가
 - 시간봉별 여러 전략 활성화가 Watchlist, 레버리지, 기존 포지션 제한을 우회하지 않는가
+- Live 시작 시 이미 저장된 최신 closed candle 신호가 즉시 실주문으로 이어지지 않도록 startup priming이 적용되는가
 - 자동매매 레버리지가 10x 이하로 제한되는가
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal이 차단되는가
 - 레버리지 반영 손절 위험이 설정된 1회 최대 손실률보다 큰 signal은 차단 대신 포지션 투입비율이 축소되는가
 - 수수료 모델이 market/taker와 limit/maker 가정을 명시하고, maker 체결을 보장할 수 없는 주문을 maker로 과대평가하지 않는가
 - 진입 체결 후 TP1/TP2/SL 거래소-side 보호 주문이 모두 등록되기 전까지 protected 상태로 표시하지 않는가
+- 진입 체결 응답 후 보호주문 설치 전에 position snapshot으로 실제 open position 존재를 확인하는가
 - TP1 체결 후 남은 물량의 SL이 profit-lock 가격으로 이동되기 전까지 remaining position을 protected로 과대 표시하지 않는가
 - TP/SL 보호 주문 등록 실패 시 실패한 주문별 최소 5회 재시도하고, 소진 시 fail-closed 정책으로 이어지는가
+- fail-closed `close-positions` 호출 직전에 fresh position snapshot을 확인하고, 닫을 포지션이 없으면 시장가 청산 주문을 생략하는가
 - TP/SL clientOid가 재시도 중복 주문을 줄일 수 있도록 안정적으로 생성되는가
-- paper fill, rejected order, risk block이 구분되어 기록되는가
+- live order, rejected/fill-not-confirmed order, risk block이 구분되어 기록되는가
+- 보호주문 재시도 소진 로그가 원문 private response 없이 sanitized Bitget code/message를 보존하는가
 - 잘못된 symbol/productType/timeframe 입력이 실패로 처리되는가
-- `POST /api/v2/mix/order/place-order` 호출 경로가 future live policy 전까지 실패로 닫혀 있는가
+- `POST /api/v2/mix/order/place-order` 호출 경로가 UI 동의와 risk policy를 우회할 수 없는가
 
 ### Logging
 
-- credential, signature, account balance 원문, full order response를 남기지 않는가
+- credential, signature, account balance 원문, raw order identifier, full order response를 남기지 않는가
 - 실패 메시지가 사용자에게 필요한 수준으로만 정제되는가
 - debug dump가 남아 있지 않은가
 

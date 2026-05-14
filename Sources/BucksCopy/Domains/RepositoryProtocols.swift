@@ -75,7 +75,12 @@ protocol TradeEventLogStore {
 }
 
 protocol LiveOrderPlacing {
-    func placeLiveOrder(_ intent: OrderIntent) async throws
+    func placeMarketOrder(_ request: LiveOrderRequest) async throws -> LiveOrderReceipt
+    func closePosition(symbol: FuturesSymbol, holdSide: PositionSide?) async throws -> LiveClosePositionReceipt
+}
+
+protocol LiveLeverageSetting {
+    func setLeverage(symbol: FuturesSymbol, leverage: Int, marginCoin: String) async throws
 }
 
 protocol PositionProtectionInstalling {

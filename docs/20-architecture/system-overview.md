@@ -3,22 +3,22 @@
 ## 한글 요약
 
 - `BucksCopy`는 SwiftUI 네이티브 macOS 앱으로 시작합니다.
-- 초기 거래소는 Bitget, 상품 범위는 USDT-M Futures, 실행 모드는 Paper trading입니다.
+- 초기 거래소는 Bitget, 상품 범위는 USDT-M Futures, 실행 모드는 명시 동의 기반 live auto-trading입니다.
 - Bitget API product line은 v1에서 `productType=USDT-FUTURES` 단일값으로 고정합니다.
 - Dashboard v1 심볼 catalog와 Watchlist는 BTCUSDT/ETHUSDT만 앱 상태에 보관하고 노출합니다.
 - 레이어는 `App / Presentation / Domains / Data` 네 축으로 단순하게 둡니다.
 - Bitget candle 조회 한계를 보완하기 위해 Watchlist 시장 데이터는 로컬 DB에 누적 저장합니다.
-- Dashboard v1은 Connect-only API credential 입력, 연결 후 계정 요약, BTC/ETH Watchlist, interactive Bitget-backed SwiftUI Canvas candle chart, 백그라운드 백테스트, read-only 실계정 포지션, Paper bot 로그를 한 화면에 둡니다.
-- 실거래 주문은 v1에서 기본 차단이며, future live policy가 명시되기 전까지 live execution을 구현하지 않습니다.
+- Dashboard v1은 Connect-only API credential 입력, 연결 후 계정 요약, BTC/ETH Watchlist, interactive Bitget-backed SwiftUI Canvas candle chart, 백그라운드 백테스트, 실계정 포지션, Live bot 로그를 한 화면에 둡니다.
+- 실거래 주문은 credential 연결, UI 실거래 동의, Start Live, risk policy 통과, portfolio arbitration 이후에만 실행됩니다.
 
 ## 구조 원칙
 
 1. UI, 도메인 규칙, 거래소 연동, 저장소, 실행 엔진을 분리합니다.
 2. API credential은 Keychain-facing Data 코드만 소유합니다.
 3. Bitget REST/WS 응답은 Data 경계에서 DTO로 받고 Domain 모델로 변환합니다.
-4. Strategy는 주문 API를 직접 부르지 않고 paper/live execution gateway contract만 사용합니다.
+4. Strategy는 주문 API를 직접 부르지 않고 live execution gateway contract만 사용합니다.
 5. Candle 생성은 deterministic하게 테스트 가능한 Domain/Data 경계로 둡니다.
-6. Watchlist에 없는 심볼은 WebSocket 구독, strategy 실행, paper order intent 생성 대상이 아닙니다.
+6. Watchlist에 없는 심볼은 WebSocket 구독, strategy 실행, live order 생성 대상이 아닙니다.
 7. Strategy는 로컬에 저장된 closed candle과 새로 수신한 closed candle만 소비합니다.
 
 ## 레이어별 책임
@@ -66,10 +66,13 @@ flowchart LR
 | Public WS | `trade` | Trade stream for higher-fidelity market input |
 | Public WS | `candle1m` | Default live candle input for internal aggregation |
 | Private REST | `GET /api/v2/mix/account/accounts` | Credential test and account snapshot |
-| Private REST | `GET /api/v2/mix/position/all-position` | Position snapshot |
-| Private REST | `POST /api/v2/mix/order/place-tpsl-order` | Exchange-side TP/SL protection order adapter; not auto-enabled while live entry is disabled |
+| Private REST | `GET /api/v2/mix/position/all-position` | Position snapshot and replacement scoring input |
+| Private REST | `POST /api/v2/mix/account/set-leverage` | Set symbol leverage before live entry |
+| Private REST | `POST /api/v2/mix/order/place-order` | Live market entry after explicit UI gate and risk approval |
+| Private REST | `GET /api/v2/mix/order/detail` | Confirm live market entry fill receipt before position verification |
+| Private REST | `POST /api/v2/mix/order/place-tpsl-order` | Exchange-side TP1/TP2/SL protection order adapter |
+| Private REST | `POST /api/v2/mix/order/close-positions` | Fail-closed close and replacement close path |
 | Private WS | `orders` | Order status tracking structure |
-| Disabled | `POST /api/v2/mix/order/place-order` | Live order placement blocked until future policy |
 
 ## Dashboard UX Defaults
 
@@ -82,13 +85,14 @@ flowchart LR
 - The chart includes a right-side price axis, latest-price line, zoom controls, reset, horizontal drag pan, and vertical drag pan.
 - Chart zoom uses continuous candle spacing instead of a fixed visible-count jump. As spacing changes, candle width and visible candle count change together.
 - The default viewport should focus on recent candles instead of scaling every locally stored candle into one compressed view.
+- The bottom dashboard band is a cumulative Live automation ledger, not a per-start reset view. It shows first saved seed equity, current equity, estimated net profit excluding open unrealized PnL, cumulative active duration, entry/close log counts, open position count, and risk event count from stored automation records. Exact win/loss counts require a future closed-PnL/order-history integration.
 
 ## Watchlist Rules
 
 - Load Dashboard v1 symbols with `GET /api/v2/mix/market/contracts?productType=USDT-FUTURES&symbol=BTCUSDT` and the same request for `ETHUSDT`.
 - A symbol can be selected only when `symbolStatus=normal` and `supportMarginCoins` contains `USDT`.
 - Dashboard v1 keeps only BTCUSDT and ETHUSDT from the tradable contract response.
-- Watchlist symbols drive WebSocket subscription, strategy execution, and paper order intent generation.
+- Watchlist symbols drive WebSocket subscription, strategy execution, and live order eligibility.
 - Watchlist overflow must either split WebSocket connections or fail validation before subscribe.
 - The first implementation should prefer validation failure over silent partial subscription.
 
@@ -104,7 +108,7 @@ flowchart LR
 - If no local history exists, seed from the maximum officially queryable REST range, then continue accumulating locally from that point forward.
 - Keep in-progress candles either in memory or stored with an explicit non-closed state; strategy execution must ignore non-closed candles.
 - Public WebSocket candle pushes are stored with an explicit non-closed state until a later interval or REST refresh confirms closure.
-- Paper execution may keep minimal local audit records for debugging and strategy review, but candle history is the primary long-lived dataset.
+- Live execution keeps minimal local audit metadata for strategy review; raw private account/order payloads and raw order identifiers are not persisted in logs.
 
 ## Candle API Limits To Design Around
 
@@ -128,12 +132,12 @@ flowchart LR
 | `PositionSnapshot` | read-only Bitget current position projection |
 | `StrategyDefinition` | built-in strategy registry item |
 | `StrategyConfig` | selected strategy and parameter values |
-| `StrategyRunState` | stopped or running Paper state |
+| `StrategyRunState` | stopped or running Live state |
 | `StrategySignal` | strategy output before order intent |
-| `OrderIntent` | desired paper/live order action after strategy |
-| `PaperOrder` | simulated execution record |
+| `LiveOrderRequest` | desired live exchange order action after strategy/risk approval |
+| `LiveOrderReceipt` | exchange order submission/fill confirmation record |
 | `RiskDecision` | allow/block decision with reason |
-| `TradeEventLog` | persistent bot/signal/paper/risk/position event log |
+| `TradeEventLog` | persistent bot/signal/live/risk/position event log with redacted order identifiers |
 
 References:
 
@@ -156,10 +160,11 @@ References:
 - Built-in strategy inputs are limited to local closed OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget.
 - Built-in strategy set: X, VWMA100 touch trend, Donchian channel breakout, and Time-Series momentum.
 - Strategy signals use the main strategy output and risk policy as the default trading path. Auxiliary indicator Gate data has been removed from the active decision path after validation showed weak path stability.
-- Paper monitoring is independent from the chart-selected timeframe. When Paper is running, it evaluates every Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D`, using the recommended strategy list for each timeframe.
-- Paper monitoring stores a `(symbol, timeframe, strategy, closed candle open time)` key to avoid generating duplicate paper orders from the same closed candle.
-- Paper monitoring now collects all same-run strategy/timeframe candidates first, then selects a single portfolio candidate. Priority is deterministic: highest planned reward/risk first, then highest expected net profit amount, then lower account risk.
-- If a new candidate outranks the best open position, Paper records a replacement decision: the current position is treated as market-close first, then the selected candidate becomes the new entry target. This remains a Paper decision until live execution is explicitly accepted.
+- Live monitoring is independent from the chart-selected timeframe. When Live is running, it evaluates every Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D`, using the recommended strategy list for each timeframe.
+- Live monitoring stores a `(symbol, timeframe, strategy, closed candle open time)` key to avoid generating duplicate live entries from the same closed candle.
+- When Live starts, the monitor first primes the current latest closed candle keys for every Watchlist route. Those already-closed candles cannot create immediate live entries; only newly closed candles after Start Live can submit orders.
+- Live monitoring collects all same-run strategy/timeframe candidates first, then selects a single portfolio candidate. Priority is deterministic: highest planned reward/risk first, then highest expected net profit amount, then lower account risk.
+- If a new candidate outranks the best open position, Live execution closes the existing position by market close-position API before entering the selected candidate.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
 - Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, leverage above `10x`, and signals whose take-profit cannot cover estimated round-trip trading fees.
 - Risk policy sizes each position so `stop-loss percent × leverage × margin allocation <= configured max loss per trade`. The default max loss per trade is `5%`, and UI configuration is capped at `15%`.
@@ -167,22 +172,22 @@ References:
   - Entry after a closed-candle signal is assumed to be market execution, so it uses taker fee.
   - Take-profit protection is modeled as exchange-side reduce-only limit execution, so the planning model uses maker fee.
   - Stop-loss protection is modeled as exchange-side trigger market execution, so it uses taker fee even when it is moved to a profit-lock price.
-- Backtesting is an engine capability and is not shown as a primary app panel; strategy checks should run against local closed candles without changing the Paper trading path.
+- Backtesting is an engine capability and is not shown as a primary app panel; strategy checks should run against local closed candles without changing the Live trading path.
 - Backtest capital is compounded from the configured starting amount. Each closed trade applies its position-sized net leveraged return percent to the current balance, and the final balance/net return are derived from that balance curve.
 - Backtest exits use two-stage take-profit by default: TP1 is the midpoint between entry and final target for 50% size, TP2 is the original final target for the remaining 50%, and after TP1 the remaining stop-loss moves to 25% of the entry-to-target distance.
 - Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
-- Paper execution records intent, simulated fill, rejected order, and risk decision separately.
-- Live execution requires a future accepted decision log entry, security review, and explicit UI switch.
+- Live execution records signal, risk decision, redacted exchange order metadata, and protection status separately.
+- Live execution requires a connected Bitget credential, explicit UI consent checkbox, and `Start Live`; deleting credentials stops the live monitor.
 
 ## Exchange-Side Protection Orders
 
 - A live entry is not considered protected until both take-profit legs and stop-loss orders are accepted by Bitget.
-- The intended live sequence is market entry -> fill confirmation -> exchange-side TP1/TP2/SL registration -> protection confirmation.
+- The live sequence is set leverage -> market entry -> fill receipt confirmation -> fresh position snapshot verification -> exchange-side TP1/TP2/SL registration -> protection confirmation.
 - TP1 and TP2 are represented as Bitget TPSL `profit_plan` orders with limit `executePrice`; SL is represented as a `loss_plan` with market execution (`executePrice=0`).
-- When TP1 is filled, the future live runner must move the remaining SL to the profit-lock price before considering the remaining position protected.
+- When TP1 is filled, the next order-state iteration must move the remaining SL to the profit-lock price before considering the remaining position protected.
 - Protection registration failures must be retried at least 5 times per failed protection order before the position is treated as protection-failed.
-- If retries are exhausted after a real entry fill, the future live runner must fail closed: emit a high-severity risk log and either market-close the position or enter an explicitly reviewed emergency state.
-- The current code includes the domain retry installer and Bitget TPSL adapter, but automatic live entry remains disabled until the live execution policy is accepted.
+- If retries are exhausted after a verified real entry position, the live executor checks a fresh position snapshot before fail-closed; it calls `close-positions` only when there is still an open position to close.
+- The current code includes market entry, fill confirmation, set leverage, TPSL registration, and fail-closed close-position adapters. Raw order IDs are redacted before local logs.
 
 ## Strategy Portfolio Plan
 
@@ -190,9 +195,9 @@ References:
 - The selection unit is `strategy × timeframe`, not strategy alone. A strategy can be enabled for multiple timeframes, and a single timeframe can have multiple enabled strategies.
 - Candidate combinations must be evaluated by win rate, net return after fees, trade count, drawdown, and blocked-signal frequency.
 - When a closed candle arrives for a timeframe, every enabled strategy for that symbol and timeframe can be evaluated.
-- The visible chart timeframe is only a viewing/editing context. It must not disable monitoring of other enabled timeframes while Paper trading is running.
+- The visible chart timeframe is only a viewing/editing context. It must not disable monitoring of other enabled timeframes while Live trading is running.
 - More active combinations should increase trade opportunities, but execution must still cap risk by Watchlist symbol, leverage, open position state, duplicate signal handling, and opposite-signal handling.
-- Portfolio arbitration is global for the Paper monitor run: simultaneous candidates compete with open positions, and only the top-ranked candidate can create a Paper order.
+- Portfolio arbitration is global for the Live monitor run: simultaneous candidates compete with open positions, and only the top-ranked candidate can create a live order.
 - Open positions with TP/SL data are scored by remaining reward/risk from mark price to TP/SL and expected remaining profit amount. Positions without enough TP/SL data receive the lowest comparable priority because their remaining reward/risk cannot be proven.
 - Portfolio backtesting should eventually report both per-combination metrics and aggregate portfolio metrics so weak combinations can be removed without disabling the whole strategy family.
 
@@ -204,6 +209,6 @@ References:
   - `12H`: VWMA100 touch trend, Donchian channel breakout, Time-Series momentum
   - `1D`: VWMA100 touch trend, Donchian channel breakout
 - The `15m` X route is now the Phase-Spread Reclaim strategy. On the latest local BTCUSDT 15m four-year backtest window it finished at `$216.139727` from `$100`, with `+116.14%` net return, `72.22%` win rate, `54` trades, `10.96%` max drawdown, and `2.02` profit factor under `10x` leverage / `5%` per-trade account-risk settings.
-- The `15m` X-Frequency route keeps the same phase-spread reclaim family but uses a wider spread gate and stronger `1.5x` volume gate for a medium-frequency target. On the same backtest window it finished at `$276.774724` from `$100`, with `+176.77%` net return, `60.19%` win rate, `216` trades, `39.88%` max drawdown, and `1.29` profit factor. It should still be treated as a higher-drawdown Paper candidate, not a default live candidate.
-- `1H` currently has no recommended live/Paper strategy route.
+- The `15m` X-Frequency route keeps the same phase-spread reclaim family but uses a wider spread gate and stronger `1.5x` volume gate for a medium-frequency target. On the same backtest window it finished at `$276.774724` from `$100`, with `+176.77%` net return, `60.19%` win rate, `216` trades, `39.88%` max drawdown, and `1.29` profit factor. It is a higher-drawdown live route and should be monitored cautiously.
+- `1H` currently has no recommended live strategy route.
 - Strategies that failed the latest return, drawdown, or trade-count filters were removed from the built-in registry and implementation.

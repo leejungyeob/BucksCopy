@@ -89,7 +89,7 @@ struct StrategySettingsPanel: View {
                     GridRow {
                         Text("모드")
                             .foregroundStyle(.secondary)
-                        Text("Paper")
+                        Text("Live")
                     }
                 }
                 .font(.callout)

@@ -1,22 +1,23 @@
 import XCTest
 @testable import BucksCopy
 
-final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
+final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
     func testEvaluatesRecommendedStrategiesAcrossAllTimeframesAndSkipsDuplicateCandle() async throws {
         let symbol = FuturesSymbol("BTCUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
         let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
-        let runner = PaperTradingRunner(
+        let runner = TradingSignalEvaluator(
             strategyRegistry: registry,
             logStore: logStore,
             confirmationEngine: passingConfirmationEngine(),
             clock: FixedClock(now: Date(timeIntervalSince1970: 10_000))
         )
-        let monitor = MultiTimeframePaperTradingMonitor(
+        let monitor = MultiTimeframeLiveTradingMonitor(
             candleRepository: candleRepository,
             candleBackfillRepository: nil,
-            paperRunner: runner,
+            signalEvaluator: runner,
+            liveExecutor: monitorLiveExecutor(logStore: logStore),
             strategyRegistry: registry
         )
 
@@ -28,11 +29,15 @@ final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
 
         let firstRun = await monitor.evaluateOnce(
             watchlist: [symbol],
-            leverageBySymbol: [symbol: 2]
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
         )
         let secondRun = await monitor.evaluateOnce(
             watchlist: [symbol],
-            leverageBySymbol: [symbol: 2]
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
         )
 
         XCTAssertTrue(firstRun.failures.isEmpty)
@@ -60,20 +65,23 @@ final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
             timeframe: .fourHours,
             startOffset: 200
         ))
-        let monitor = MultiTimeframePaperTradingMonitor(
+        let monitor = MultiTimeframeLiveTradingMonitor(
             candleRepository: candleRepository,
             candleBackfillRepository: backfillRepository,
-            paperRunner: PaperTradingRunner(
+            signalEvaluator: TradingSignalEvaluator(
                 strategyRegistry: registry,
                 logStore: logStore,
                 confirmationEngine: passingConfirmationEngine()
             ),
+            liveExecutor: monitorLiveExecutor(logStore: logStore),
             strategyRegistry: registry
         )
 
         let result = await monitor.evaluateOnce(
             watchlist: [symbol],
-            leverageBySymbol: [symbol: 2]
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
         )
 
         XCTAssertEqual(result.signalCount, 1)
@@ -84,6 +92,55 @@ final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
             limit: 10
         )
         XCTAssertEqual(storedCandles.count, 10)
+    }
+
+    func testPrimingCurrentClosedCandlesPreventsStartupEntryUntilNextClosedCandle() async throws {
+        let symbol = FuturesSymbol("BTCUSDT")
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
+        let monitor = MultiTimeframeLiveTradingMonitor(
+            candleRepository: candleRepository,
+            candleBackfillRepository: nil,
+            signalEvaluator: TradingSignalEvaluator(
+                strategyRegistry: registry,
+                logStore: logStore,
+                confirmationEngine: passingConfirmationEngine()
+            ),
+            liveExecutor: monitorLiveExecutor(logStore: logStore),
+            strategyRegistry: registry
+        )
+
+        try candleRepository.upsertCandles(donchianBreakoutCandles(
+            symbol: symbol,
+            timeframe: .fourHours,
+            startOffset: 100
+        ))
+
+        let priming = await monitor.primeLatestClosedCandles(watchlist: [symbol])
+        let startupRun = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        try candleRepository.upsertCandles(donchianBreakoutCandles(
+            symbol: symbol,
+            timeframe: .fourHours,
+            startOffset: 200
+        ))
+        let nextCandleRun = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        XCTAssertEqual(priming.primedCount, 1)
+        XCTAssertTrue(startupRun.evaluations.isEmpty)
+        XCTAssertEqual(startupRun.executionResult?.didSubmitOrder, false)
+        XCTAssertEqual(nextCandleRun.signalCount, 1)
     }
 }
 
@@ -102,6 +159,36 @@ private func passingConfirmationEngine() -> SignalConfirmationEngine {
         MonitorEvidenceRule(id: "trend", group: .trend, score: 20),
         MonitorEvidenceRule(id: "momentum", group: .momentum, score: 5)
     ])
+}
+
+private func monitorLiveExecutor(logStore: TradeEventLogStore) -> LiveTradeExecutor {
+    let client = TestLiveOrderClient()
+    return LiveTradeExecutor(
+        orderPlacer: client,
+        leverageSetter: client,
+        protectionInstaller: ExchangeProtectionInstaller(
+            orderPlacer: client,
+            retryPolicy: ExchangeProtectionRetryPolicy(retryDelayNanoseconds: 0)
+        ),
+        logStore: logStore
+    )
+}
+
+private func monitorContractSpec(symbol: FuturesSymbol) -> ContractSpec {
+    ContractSpec(
+        symbol: symbol,
+        baseCoin: symbol.rawValue.replacingOccurrences(of: "USDT", with: ""),
+        quoteCoin: "USDT",
+        symbolStatus: "normal",
+        supportMarginCoins: ["USDT"],
+        minTradeNum: Decimal(string: "0.0001")!,
+        minTradeUSDT: 5,
+        sizeMultiplier: Decimal(string: "0.0001")!,
+        pricePlace: 1,
+        volumePlace: 4,
+        minLeverage: 1,
+        maxLeverage: 10
+    )
 }
 
 private final class MonitorBackfillRepository: CandleBackfillRepository {

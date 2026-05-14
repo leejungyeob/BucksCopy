@@ -171,21 +171,126 @@ enum StrategyTimeframeRouting {
     }
 }
 
-enum TradingDomainError: Error, Equatable {
+enum TradingDomainError: Error, Equatable, CustomStringConvertible {
     case missingEntryPrice
     case missingStopLoss
     case missingTakeProfit
     case strategyNotFound(String)
     case liveTradingDisabled
     case selectedSymbolNotInWatchlist(FuturesSymbol)
+    case missingAccountEquity
+    case missingContractSpec(FuturesSymbol)
+    case liveOrderSizeTooSmall(FuturesSymbol)
+    case liveOrderFillNotConfirmed(String)
+    case liveEntryPositionNotConfirmed(String)
     case invalidProtectionPlan(String)
-    case protectionOrderRetryExhausted(kind: ExchangeProtectionOrderKind, attempts: Int)
+    case protectionOrderRetryExhausted(kind: ExchangeProtectionOrderKind, attempts: Int, cause: String? = nil)
+
+    var description: String {
+        switch self {
+        case .missingEntryPrice:
+            return "missing entry price"
+        case .missingStopLoss:
+            return "missing stop loss"
+        case .missingTakeProfit:
+            return "missing take profit"
+        case .strategyNotFound(let strategyID):
+            return "strategy not found: \(strategyID)"
+        case .liveTradingDisabled:
+            return "live trading disabled"
+        case .selectedSymbolNotInWatchlist(let symbol):
+            return "selected symbol not in Watchlist: \(symbol.rawValue)"
+        case .missingAccountEquity:
+            return "missing account equity"
+        case .missingContractSpec(let symbol):
+            return "missing contract spec: \(symbol.rawValue)"
+        case .liveOrderSizeTooSmall(let symbol):
+            return "live order size too small: \(symbol.rawValue)"
+        case .liveOrderFillNotConfirmed(let clientOid):
+            return "live order fill not confirmed: \(TradeLogRedaction.identifier(clientOid))"
+        case .liveEntryPositionNotConfirmed(let clientOid):
+            return "live entry position not confirmed after fill receipt: \(TradeLogRedaction.identifier(clientOid))"
+        case .invalidProtectionPlan(let reason):
+            return "invalid protection plan: \(reason)"
+        case .protectionOrderRetryExhausted(let kind, let attempts, let cause):
+            let causeText = cause.map { ", cause \($0)" } ?? ""
+            return "protection order retry exhausted: \(kind.rawValue), attempts \(attempts)\(causeText)"
+        }
+    }
+}
+
+protocol PublicTradingErrorDescribing {
+    var tradingLogDescription: String { get }
 }
 
 struct OrderIntent: Codable, Equatable, Identifiable {
     let id: UUID
     let signal: StrategySignal
     let createdAt: Date
+}
+
+enum LiveOrderPurpose: String, Codable, Equatable {
+    case open
+    case close
+}
+
+enum LiveOrderStatus: String, Codable, Equatable {
+    case live
+    case partiallyFilled = "partially_filled"
+    case filled
+    case canceled
+    case unknown
+}
+
+struct LiveOrderRequest: Codable, Equatable, Identifiable {
+    let id: UUID
+    let symbol: FuturesSymbol
+    let side: TradeSide
+    let purpose: LiveOrderPurpose
+    let size: Decimal
+    let leverage: Int
+    let marginMode: String
+    let marginCoin: String
+    let reduceOnly: Bool
+    let clientOid: String
+
+    init(
+        id: UUID = UUID(),
+        symbol: FuturesSymbol,
+        side: TradeSide,
+        purpose: LiveOrderPurpose,
+        size: Decimal,
+        leverage: Int,
+        marginMode: String = "isolated",
+        marginCoin: String = "USDT",
+        reduceOnly: Bool = false,
+        clientOid: String? = nil
+    ) {
+        self.id = id
+        self.symbol = symbol
+        self.side = side
+        self.purpose = purpose
+        self.size = size
+        self.leverage = leverage
+        self.marginMode = marginMode
+        self.marginCoin = marginCoin
+        self.reduceOnly = reduceOnly
+        self.clientOid = clientOid ?? "bc-\(id.uuidString.lowercased())"
+    }
+}
+
+struct LiveOrderReceipt: Codable, Equatable {
+    let orderID: String
+    let clientOid: String
+    let symbol: FuturesSymbol
+    let status: LiveOrderStatus
+    let filledSize: Decimal?
+    let averagePrice: Decimal?
+}
+
+struct LiveClosePositionReceipt: Codable, Equatable {
+    let symbol: FuturesSymbol
+    let orderIDs: [String]
 }
 
 struct RiskDecision: Codable, Equatable, Identifiable {
@@ -198,7 +303,7 @@ struct RiskDecision: Codable, Equatable, Identifiable {
     let decidedAt: Date
 }
 
-struct PaperOrder: Codable, Equatable, Identifiable {
+struct LiveOrderRecord: Codable, Equatable, Identifiable {
     let id: UUID
     let intentID: UUID
     let symbol: FuturesSymbol

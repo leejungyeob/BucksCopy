@@ -1,6 +1,6 @@
 import Foundation
 
-struct PaperTradeCandidate: Equatable, Identifiable {
+struct TradeCandidate: Equatable, Identifiable {
     let id: String
     let signal: StrategySignal
     let timeframe: CandleTimeframe
@@ -67,14 +67,14 @@ struct PortfolioOpenPositionAssessment: Equatable {
 
 enum PortfolioSignalDecision: Equatable {
     case noAction
-    case enter(PaperTradeCandidate, reason: String)
-    case replace(existing: PortfolioOpenPositionAssessment, with: PaperTradeCandidate, reason: String)
-    case holdExisting(PortfolioOpenPositionAssessment, bestCandidate: PaperTradeCandidate, reason: String)
+    case enter(TradeCandidate, reason: String)
+    case replace(existing: PortfolioOpenPositionAssessment, with: TradeCandidate, reason: String)
+    case holdExisting(PortfolioOpenPositionAssessment, bestCandidate: TradeCandidate, reason: String)
 }
 
 enum PortfolioSignalSelectionPolicy {
     static func decision(
-        candidates: [PaperTradeCandidate],
+        candidates: [TradeCandidate],
         openPositions: [PositionSnapshot],
         accountEquity: Decimal? = nil
     ) -> PortfolioSignalDecision {
@@ -110,7 +110,7 @@ enum PortfolioSignalSelectionPolicy {
     }
 
     static func score(
-        for candidate: PaperTradeCandidate,
+        for candidate: TradeCandidate,
         accountEquity: Decimal? = nil
     ) -> PortfolioSignalScore {
         let rewardRiskRatio = candidate.signal.plannedRewardRiskRatio ?? 0
@@ -202,9 +202,9 @@ enum PortfolioSignalSelectionPolicy {
     }
 
     private static func bestCandidate(
-        in candidates: [PaperTradeCandidate],
+        in candidates: [TradeCandidate],
         accountEquity: Decimal?
-    ) -> PaperTradeCandidate? {
+    ) -> TradeCandidate? {
         candidates.sorted {
             let lhsScore = score(for: $0, accountEquity: accountEquity)
             let rhsScore = score(for: $1, accountEquity: accountEquity)
@@ -246,7 +246,7 @@ enum PortfolioSignalSelectionPolicy {
     }
 
     private static func summary(
-        for candidate: PaperTradeCandidate,
+        for candidate: TradeCandidate,
         accountEquity: Decimal?
     ) -> String {
         let candidateScore = score(for: candidate, accountEquity: accountEquity)

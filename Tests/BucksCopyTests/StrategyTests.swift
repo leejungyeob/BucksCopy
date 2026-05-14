@@ -190,19 +190,20 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(signal.plannedRewardRiskRatio, 2)
     }
 
-    func testPaperRunnerRejectsSymbolOutsideWatchlist() throws {
+    func testSignalEvaluatorRejectsSymbolOutsideWatchlist() throws {
         let logStore = InMemoryTradeEventLogStore()
-        let runner = PaperTradingRunner(
+        let runner = TradingSignalEvaluator(
             strategyRegistry: StrategyRegistry(),
             logStore: logStore,
             clock: FixedClock(now: Date(timeIntervalSince1970: 1))
         )
 
         XCTAssertThrowsError(
-            try runner.start(
+            try runner.makeCandidate(
                 symbol: FuturesSymbol("SOLUSDT"),
                 watchlist: [FuturesSymbol("BTCUSDT")],
                 timeframe: .fifteenMinutes,
+                candleOpenTime: Date(timeIntervalSince1970: 1),
                 candles: [],
                 config: .default
             )
@@ -211,18 +212,19 @@ final class StrategyTests: XCTestCase {
         }
     }
 
-    func testPaperRunnerDoesNotPersistNoSignalEvaluation() throws {
+    func testSignalEvaluatorDoesNotPersistNoSignalEvaluation() throws {
         let logStore = InMemoryTradeEventLogStore()
-        let runner = PaperTradingRunner(
+        let runner = TradingSignalEvaluator(
             strategyRegistry: StrategyRegistry(),
             logStore: logStore,
             clock: FixedClock(now: Date(timeIntervalSince1970: 1))
         )
 
-        _ = try runner.start(
+        _ = try runner.makeCandidate(
             symbol: FuturesSymbol("BTCUSDT"),
             watchlist: [FuturesSymbol("BTCUSDT")],
             timeframe: .fifteenMinutes,
+            candleOpenTime: Date(timeIntervalSince1970: 1),
             candles: [],
             config: .default
         )
@@ -231,51 +233,83 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(logs.count, 0)
     }
 
-    func testPaperRunnerPersistsDetailedPaperOrderWhenSignalExists() throws {
+    func testSignalEvaluatorPersistsDetailedLiveOrderWhenExecutionSucceeds() throws {
         let logStore = InMemoryTradeEventLogStore()
-        let runner = PaperTradingRunner(
+        let runner = TradingSignalEvaluator(
             strategyRegistry: StrategyRegistry(strategies: [FixtureSignalStrategy()]),
             logStore: logStore,
             clock: FixedClock(now: Date(timeIntervalSince1970: 1))
         )
 
-        _ = try runner.start(
+        let candidate = try XCTUnwrap(try runner.makeCandidate(
             symbol: FuturesSymbol("BTCUSDT"),
             watchlist: [FuturesSymbol("BTCUSDT")],
             timeframe: .fifteenMinutes,
+            candleOpenTime: Date(timeIntervalSince1970: 1),
             candles: [],
             config: fixtureSignalConfig(leverage: 2)
+        ))
+        let receipt = LiveOrderReceipt(
+            orderID: "entry-1",
+            clientOid: "client-1",
+            symbol: candidate.signal.symbol,
+            status: .filled,
+            filledSize: Decimal(string: "0.5"),
+            averagePrice: candidate.signal.entryPrice
+        )
+        let protectionReceipts = [
+            ExchangeProtectionReceipt(orderID: "tp1", clientOid: "tp1", kind: .takeProfit, attempts: 1),
+            ExchangeProtectionReceipt(orderID: "tp2", clientOid: "tp2", kind: .takeProfit, attempts: 1),
+            ExchangeProtectionReceipt(orderID: "sl", clientOid: "sl", kind: .stopLoss, attempts: 1)
+        ]
+
+        try runner.recordLiveOrder(
+            candidate,
+            receipt: receipt,
+            protectionReceipts: protectionReceipts,
+            portfolioDecisionReason: "fixture decision"
         )
 
         let log = try XCTUnwrap(try logStore.loadRecent(limit: 10).first)
-        XCTAssertEqual(log.category, .paperOrder)
-        XCTAssertTrue(log.message.contains("Paper buy order"))
+        XCTAssertEqual(log.category, .liveOrder)
+        XCTAssertTrue(log.message.contains("Live buy order submitted"))
         XCTAssertTrue(log.message.contains("leverage 2x"))
         XCTAssertTrue(log.message.contains("margin 25%"))
         XCTAssertTrue(log.message.contains("account risk 5%"))
-        XCTAssertTrue(log.message.contains("TP fee 0.03%"))
-        XCTAssertTrue(log.message.contains("SL fee 0.05%"))
+        XCTAssertTrue(log.message.contains("protection takeProfit#****, takeProfit#****, stopLoss#****"))
+        XCTAssertFalse(log.message.contains("entry-1"))
+        XCTAssertFalse(log.message.contains("tp1"))
+        XCTAssertTrue(log.message.contains("fixture decision"))
         XCTAssertTrue(log.isPersistentTradingRecord)
+        XCTAssertEqual(log.metadata?.title, "BTCUSDT 15m 매수 진입")
+        XCTAssertEqual(log.metadata?.tags.map(\.label), ["LIVE", "15m", "매수", "2x", FixtureSignalStrategy.identifier])
+        XCTAssertTrue(log.metadata?.details.contains {
+            $0.label == "손익비" && $0.value == "2:1"
+        } ?? false)
+        XCTAssertTrue(log.metadata?.details.contains {
+            $0.label == "진입가" && $0.value == "100"
+        } ?? false)
     }
 
-    func testPaperRunnerBlocksLeverageAboveAutomationLimit() throws {
+    func testSignalEvaluatorBlocksLeverageAboveAutomationLimit() throws {
         let logStore = InMemoryTradeEventLogStore()
-        let runner = PaperTradingRunner(
+        let runner = TradingSignalEvaluator(
             strategyRegistry: StrategyRegistry(strategies: [FixtureSignalStrategy()]),
             logStore: logStore,
             clock: FixedClock(now: Date(timeIntervalSince1970: 1))
         )
 
-        let evaluation = try runner.start(
+        let candidate = try runner.makeCandidate(
             symbol: FuturesSymbol("BTCUSDT"),
             watchlist: [FuturesSymbol("BTCUSDT")],
             timeframe: .fifteenMinutes,
+            candleOpenTime: Date(timeIntervalSince1970: 1),
             candles: [],
             config: fixtureSignalConfig(leverage: 11)
         )
 
         let log = try XCTUnwrap(try logStore.loadRecent(limit: 10).first)
-        XCTAssertEqual(evaluation, .noSignal)
+        XCTAssertNil(candidate)
         XCTAssertEqual(log.category, .risk)
         XCTAssertTrue(log.message.contains("최대 10x"))
     }

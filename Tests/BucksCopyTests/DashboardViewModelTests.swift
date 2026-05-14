@@ -14,7 +14,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleRepository: candleRepository,
             candleBackfillRepository: nil,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry
         )
 
@@ -32,7 +32,7 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.state.candles.allSatisfy { $0.timeframe == .oneHour })
     }
 
-    func testTimeframeChangeRoutesPaperStrategyToRecommendedDefault() {
+    func testTimeframeChangeRoutesLiveStrategyToRecommendedDefault() {
         let viewModel = makeViewModel(credentialStore: InMemoryCredentialStore())
 
         viewModel.selectTimeframe(.twelveHours)
@@ -67,17 +67,32 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state.strategyConfig.strategyID, VWMATouchTrendStrategy.identifier)
     }
 
-    func testPaperBotMonitorsRecommendedStrategiesAcrossAllTimeframes() async throws {
+    func testLiveBotMonitorsRecommendedStrategiesAcrossAllTimeframes() async throws {
         let symbol = FuturesSymbol("BTCUSDT")
         var state = DashboardState()
+        state.credentialStatus = .connected(
+            redactedIdentifier: "test...test",
+            checkedAt: Date(timeIntervalSince1970: 1)
+        )
         state.watchlist = [symbol]
         state.selectedSymbol = symbol
         state.selectedTimeframe = .fifteenMinutes
         state.strategyConfig = VWMATouchTrendStrategy().definition.defaultConfig
+        state.accounts = [
+            AccountSnapshot(
+                marginCoin: "USDT",
+                available: 10_000,
+                accountEquity: 10_000,
+                unrealizedProfitLoss: 0,
+                updatedAt: Date(timeIntervalSince1970: 1)
+            )
+        ]
+        state.symbolCatalog = [makeContractSpec(symbol: symbol, maxLeverage: 10)]
 
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
         let registry = StrategyRegistry()
+        let liveOrderClient = TestLiveOrderClient()
         let viewModel = DashboardViewModel(
             state: state,
             credentialStore: InMemoryCredentialStore(),
@@ -86,13 +101,22 @@ final class DashboardViewModelTests: XCTestCase {
             candleRepository: candleRepository,
             candleBackfillRepository: nil,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(
+            signalEvaluator: TradingSignalEvaluator(
                 strategyRegistry: registry,
                 logStore: logStore,
                 confirmationEngine: dashboardPassingConfirmationEngine()
             ),
+            liveExecutor: LiveTradeExecutor(
+                orderPlacer: liveOrderClient,
+                leverageSetter: liveOrderClient,
+                protectionInstaller: ExchangeProtectionInstaller(
+                    orderPlacer: liveOrderClient,
+                    retryPolicy: ExchangeProtectionRetryPolicy(retryDelayNanoseconds: 0)
+                ),
+                logStore: logStore
+            ),
             strategyRegistry: registry,
-            paperMonitorIntervalNanoseconds: 20_000_000
+            liveMonitorIntervalNanoseconds: 20_000_000
         )
 
         try candleRepository.upsertCandles(dashboardDonchianBreakoutCandles(
@@ -101,8 +125,33 @@ final class DashboardViewModelTests: XCTestCase {
             startOffset: 100
         ))
 
-        viewModel.startPaperBot()
-        defer { viewModel.stopPaperBot() }
+        viewModel.startLiveBot()
+        defer {
+            if case .runningLive = viewModel.state.runState {
+                viewModel.stopLiveBot()
+            }
+        }
+        XCTAssertEqual(viewModel.state.liveAutomationSession?.seedEquity, 10_000)
+        XCTAssertEqual(viewModel.state.liveAutomationSession?.latestEquity, 10_000)
+        XCTAssertNil(viewModel.state.liveAutomationSession?.stoppedAt)
+        XCTAssertEqual(viewModel.state.automationLogs.filter { $0.category == .automation }.count, 1)
+
+        try await waitUntil(timeout: 2) {
+            viewModel.state.recentLogs.contains {
+                $0.message.contains("Live monitor armed")
+            }
+        }
+
+        XCTAssertFalse(viewModel.state.recentLogs.contains {
+            $0.message.contains(DonchianChannelBreakoutStrategy.identifier) &&
+                $0.message.contains("4H")
+        })
+
+        try candleRepository.upsertCandles(dashboardDonchianBreakoutCandles(
+            symbol: symbol,
+            timeframe: .fourHours,
+            startOffset: 200
+        ))
 
         try await waitUntil(timeout: 2) {
             viewModel.state.recentLogs.contains {
@@ -112,6 +161,16 @@ final class DashboardViewModelTests: XCTestCase {
         }
 
         XCTAssertEqual(viewModel.state.selectedTimeframe, .fifteenMinutes)
+
+        viewModel.stopLiveBot()
+        XCTAssertNotNil(viewModel.state.liveAutomationSession?.stoppedAt)
+        let automationRecords = try logStore.loadRecent(limit: 10)
+            .filter { $0.category == .automation }
+        XCTAssertEqual(automationRecords.map(\.message), [
+            "Live automation session started.",
+            "Live automation session stopped."
+        ])
+        XCTAssertEqual(viewModel.state.automationLogs.filter { $0.category == .automation }.count, 2)
     }
 
     func testConnectCredentialStoresKeyAndConnects() async throws {
@@ -166,7 +225,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleHistoryStore: candleRepository,
             candleBackfillRepository: backfillRepository,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry,
             historyBackfillPolicy: .test
         )
@@ -234,7 +293,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleHistoryStore: candleRepository,
             candleBackfillRepository: backfillRepository,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry,
             historyBackfillPolicy: .test
         )
@@ -279,7 +338,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleBackfillRepository: StubCandleBackfillRepository(candles: [backfillCandle]),
             candleStreamService: streamService,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry
         )
 
@@ -336,7 +395,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleHistoryStore: candleRepository,
             candleBackfillRepository: backfillRepository,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry,
             historyBackfillPolicy: .test
         )
@@ -384,7 +443,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleRepository: InMemoryCandleRepository(),
             candleBackfillRepository: nil,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry
         )
 
@@ -426,7 +485,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleRepository: candleRepository,
             candleBackfillRepository: nil,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry
         )
 
@@ -479,7 +538,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleRepository: candleRepository,
             candleBackfillRepository: nil,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             backtestEngine: BacktestEngine(
                 strategyRegistry: registry,
                 confirmationEngine: SignalConfirmationEngine(rules: [])
@@ -554,7 +613,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleRepository: repository,
             candleBackfillRepository: nil,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry
         )
 
@@ -584,7 +643,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleRepository: InMemoryCandleRepository(),
             candleBackfillRepository: nil,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry
         )
 
@@ -623,7 +682,7 @@ final class DashboardViewModelTests: XCTestCase {
             candleRepository: candleRepository,
             candleBackfillRepository: nil,
             logStore: logStore,
-            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
             strategyRegistry: registry
         )
     }

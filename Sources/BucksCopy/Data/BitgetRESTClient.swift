@@ -8,6 +8,23 @@ enum BitgetClientError: Error, Equatable {
     case emptyData
 }
 
+extension BitgetClientError: PublicTradingErrorDescribing {
+    var tradingLogDescription: String {
+        switch self {
+        case .missingCredential:
+            return "Bitget credential missing"
+        case .invalidURL:
+            return "Bitget request URL invalid"
+        case .httpStatus(let status):
+            return "Bitget HTTP \(status)"
+        case .apiError(let code, let message):
+            return "Bitget API \(code): \(message)"
+        case .emptyData:
+            return "Bitget empty response"
+        }
+    }
+}
+
 final class BitgetRESTClient {
     private let baseURL: URL
     private let session: URLSession

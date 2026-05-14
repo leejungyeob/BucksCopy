@@ -3,7 +3,7 @@ name: bucks-copy-l3-migration
 description: >
   Use when BucksCopy needs staged migration across App, Presentation, Domains,
   or Data while preserving build health, Bitget
-  boundary safety, and Paper-first trading behavior.
+  boundary safety, and explicit-consent live trading behavior.
 ---
 
 # BucksCopy L3 Migration
@@ -21,5 +21,5 @@ description: >
 1. Classify current responsibility and target layer.
 2. Define one small migration slice.
 3. Rewire dependencies to the correct boundary.
-4. Preserve Paper-first and no-secret logging rules.
+4. Preserve explicit-consent live trading and no-secret/no-raw-order logging rules.
 5. Verify checks and update docs if needed.
