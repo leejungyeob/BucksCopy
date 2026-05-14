@@ -19,7 +19,7 @@
 | credential storage 변경 | Security checklist + Keychain delete/read/write failure cases |
 | candle builder 변경 | 15m/1H/4H/12H/1D bucket, boundary timestamp, missing/out-of-order input |
 | strategy 변경 | built-in registry coverage, signal generation, no duplicate order intent, closed-candle 기준 |
-| backtest 변경 | manual trigger, background execution, symbol/timeframe/strategy config, Korean result summary, risk-blocked signal count, primary OFF result consistency, optional confirmation OFF/Observe/Gate comparison, Gate threshold candidate scan |
+| backtest/strategy validation 변경 | engine-level deterministic tests, local-candle validation runner, risk-blocked signal count, primary result consistency |
 | paper execution 변경 | accepted/rejected/risk-blocked/fill simulation |
 | live execution policy 변경 | 별도 decision log + Security + TDD Guide 필수 |
 
@@ -46,7 +46,6 @@
 - 로컬 DB에 1시간 전 closed candle까지 있음 -> 앱 시작 -> gap만 REST로 보충 -> 중복 없이 upsert
 - Bitget candle API 조회 가능 기간보다 오래된 로컬 candle 있음 -> 재시작 후 삭제하지 않고 strategy warmup에 사용
 - strategy 매수 signal -> paper order intent 생성 -> risk policy 통과 -> simulated fill 기록
-- 백테스트 설정 -> BTCUSDT/ETHUSDT 중 선택 -> 시간봉 선택 -> 전략 선택 -> 수동 실행 -> UI는 즉시 running 상태가 되고 계산 완료 후 승률/손익비/차단 신호가 한국어로 표시
 - 백테스트 시작금액 설정 -> 첫 거래 수익률을 시작잔고에 반영 -> 다음 거래는 갱신된 잔고 기준으로 복리 계산 -> 최종잔고와 순손익 표시
 - 백테스트 중 포지션이 여러 candle 뒤에 청산 -> 그 사이 candle은 신규 진입 평가는 건너뛰되 이후 지표 history에는 포함
 - 백테스트 실행 중 전략/코인/시간봉 변경 -> 기존 작업 취소 -> 이전 결과가 새 설정에 섞이지 않음
@@ -55,20 +54,16 @@
 - 같은 `symbol/timeframe/strategy/closed candle`을 반복 평가 -> Paper order가 중복 생성되지 않음
 - 선택 화면 시간봉 변경 -> 표시 candle과 설정 UI만 바뀌고 실행 중 Paper monitor의 다른 시간봉 감시는 유지
 - 전략 × 시간봉 백테스트 -> 조합별 승률/순손익/거래 수/최대 낙폭 표시 -> 포트폴리오 합산 성과와 분리해 비교 가능
-- 보조 점수 백테스트 비교 -> 같은 candle set에서 confirmation OFF/Observe/Gate를 각각 실행 -> 순손익/승률/거래 수/MDD 차이를 표시
-- primary 백테스트 결과 -> 보조 점수 비교가 켜져도 메인 결과와 로그는 OFF 결과를 사용 -> 사용자가 요청한 백테스트 값과 UI 기준값을 일치시킴
-- 보조 점수 Observe -> 메인 전략 signal을 차단하지 않고 점수 구간별 성과를 집계
-- 보조 점수 Gate -> 메인 전략 signal이 있어도 점수 threshold 미달이면 risk policy 전에 confirmation-blocked로 집계
-- 보조 점수 Gate 최적화 -> 여러 threshold 후보를 같은 candle set에서 실행 -> OFF보다 순손익이 개선되고 최소 거래 수를 만족할 때만 Gate 추천
-- 전략별 보조지표 프로파일 -> 추천 `strategy × timeframe`에서는 전용 Hard/Soft Gate를 적용 -> OFF 결과는 primary로 유지하고 적용 결과는 비교표에만 표시
-- Soft Gate 동조 수 부족 -> confirmation-blocked로 집계하거나, 허용 시 리스크 배율을 낮춰 position sizing에 반영
 - 동일 symbol/timeframe에서 여러 전략이 동시에 signal 생성 -> 중복 진입, 같은 방향 추가 진입, 반대 신호 처리 정책이 deterministic하게 적용
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal -> paper/backtest 모두 risk-blocked로 처리
 - 손절폭이 큰 signal -> 차단하지 않고 `손절폭 × 레버리지 × 투입비율 <= 1회 최대 손실률`이 되도록 포지션 투입비율을 축소
 - 1회 최대 손실률 설정 -> 기본 12%, UI 최대 15%로 제한
 - Backtest risk-blocked signal -> 차단 사유를 손절 위험, 손익비, 수수료, 레버리지 제한 등으로 집계해 결과 화면에 표시
+- TP 2분할 -> 진입가와 최종 목표가의 중간값에서 50% 익절 -> 남은 50%는 최종 목표가 또는 profit-lock stop 중 먼저 닿는 가격에 청산
+- TP1 이후 profit-lock stop -> stop-loss를 진입가에서 목표가 방향 25% 지점으로 이동 -> 목표가를 못 가고 되돌아와도 남은 물량이 익절로 끝남
 - 수수료 모델 -> entry taker, take-profit maker, stop-loss taker를 결과별로 계산
-- 진입 체결 후 보호 주문 설치 -> TP limit 보호 주문과 SL market 보호 주문이 모두 거래소에 등록되어야 protected 상태로 처리
+- 진입 체결 후 보호 주문 설치 -> TP1/TP2 limit 보호 주문과 SL market 보호 주문이 모두 거래소에 등록되어야 protected 상태로 처리
+- live TP1 체결 후 -> 기존 SL을 취소/재등록해 profit-lock stop으로 이동하는 상태 전이가 필요함
 - TP/SL 보호 주문 등록 실패 -> 실패한 주문별 최소 5회 재시도 -> 재시도 소진 시 protection-failed 상태와 fail-closed 경로 확인
 - 앱 재시작 -> 현재 포지션과 거래소-side TP/SL 보호 주문을 조회 -> 누락된 보호 주문 감지
 - 레버리지 stepper -> contract max가 10보다 크더라도 자동매매 설정은 10x 이하로 제한

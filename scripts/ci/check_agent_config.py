@@ -23,6 +23,7 @@ DOMAIN_SKILLS = {
     "bucks-copy-macos-structure",
     "bucks-copy-bitget-integration",
     "bucks-copy-trading-engine",
+    "bucks-copy-strategy-validation",
 }
 
 IMPLICIT_SKILLS = {

@@ -8,6 +8,25 @@ enum SQLiteDatabaseError: Error, Equatable {
     case bindFailed(String)
 }
 
+extension SQLiteDatabaseError: CustomStringConvertible, LocalizedError {
+    var description: String {
+        switch self {
+        case .openFailed(let message):
+            return "open failed: \(message)"
+        case .prepareFailed(let message):
+            return "prepare failed: \(message)"
+        case .stepFailed(let message):
+            return "step failed: \(message)"
+        case .bindFailed(let message):
+            return "bind failed: \(message)"
+        }
+    }
+
+    var errorDescription: String? {
+        description
+    }
+}
+
 final class SQLiteDatabase {
     private let handle: OpaquePointer?
 
@@ -19,6 +38,7 @@ final class SQLiteDatabase {
             throw SQLiteDatabaseError.openFailed(message)
         }
         handle = database
+        try configureConnection()
     }
 
     deinit {
@@ -47,6 +67,12 @@ final class SQLiteDatabase {
     var errorMessageString: String {
         guard let handle else { return "Database is closed." }
         return String(cString: sqlite3_errmsg(handle))
+    }
+
+    private func configureConnection() throws {
+        try execute("PRAGMA busy_timeout = 5000;")
+        try execute("PRAGMA journal_mode = WAL;")
+        try execute("PRAGMA synchronous = NORMAL;")
     }
 }
 

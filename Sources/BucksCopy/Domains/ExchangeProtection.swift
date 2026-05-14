@@ -31,7 +31,9 @@ struct ExchangeProtectionPlan: Codable, Equatable, Identifiable {
     let symbol: FuturesSymbol
     let holdSide: PositionSide
     let size: Decimal
+    let partialTakeProfit: Decimal
     let takeProfit: Decimal
+    let profitLockStopLoss: Decimal
     let stopLoss: Decimal
     let marginCoin: String
     let createdAt: Date
@@ -47,24 +49,39 @@ struct ExchangeProtectionPlan: Codable, Equatable, Identifiable {
         symbol = signal.symbol
         holdSide = PositionSide(openedBy: signal.side)
         self.size = size
+        partialTakeProfit = signal.partialTakeProfit
         takeProfit = signal.takeProfit
+        profitLockStopLoss = signal.profitLockStopLossAfterPartialTakeProfit
         stopLoss = signal.stopLoss
         self.marginCoin = marginCoin
         self.createdAt = createdAt
     }
 
     var orders: [ExchangeProtectionOrder] {
-        [
+        let partialSize = size * SplitTakeProfitPlan.partialTakeProfitRatio
+        let finalSize = size - partialSize
+        return [
             ExchangeProtectionOrder(
-                id: "\(id.uuidString)-tp",
+                id: "\(id.uuidString)-tp1",
+                kind: .takeProfit,
+                symbol: symbol,
+                holdSide: holdSide,
+                triggerPrice: partialTakeProfit,
+                executePrice: partialTakeProfit,
+                size: partialSize,
+                marginCoin: marginCoin,
+                clientOid: "\(id.uuidString)-tp1"
+            ),
+            ExchangeProtectionOrder(
+                id: "\(id.uuidString)-tp2",
                 kind: .takeProfit,
                 symbol: symbol,
                 holdSide: holdSide,
                 triggerPrice: takeProfit,
                 executePrice: takeProfit,
-                size: size,
+                size: finalSize,
                 marginCoin: marginCoin,
-                clientOid: "\(id.uuidString)-tp"
+                clientOid: "\(id.uuidString)-tp2"
             ),
             ExchangeProtectionOrder(
                 id: "\(id.uuidString)-sl",
@@ -87,8 +104,8 @@ struct ExchangeProtectionPlan: Codable, Equatable, Identifiable {
         guard size > 0 else {
             throw TradingDomainError.invalidProtectionPlan("position size must be greater than zero")
         }
-        guard takeProfit > 0, stopLoss > 0 else {
-            throw TradingDomainError.invalidProtectionPlan("take-profit and stop-loss must be positive")
+        guard partialTakeProfit > 0, takeProfit > 0, profitLockStopLoss > 0, stopLoss > 0 else {
+            throw TradingDomainError.invalidProtectionPlan("take-profit and stop-loss prices must be positive")
         }
     }
 }

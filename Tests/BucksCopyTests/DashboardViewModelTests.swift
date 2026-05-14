@@ -43,7 +43,7 @@ final class DashboardViewModelTests: XCTestCase {
         viewModel.selectTimeframe(.fourHours)
 
         XCTAssertEqual(viewModel.state.selectedTimeframe, .fourHours)
-        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, BlockedCandleShortStrategy.identifier)
+        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, DonchianChannelBreakoutStrategy.identifier)
     }
 
     func testBacktestTimeframeChangeRoutesStrategyToRecommendedDefault() {
@@ -62,7 +62,7 @@ final class DashboardViewModelTests: XCTestCase {
         let viewModel = makeViewModel(credentialStore: InMemoryCredentialStore())
         viewModel.selectTimeframe(.twelveHours)
 
-        viewModel.updateStrategy(MovingAverageAlignmentStrategy.identifier)
+        viewModel.updateStrategy("removed-strategy")
 
         XCTAssertEqual(viewModel.state.strategyConfig.strategyID, VWMATouchTrendStrategy.identifier)
     }
@@ -73,7 +73,7 @@ final class DashboardViewModelTests: XCTestCase {
         state.watchlist = [symbol]
         state.selectedSymbol = symbol
         state.selectedTimeframe = .fifteenMinutes
-        state.strategyConfig = MovingAverageAlignmentStrategy().definition.defaultConfig
+        state.strategyConfig = VWMATouchTrendStrategy().definition.defaultConfig
 
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
@@ -95,7 +95,7 @@ final class DashboardViewModelTests: XCTestCase {
             paperMonitorIntervalNanoseconds: 20_000_000
         )
 
-        try candleRepository.upsertCandles(blockedShortPattern(
+        try candleRepository.upsertCandles(dashboardDonchianBreakoutCandles(
             symbol: symbol,
             timeframe: .fourHours,
             startOffset: 100
@@ -106,7 +106,7 @@ final class DashboardViewModelTests: XCTestCase {
 
         try await waitUntil(timeout: 2) {
             viewModel.state.recentLogs.contains {
-                $0.message.contains(BlockedCandleShortStrategy.identifier) &&
+                $0.message.contains(DonchianChannelBreakoutStrategy.identifier) &&
                     $0.message.contains("4H")
             }
         }
@@ -305,7 +305,7 @@ final class DashboardViewModelTests: XCTestCase {
         state.backtestConfiguration = BacktestConfiguration(
             symbol: FuturesSymbol("BTCUSDT"),
             timeframe: .fifteenMinutes,
-            strategyConfig: BlockedCandleShortStrategy().definition.defaultConfig
+            strategyConfig: DonchianChannelBreakoutStrategy().definition.defaultConfig
         )
 
         let candleRepository = InMemoryCandleRepository()
@@ -343,8 +343,8 @@ final class DashboardViewModelTests: XCTestCase {
 
     func testBacktestComparisonDoesNotReplacePrimaryResultWithGateResult() async throws {
         let symbol = FuturesSymbol("BTCUSDT")
-        let timeframe = CandleTimeframe.fifteenMinutes
-        var config = BlockedCandleShortStrategy().definition.defaultConfig
+        let timeframe = CandleTimeframe.fourHours
+        var config = DonchianChannelBreakoutStrategy().definition.defaultConfig
         config.signalConfirmation = SignalConfirmationConfig(
             mode: .gate,
             requiredScore: 10,
@@ -363,7 +363,7 @@ final class DashboardViewModelTests: XCTestCase {
 
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
-        let registry = StrategyRegistry(strategies: [BlockedCandleShortStrategy()])
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
         let viewModel = DashboardViewModel(
             state: state,
             credentialStore: InMemoryCredentialStore(),
@@ -380,28 +380,17 @@ final class DashboardViewModelTests: XCTestCase {
             strategyRegistry: registry
         )
 
-        let warmup = (0..<36).map { offset in
-            dashboardCandle(
-                symbol: symbol,
-                timeframe: timeframe,
-                offset: offset,
-                open: 120,
-                high: 122,
-                low: 118,
-                close: 120
-            )
-        }
         let exit = dashboardCandle(
             symbol: symbol,
             timeframe: timeframe,
-            offset: 40,
-            open: 149,
-            high: 151,
-            low: 99,
-            close: 105
+            offset: 141,
+            open: 105,
+            high: 130,
+            low: 104,
+            close: 128
         )
         try candleRepository.upsertCandles(
-            warmup + blockedShortPattern(symbol: symbol, timeframe: timeframe, startOffset: 36) + [exit]
+            dashboardDonchianBreakoutCandles(symbol: symbol, timeframe: timeframe, startOffset: 100) + [exit]
         )
 
         viewModel.runBacktest()
@@ -423,31 +412,21 @@ final class DashboardViewModelTests: XCTestCase {
 
     func testBacktestUsesAllStoredCandlesInsteadOfDisplayLimit() async throws {
         let symbol = FuturesSymbol("BTCUSDT")
-        let timeframe = CandleTimeframe.fifteenMinutes
+        let timeframe = CandleTimeframe.fourHours
         let repository = BacktestAllHistoryCandleRepository(
-            candles: (0..<36).map { offset in
-                dashboardCandle(
-                    symbol: symbol,
-                    timeframe: timeframe,
-                    offset: offset,
-                    open: 120,
-                    high: 122,
-                    low: 118,
-                    close: 120
-                )
-            } + blockedShortPattern(
+            candles: dashboardDonchianBreakoutCandles(
                 symbol: symbol,
                 timeframe: timeframe,
-                startOffset: 36
+                startOffset: 100
             ) + [
                 dashboardCandle(
                     symbol: symbol,
                     timeframe: timeframe,
-                    offset: 40,
-                    open: 149,
-                    high: 151,
-                    low: 99,
-                    close: 105
+                    offset: 141,
+                    open: 105,
+                    high: 130,
+                    low: 104,
+                    close: 128
                 )
             ]
         )
@@ -456,9 +435,9 @@ final class DashboardViewModelTests: XCTestCase {
         state.backtestConfiguration = BacktestConfiguration(
             symbol: symbol,
             timeframe: timeframe,
-            strategyConfig: BlockedCandleShortStrategy().definition.defaultConfig
+            strategyConfig: DonchianChannelBreakoutStrategy().definition.defaultConfig
         )
-        let registry = StrategyRegistry(strategies: [BlockedCandleShortStrategy()])
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
         let logStore = InMemoryTradeEventLogStore()
         let viewModel = DashboardViewModel(
             state: state,
@@ -623,16 +602,31 @@ final class DashboardViewModelTests: XCTestCase {
         )
     }
 
-    private func blockedShortPattern(
+    private func dashboardDonchianBreakoutCandles(
         symbol: FuturesSymbol,
         timeframe: CandleTimeframe,
         startOffset: Int
     ) -> [Candle] {
-        [
-            dashboardCandle(symbol: symbol, timeframe: timeframe, offset: startOffset, open: 100, high: 135, low: 99, close: 130),
-            dashboardCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 1, open: 132, high: 170, low: 131, close: 150),
-            dashboardCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 2, open: 151, high: 165, low: 150, close: 160),
-            dashboardCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 3, open: 166, high: 166, low: 148, close: 150)
+        (0..<40).map { offset in
+            dashboardCandle(
+                symbol: symbol,
+                timeframe: timeframe,
+                offset: startOffset + offset,
+                open: 100,
+                high: 101,
+                low: 99,
+                close: 100
+            )
+        } + [
+            dashboardCandle(
+                symbol: symbol,
+                timeframe: timeframe,
+                offset: startOffset + 40,
+                open: 100,
+                high: 106,
+                low: 99,
+                close: 105
+            )
         ]
     }
 

@@ -318,7 +318,6 @@ struct BacktestEngine {
             initialCapital: initialCapital,
             completedAt: completedAt
         )
-
         return BacktestComparisonResult(
             withoutSignalConfirmation: withoutSignalConfirmation,
             observedSignalConfirmation: observedSignalConfirmation,
@@ -513,65 +512,178 @@ struct BacktestEngine {
     ) -> (trade: BacktestTrade, exitIndex: Int)? {
         guard startIndex < candles.count else { return nil }
 
+        let partialTakeProfit = signal.partialTakeProfit
+        let profitLockStopLoss = signal.profitLockStopLossAfterPartialTakeProfit
+        var didHitPartialTakeProfit = false
+
         for index in startIndex..<candles.count {
             let candle = candles[index]
+            let activeStopLoss = didHitPartialTakeProfit ? profitLockStopLoss : signal.stopLoss
             let hitStop: Bool
-            let hitTake: Bool
+            let hitPartialTakeProfit: Bool
+            let hitFinalTakeProfit: Bool
 
             switch signal.side {
             case .buy:
-                hitStop = candle.low <= signal.stopLoss
-                hitTake = candle.high >= signal.takeProfit
+                hitStop = candle.low <= activeStopLoss
+                hitPartialTakeProfit = candle.high >= partialTakeProfit
+                hitFinalTakeProfit = candle.high >= signal.takeProfit
             case .sell:
-                hitStop = candle.high >= signal.stopLoss
-                hitTake = candle.low <= signal.takeProfit
+                hitStop = candle.high >= activeStopLoss
+                hitPartialTakeProfit = candle.low <= partialTakeProfit
+                hitFinalTakeProfit = candle.low <= signal.takeProfit
             }
 
-            guard hitStop || hitTake else { continue }
+            if hitStop {
+                let legs: [SimulatedExitLeg]
+                if didHitPartialTakeProfit {
+                    legs = [
+                        SimulatedExitLeg(
+                            kind: .partialTakeProfit,
+                            price: partialTakeProfit,
+                            ratio: SplitTakeProfitPlan.partialTakeProfitRatio,
+                            exitExecution: .takeProfitLimit
+                        ),
+                        SimulatedExitLeg(
+                            kind: .stopLoss,
+                            price: profitLockStopLoss,
+                            ratio: SplitTakeProfitPlan.finalTakeProfitRatio,
+                            exitExecution: .stopLossMarket
+                        )
+                    ]
+                } else {
+                    legs = [
+                        SimulatedExitLeg(
+                            kind: .stopLoss,
+                            price: signal.stopLoss,
+                            ratio: 1,
+                            exitExecution: .stopLossMarket
+                        )
+                    ]
+                }
+                return makeTrade(
+                    signal: signal,
+                    exitTime: candle.openTime,
+                    legs: legs,
+                    leverage: leverage,
+                    positionMarginRatio: positionMarginRatio,
+                    accountRiskPercent: accountRiskPercent,
+                    startingBalance: startingBalance,
+                    exitIndex: index
+                )
+            }
 
-            let outcome: BacktestTradeOutcome = hitStop ? .loss : .win
-            let exitPrice = hitStop ? signal.stopLoss : signal.takeProfit
-            let grossReturnPercent = leveragedReturnPercent(
-                side: signal.side,
-                entryPrice: signal.entryPrice,
-                exitPrice: exitPrice,
-                leverage: leverage,
-                positionMarginRatio: positionMarginRatio
-            )
-            let returnPercent = TradingFeePolicy.netLeveragedReturnPercent(
-                grossLeveragedReturnPercent: grossReturnPercent,
-                outcome: outcome,
-                leverage: leverage,
-                positionMarginRatio: positionMarginRatio
-            )
-            let endingBalance = balance(
-                startingBalance: startingBalance,
-                returnPercent: returnPercent
-            )
+            if hitFinalTakeProfit {
+                let legs = [
+                    SimulatedExitLeg(
+                        kind: .partialTakeProfit,
+                        price: partialTakeProfit,
+                        ratio: SplitTakeProfitPlan.partialTakeProfitRatio,
+                        exitExecution: .takeProfitLimit
+                    ),
+                    SimulatedExitLeg(
+                        kind: .finalTakeProfit,
+                        price: signal.takeProfit,
+                        ratio: SplitTakeProfitPlan.finalTakeProfitRatio,
+                        exitExecution: .takeProfitLimit
+                    )
+                ]
+                return makeTrade(
+                    signal: signal,
+                    exitTime: candle.openTime,
+                    legs: legs,
+                    leverage: leverage,
+                    positionMarginRatio: positionMarginRatio,
+                    accountRiskPercent: accountRiskPercent,
+                    startingBalance: startingBalance,
+                    exitIndex: index
+                )
+            }
 
-            let trade = BacktestTrade(
-                symbol: signal.symbol,
-                side: signal.side,
-                entryTime: signal.generatedAt,
-                exitTime: candle.openTime,
-                entryPrice: signal.entryPrice,
-                stopLoss: signal.stopLoss,
-                takeProfit: signal.takeProfit,
-                exitPrice: exitPrice,
-                outcome: outcome,
-                rewardRiskRatio: signal.plannedRewardRiskRatio ?? 0,
-                leveragedReturnPercent: returnPercent,
-                leveragedStopLossPercent: accountRiskPercent,
-                positionMarginRatio: positionMarginRatio,
-                accountRiskPercent: accountRiskPercent,
-                startingBalance: startingBalance,
-                endingBalance: endingBalance,
-                reason: signal.reason
-            )
-            return (trade, index)
+            if hitPartialTakeProfit {
+                didHitPartialTakeProfit = true
+            }
         }
 
         return nil
+    }
+
+    private func makeTrade(
+        signal: StrategySignal,
+        exitTime: Date,
+        legs: [SimulatedExitLeg],
+        leverage: Int,
+        positionMarginRatio: Decimal,
+        accountRiskPercent: Decimal,
+        startingBalance: Decimal,
+        exitIndex: Int
+    ) -> (trade: BacktestTrade, exitIndex: Int) {
+        let returnPercent = legs.reduce(Decimal(0)) { partial, leg in
+            let legPositionMarginRatio = positionMarginRatio * leg.ratio
+            let grossReturnPercent = leveragedReturnPercent(
+                side: signal.side,
+                entryPrice: signal.entryPrice,
+                exitPrice: leg.price,
+                leverage: leverage,
+                positionMarginRatio: legPositionMarginRatio
+            )
+            return partial + TradingFeePolicy.netLeveragedReturnPercent(
+                grossLeveragedReturnPercent: grossReturnPercent,
+                exitExecution: leg.exitExecution,
+                leverage: leverage,
+                positionMarginRatio: legPositionMarginRatio
+            )
+        }
+        let endingBalance = balance(
+            startingBalance: startingBalance,
+            returnPercent: returnPercent
+        )
+        let exitPrice = weightedExitPrice(legs)
+        let outcome: BacktestTradeOutcome = returnPercent > 0 ? .win : .loss
+        let partialFillRatio = fillRatio(legs, kind: .partialTakeProfit)
+        let finalFillRatio = fillRatio(legs, kind: .finalTakeProfit)
+        let stopFillRatio = fillRatio(legs, kind: .stopLoss)
+        let exitReason = partialFillRatio > 0
+            ? "\(signal.reason) | TP1 \(signal.partialTakeProfit) 50%, SL 보호 \(signal.profitLockStopLossAfterPartialTakeProfit)"
+            : signal.reason
+
+        let trade = BacktestTrade(
+            symbol: signal.symbol,
+            side: signal.side,
+            entryTime: signal.generatedAt,
+            exitTime: exitTime,
+            entryPrice: signal.entryPrice,
+            stopLoss: signal.stopLoss,
+            takeProfit: signal.takeProfit,
+            partialTakeProfit: partialFillRatio > 0 ? signal.partialTakeProfit : nil,
+            exitPrice: exitPrice,
+            outcome: outcome,
+            rewardRiskRatio: signal.plannedRewardRiskRatio ?? 0,
+            leveragedReturnPercent: returnPercent,
+            leveragedStopLossPercent: accountRiskPercent,
+            positionMarginRatio: positionMarginRatio,
+            accountRiskPercent: accountRiskPercent,
+            partialTakeProfitFillRatio: partialFillRatio,
+            finalTakeProfitFillRatio: finalFillRatio,
+            stopLossFillRatio: stopFillRatio,
+            startingBalance: startingBalance,
+            endingBalance: endingBalance,
+            reason: exitReason
+        )
+        return (trade, exitIndex)
+    }
+
+    private func weightedExitPrice(_ legs: [SimulatedExitLeg]) -> Decimal {
+        let totalRatio = legs.reduce(Decimal(0)) { $0 + $1.ratio }
+        guard totalRatio > 0 else { return 0 }
+        return legs.reduce(Decimal(0)) { $0 + $1.price * $1.ratio } / totalRatio
+    }
+
+    private func fillRatio(
+        _ legs: [SimulatedExitLeg],
+        kind: SimulatedExitLeg.Kind
+    ) -> Decimal {
+        legs.filter { $0.kind == kind }.reduce(Decimal(0)) { $0 + $1.ratio }
     }
 
     private func leveragedReturnPercent(
@@ -638,6 +750,19 @@ private extension Array where Element == BacktestTrade {
         guard losses > 0 else { return wins > 0 ? 999 : 0 }
         return wins / losses
     }
+}
+
+private struct SimulatedExitLeg {
+    enum Kind: Equatable {
+        case partialTakeProfit
+        case finalTakeProfit
+        case stopLoss
+    }
+
+    let kind: Kind
+    let price: Decimal
+    let ratio: Decimal
+    let exitExecution: TradingFeePolicy.ExitExecution
 }
 
 private struct ScoreBucketAccumulator {

@@ -53,7 +53,7 @@ enum StrategyRiskPolicy {
             )
             accountRiskPercent = fullMarginRisk * positionMarginRatio
 
-            if let leveragedReward = signal.leveragedTakeProfitPercent(leverage: leverage) {
+            if let leveragedReward = signal.leveragedSplitTakeProfitPercent(leverage: leverage) {
                 let scaledReward = leveragedReward * positionMarginRatio
                 let takeProfitFee = TradingFeePolicy.marketEntryTakeProfitLimitFeePercent(
                     leverage: leverage,
@@ -131,6 +131,14 @@ extension StrategySignal {
         return reward / risk
     }
 
+    var partialTakeProfit: Decimal {
+        (entryPrice + takeProfit) / 2
+    }
+
+    var profitLockStopLossAfterPartialTakeProfit: Decimal {
+        entryPrice + (takeProfit - entryPrice) * SplitTakeProfitPlan.profitLockStopRatio
+    }
+
     var stopLossPercent: Decimal? {
         guard entryPrice > 0, hasValidPriceLayout else { return nil }
         let risk = absoluteDecimal(entryPrice - stopLoss)
@@ -147,6 +155,21 @@ extension StrategySignal {
         let reward = absoluteDecimal(takeProfit - entryPrice)
         return reward / entryPrice * 100 * Decimal(leverage)
     }
+
+    func leveragedSplitTakeProfitPercent(leverage: Int) -> Decimal? {
+        guard entryPrice > 0, hasValidPriceLayout else { return nil }
+        let firstReward = absoluteDecimal(partialTakeProfit - entryPrice)
+        let finalReward = absoluteDecimal(takeProfit - entryPrice)
+        let blendedReward = firstReward * SplitTakeProfitPlan.partialTakeProfitRatio +
+            finalReward * SplitTakeProfitPlan.finalTakeProfitRatio
+        return blendedReward / entryPrice * 100 * Decimal(leverage)
+    }
+}
+
+enum SplitTakeProfitPlan {
+    static let partialTakeProfitRatio: Decimal = Decimal(5) / Decimal(10)
+    static let finalTakeProfitRatio: Decimal = Decimal(5) / Decimal(10)
+    static let profitLockStopRatio: Decimal = Decimal(25) / Decimal(100)
 }
 
 extension Decimal {

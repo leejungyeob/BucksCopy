@@ -1,0 +1,4 @@
+interface:
+  display_name: "BucksCopy Strategy Validation"
+  short_description: "Run local full-history backtests and summarize strategy viability"
+  default_prompt: "Use $bucks-copy-strategy-validation after adding or changing a trading strategy, risk policy, TP/SL behavior, or when judging strategy viability."

@@ -217,48 +217,52 @@
   - 손절폭이 넓은 전략은 거래가 차단되지는 않지만 투입비율이 낮아져 기대수익도 함께 낮아집니다.
   - 실제 live 적용 전에는 최소 주문금액과 계약 수량 반올림 검증이 추가로 필요합니다.
 
-## 0013. Confirmation Scoring Before Risk Policy
+## 0013. Confirmation Scoring Deprecated As Trading Input
+
+- Status: deprecated
+- Date: 2026-05-14
+- Context:
+  - 보조지표 Gate는 일부 고정 거래 진단에서 좋아 보여도 전체 재시뮬레이션에서는 최종잔고와 경로 안정성을 충분히 개선하지 못했습니다.
+  - 사용자는 보조지표 자료를 제거하고 메인 매매전략과 리스크 관리에 집중하기로 했습니다.
+- Decision:
+  - 보조지표 검증 리포트, 연구 문서, 로컬 검증 스킬을 제거합니다.
+  - 기본 자동매매 경로는 메인 전략 단독 신호와 risk policy만 사용합니다.
+  - 보조지표는 향후 명확한 재검증 요청 전까지 진입 Gate나 리스크 가중치로 적용하지 않습니다.
+- Consequences:
+  - 앱 화면은 자동매매 설정, 차트, 포지션, 로그에 집중합니다.
+  - 전략 개선은 보조지표보다 손절/익절 구조, 포지션 크기, 보유 시간 같은 리스크 관리에서 먼저 검증합니다.
+
+## 0014. Two-Stage Take Profit With Profit-Lock Stop
 
 - Status: accepted
 - Date: 2026-05-14
 - Context:
-  - 사용자는 헤드앤숄더, 피보나치, 더블탑 같은 기본 매매법을 메인 전략으로 쓰기보다, 메인 전략 신호의 확률 가중치를 높이는 보조 근거로 쓰길 원했습니다.
-  - 보조지표를 많이 붙이면 RSI/MACD/Stochastic처럼 같은 정보를 중복 계산하는 과최적화 위험이 있습니다.
+  - 최종 목표가를 잘 잡아도 목표가 직전에 되돌아와 손실로 끝나는 경우가 있습니다.
+  - 사용자는 목표가 일부를 먼저 실현하고, 이후 되돌림이 나와도 전체 거래가 손실이 아니라 익절로 끝나는 구조를 원했습니다.
 - Decision:
-  - 메인 전략이 먼저 `StrategySignal`을 만들고, risk policy 전에 `SignalConfirmationEngine`이 보조 점수를 계산합니다.
-  - 기본 보조 점수는 추세, 구조, 패턴, 모멘텀, 거래량, 변동성 그룹으로 나누고 그룹별 cap을 적용합니다.
-  - confirmation mode는 `OFF`, `Observe`, `Gate`로 나눕니다. `Observe`는 점수와 구간별 성과만 기록하고, `Gate`만 threshold 미달 signal을 `confirmation-blocked`로 차단합니다.
-  - 기본 mode는 `OFF`입니다. primary backtest 결과는 항상 메인 전략 단독 결과와 일치해야 하므로 보조 점수는 기본 계산 경로에서 제외합니다.
-  - Gate threshold 22점은 초기 휴리스틱 후보일 뿐이며, 기본 차단 정책으로 고정하지 않습니다.
-  - 백테스트는 같은 candle set에서 confirmation `OFF`, `Observe`, `Gate` 결과를 함께 계산해 순손익, 승률, 거래 수, MDD 차이를 비교할 수 있습니다.
-  - 백테스트는 Gate threshold 후보를 스캔하고, OFF보다 순손익이 개선되며 최소 거래 수를 만족하는 후보가 있을 때만 Gate 기준점을 추천합니다.
-  - 보조 점수 비교를 켜도 primary result/log는 `OFF` 결과를 사용하고, Observe/Gate 결과는 비교표에만 표시합니다.
+  - 모든 전략 신호의 기존 `takeProfit`은 최종 목표가인 TP2로 유지합니다.
+  - TP1은 진입가와 TP2의 중간값으로 두고 포지션 50%를 익절합니다.
+  - TP1 체결 후 남은 50%의 stop-loss는 진입가에서 TP2 방향으로 25% 진행한 가격으로 이동합니다.
+  - TP2에 도달하면 남은 50%를 익절하고, TP1 이후 되돌림이 나오면 이동된 stop-loss에서 남은 50%를 익절 청산합니다.
 - Consequences:
-  - confirmation layer는 승률 보장 장치가 아니라 기대값 개선 여부를 검증하기 위한 관찰/필터 레이어입니다.
-  - 기본 가중치는 휴리스틱이며, 실제 최적화는 로컬 closed candle 백테스트와 walk-forward 결과로 조정해야 합니다.
-  - live order는 계속 비활성화하며, confirmation 통과는 Paper/backtest 허용 조건일 뿐 실거래 승인 조건이 아닙니다.
+  - 백테스트 승리 거래의 최대 수익은 단일 TP보다 줄지만, TP1 이후 되돌림 거래의 손실 전환을 줄입니다.
+  - 수수료 모델은 TP1/TP2는 maker limit, stop-loss는 profit-lock 상태여도 trigger market으로 계산합니다.
+  - live entry는 계속 비활성화입니다. 향후 live 활성화 전에는 TP1 체결 감지 후 기존 SL을 취소/재등록하는 주문 상태 머신이 필요합니다.
 
-## 0014. Strategy-Timeframe Confirmation Profiles
+## 0015. Prune Built-In Strategies To Validated Portfolio
 
 - Status: accepted
 - Date: 2026-05-14
 - Context:
-  - 전역 보조 점수 Gate는 일부 조합에서 OFF보다 성과가 악화되었습니다.
-  - 사용자는 메인 전략과 보조지표의 동조/비동조 성과를 비교한 뒤, 각 `strategy × timeframe`에 맞는 보조지표만 적용하길 원했습니다.
-  - 특히 `4H 이평선 정역배열 + MA 추세 정렬`은 표본이 작아도 비동조 손실이 커서 즉시 강한 Gate로 반영하기로 했습니다.
+  - `10x` leverage and `5%` per-trade account-risk backtests showed only six strategy-timeframe combinations met the user's current practical filters after excluding `4H Bollinger 수축 돌파` and returns below `50%`.
+  - Keeping weak built-in strategies in the app creates false choices and increases backtest noise.
 - Decision:
-  - 보조지표 적용은 전역 점수제가 아니라 `SignalConfirmationProfile`로 정의합니다.
-  - `Hard Gate`는 지정 evidence가 양수로 동조하지 않으면 진입을 차단합니다.
-  - `Soft Gate`는 최소 동조 수를 만족해야 진입을 허용하고, 동조 개수에 따라 `maximumRiskPerTradePercent`를 낮춰 포지션 크기에 반영합니다.
-  - 백테스트 비교의 ON 경로는 추천 `strategy × timeframe` 조합에 대해 전용 프로파일을 사용합니다.
-  - 적용 프로파일:
-    - `15m 이평선 정역배열`: RSI, 지지/저항, 피보나치 중 1개 이상 동조 필요, 동조 수에 따라 65%/85%/100% 리스크 배율
-    - `1H 이평선 정역배열`: MA 추세 정렬 Hard Gate
-    - `4H 막힘봉 숏`: 지지/저항, 신호봉 품질 중 1개 이상 동조 필요, 동조 수에 따라 75%/100% 리스크 배율
-    - `4H 이평선 정역배열`: MA 추세 정렬 Hard Gate
-    - `12H VWMA100 터치 추세`: 보조지표 OFF
-    - `1D VWMA100 터치 추세`: 더블탑/바텀 Hard Gate, 피보나치/신호봉 품질 동조 수에 따라 80%/90%/100% 리스크 배율
+  - Keep VWMA100 touch trend, Donchian channel breakout, and Time-Series momentum as validated built-in strategy implementations.
+  - Keep the in-progress 15m X strategy implementation and route it separately while it is being developed.
+  - Recommended routing includes `15m X`, `4H Donchian`, `12H VWMA100`, `12H Donchian`, `12H Time-Series`, `1D VWMA100`, and `1D Donchian`.
+  - Remove blocked-candle, moving-average alignment, Bollinger, and MACD strategy implementations from the built-in code path.
 - Consequences:
-  - 백테스트 UI는 `OFF`, `Observe`, `적용`을 같은 candle set에서 비교합니다.
-  - 전용 프로파일 적용은 손실 회피를 우선하지만 거래 수 감소와 과최적화 위험을 동반합니다.
-  - live order는 계속 비활성화이며, Paper/backtest에서 검증된 뒤 별도 live policy가 필요합니다.
+  - `1H` no longer has a recommended Paper route until a future strategy passes the same validation bar.
+  - `15m X` remains a development route and should not be treated as part of the six validated combinations until its own backtest passes.
+  - Historical cache/report files may still contain old strategy names, but active code and generated reports use only the pruned built-in registry.
+  - Future strategy additions must be validated through the local backtest script before being added to routing.

@@ -1,169 +1,106 @@
 import Foundation
 
-struct BlockedCandleShortStrategy: TradingStrategy {
-    static let identifier = "blocked-candle-short"
+struct XStrategy: TradingStrategy {
+    static let identifier = "x"
+    private static let supportedTimeframes: Set<CandleTimeframe> = [.fifteenMinutes]
 
     let definition = StrategyDefinition(
         id: Self.identifier,
-        name: "막힘봉 숏",
-        summary: "세 양봉 몸통 축소와 낮아진 고점 뒤 강한 음봉 확인으로 숏 진입",
+        name: "X",
+        summary: "24봉 누적 압력과 반대 꼬리 흡수, range/volume 확장을 조합한 15분봉 독자 전략",
         defaultConfig: StrategyConfig(
             strategyID: Self.identifier,
             leverage: 2,
-            parameters: [:]
+            parameters: [
+                "pressureLookback": 24,
+                "rangeLookback": 24,
+                "volumeLookback": 96,
+                "rangeMultiplier": Decimal(string: "1.7")!,
+                "volumeMultiplier": Decimal(string: "1.4")!,
+                "minimumCloseLocation": Decimal(string: "0.60")!,
+                "minimumOppositeWickRatio": Decimal(string: "0.25")!,
+                "minimumPressure": Decimal(string: "0.12")!,
+                "rewardRiskRatio": Decimal(string: "2.4")!
+            ],
+            signalConfirmation: .disabled
         )
     )
 
     func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        guard Self.supportedTimeframes.contains(context.timeframe) else { return .noSignal }
+
         let candles = context.closedCandles
-        guard candles.count >= 4 else { return .noSignal }
-
-        let firstBull = candles[candles.count - 4]
-        let secondBull = candles[candles.count - 3]
-        let thirdBull = candles[candles.count - 2]
-        let reversal = candles[candles.count - 1]
-
-        guard firstBull.isBullish,
-              secondBull.isBullish,
-              thirdBull.isBullish,
-              reversal.isBearish else {
+        let parameters = XParameters(overrides: config.parameters)
+        guard candles.count > 220,
+              let averageRange = candles.averageRange(
+                period: parameters.rangeLookback,
+                endingAt: candles.count - 2
+              ),
+              let averageVolume = candles.averageVolume(period: parameters.volumeLookback),
+              let pressure = candles.directionalBodyPressure(
+                lookback: parameters.pressureLookback,
+                endingAt: candles.count - 2
+              ) else {
             return .noSignal
         }
 
-        guard firstBull.bodySize > secondBull.bodySize,
-              secondBull.bodySize > thirdBull.bodySize,
-              thirdBull.high < secondBull.high else {
+        let latest = candles[candles.count - 1]
+        let entry = latest.close
+        let range = latest.high - latest.low
+        guard entry > 0,
+              range > 0,
+              averageRange > 0,
+              averageVolume > 0,
+              range >= averageRange * parameters.rangeMultiplier,
+              latest.volume >= averageVolume * parameters.volumeMultiplier else {
             return .noSignal
         }
 
-        guard reversal.closeLocation <= Decimal(4) / Decimal(10) else {
-            return .noSignal
-        }
+        let closeLocation = (latest.close - latest.low) / range
+        let upperWickRatio = (latest.high - Swift.max(latest.open, latest.close)) / range
+        let lowerWickRatio = (Swift.min(latest.open, latest.close) - latest.low) / range
 
-        let entry = reversal.close
-        let stop = reversal.high
-        guard let takeProfit = takeProfit(
-            context: context,
-            firstBull: firstBull,
-            entry: entry,
-            stop: stop
-        ) else {
-            return .noSignal
-        }
-
-        return fixedTargetSignal(
-            context: context,
-            side: .sell,
-            entry: entry,
-            stop: stop,
-            takeProfit: takeProfit,
-            reason: "세 양봉의 몸통이 순차 축소되고 세 번째 고점이 낮아진 뒤 저가권 음봉으로 마감"
-        )
-    }
-
-    private func takeProfit(
-        context: StrategyContext,
-        firstBull: Candle,
-        entry: Decimal,
-        stop: Decimal
-    ) -> Decimal? {
-        guard entry > 0, stop > entry else { return nil }
-
-        switch context.timeframe {
-        case .oneHour:
-            return firstBull.open
-        case .fifteenMinutes, .fourHours, .oneDay:
-            let risk = stop - entry
-            return entry - risk * StrategyRiskPolicy.minimumRewardRiskRatio
-        case .twelveHours:
-            return nil
-        }
-    }
-}
-
-struct BlockedCandleLongStrategy: TradingStrategy {
-    static let identifier = "blocked-candle-long"
-
-    let definition = StrategyDefinition(
-        id: Self.identifier,
-        name: "막힘봉 롱",
-        summary: "세 음봉 몸통 축소와 높아진 저점 뒤 강한 양봉 확인으로 롱 진입",
-        defaultConfig: StrategyConfig(
-            strategyID: Self.identifier,
-            leverage: 2,
-            parameters: [:]
-        )
-    )
-
-    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
-        let candles = context.closedCandles
-        guard candles.count >= 4 else { return .noSignal }
-
-        let firstBear = candles[candles.count - 4]
-        let secondBear = candles[candles.count - 3]
-        let thirdBear = candles[candles.count - 2]
-        let reversal = candles[candles.count - 1]
-
-        guard firstBear.isBearish,
-              secondBear.isBearish,
-              thirdBear.isBearish,
-              reversal.isBullish else {
-            return .noSignal
-        }
-
-        guard firstBear.bodySize > secondBear.bodySize,
-              secondBear.bodySize > thirdBear.bodySize,
-              thirdBear.low > secondBear.low else {
-            return .noSignal
-        }
-
-        guard reversal.closeLocation >= Decimal(6) / Decimal(10) else {
-            return .noSignal
-        }
-
-        let entry = reversal.close
-        let stop = reversal.low
-        guard let takeProfit = takeProfit(
-            context: context,
-            firstBear: firstBear,
-            entry: entry,
-            stop: stop
-        ) else {
-            return .noSignal
-        }
-
-        return fixedTargetSignal(
-            context: context,
-            side: .buy,
-            entry: entry,
-            stop: stop,
-            takeProfit: takeProfit,
-            reason: "세 음봉의 몸통이 순차 축소되고 세 번째 저점이 높아진 뒤 고가권 양봉으로 마감"
-        )
-    }
-
-    private func takeProfit(
-        context: StrategyContext,
-        firstBear: Candle,
-        entry: Decimal,
-        stop: Decimal
-    ) -> Decimal? {
-        guard entry > 0, stop < entry else { return nil }
-
-        switch context.timeframe {
-        case .oneHour:
-            return firstBear.open
-        case .fifteenMinutes, .fourHours, .oneDay:
+        if pressure <= -parameters.minimumPressure,
+           lowerWickRatio >= parameters.minimumOppositeWickRatio,
+           closeLocation >= parameters.minimumCloseLocation,
+           latest.close >= latest.open {
+            let stop = latest.low
             let risk = entry - stop
-            return entry + risk * StrategyRiskPolicy.minimumRewardRiskRatio
-        case .twelveHours:
-            return nil
+            guard risk > 0 else { return .noSignal }
+            return fixedTargetSignal(
+                context: context,
+                side: .buy,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry + risk * parameters.rewardRiskRatio,
+                reason: "X: 24봉 매도 압력 뒤 하단 꼬리 흡수와 range/volume 확장 확인"
+            )
         }
+
+        if pressure >= parameters.minimumPressure,
+           upperWickRatio >= parameters.minimumOppositeWickRatio,
+           closeLocation <= 1 - parameters.minimumCloseLocation,
+           latest.close <= latest.open {
+            let stop = latest.high
+            let risk = stop - entry
+            guard risk > 0 else { return .noSignal }
+            return fixedTargetSignal(
+                context: context,
+                side: .sell,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry - risk * parameters.rewardRiskRatio,
+                reason: "X: 24봉 매수 압력 뒤 상단 꼬리 흡수와 range/volume 확장 확인"
+            )
+        }
+
+        return .noSignal
     }
 }
 
 struct VWMATouchTrendStrategy: TradingStrategy {
     static let identifier = "vwma-touch-trend"
+    private static let supportedTimeframes: Set<CandleTimeframe> = [.twelveHours, .oneDay]
 
     let definition = StrategyDefinition(
         id: Self.identifier,
@@ -177,6 +114,7 @@ struct VWMATouchTrendStrategy: TradingStrategy {
     )
 
     func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        guard Self.supportedTimeframes.contains(context.timeframe) else { return .noSignal }
         let candles = context.closedCandles
         let parameters = VWMAParameters.optimized(for: context.timeframe, overrides: config.parameters)
         guard candles.count >= parameters.period,
@@ -220,13 +158,14 @@ struct VWMATouchTrendStrategy: TradingStrategy {
     }
 }
 
-struct MovingAverageAlignmentStrategy: TradingStrategy {
-    static let identifier = "moving-average-alignment"
+struct DonchianChannelBreakoutStrategy: TradingStrategy {
+    static let identifier = "donchian-channel-breakout"
+    private static let supportedTimeframes: Set<CandleTimeframe> = [.fourHours, .twelveHours, .oneDay]
 
     let definition = StrategyDefinition(
         id: Self.identifier,
-        name: "이평선 정역배열",
-        summary: "MA25/50/100/200 정배열 전환은 롱, 역배열 전환은 숏",
+        name: "Donchian 채널 돌파",
+        summary: "최근 N봉 고점/저점 종가 돌파를 ATR 버퍼로 확인해 추세 진입",
         defaultConfig: StrategyConfig(
             strategyID: Self.identifier,
             leverage: 2,
@@ -235,31 +174,34 @@ struct MovingAverageAlignmentStrategy: TradingStrategy {
     )
 
     func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
-        let candles = context.closedCandles
-        guard candles.count >= 201 else { return .noSignal }
-
-        let currentAlignment = movingAverageAlignment(candles: candles, endingAt: candles.count - 1)
-        let previousAlignment = movingAverageAlignment(candles: candles, endingAt: candles.count - 2)
-        guard let currentAlignment, currentAlignment != previousAlignment else {
-            return .noSignal
-        }
-
-        let parameters = MovingAverageAlignmentParameters.optimized(
+        guard Self.supportedTimeframes.contains(context.timeframe) else { return .noSignal }
+        let parameters = DonchianBreakoutParameters.optimized(
             for: context.timeframe,
             overrides: config.parameters
         )
-        let latest = candles[candles.count - 1]
-        let entry = latest.close
-        guard entry > 0 else { return .noSignal }
+        let candles = context.closedCandles
+        guard candles.count > parameters.lookback + parameters.atrPeriod,
+              let atr = candles.averageTrueRange(period: parameters.atrPeriod) else {
+            return .noSignal
+        }
 
-        switch currentAlignment {
-        case .bullish:
-            guard let stop = stopLoss(
-                side: .buy,
-                entry: entry,
-                candles: candles,
-                parameters: parameters
-            ) else { return .noSignal }
+        let latest = candles[candles.count - 1]
+        let previous = candles[candles.count - 2]
+        let previousHigh = candles.highestHigh(
+            lookback: parameters.lookback,
+            endingAt: candles.count - 2
+        )
+        let previousLow = candles.lowestLow(
+            lookback: parameters.lookback,
+            endingAt: candles.count - 2
+        )
+        guard let previousHigh, let previousLow, latest.close > 0 else { return .noSignal }
+
+        let buffer = atr * parameters.breakoutBufferATR
+        if previous.close <= previousHigh + buffer,
+           latest.close > previousHigh + buffer {
+            let entry = latest.close
+            let stop = entry - atr * parameters.stopATR
             let risk = entry - stop
             guard risk > 0 else { return .noSignal }
             return fixedTargetSignal(
@@ -268,15 +210,14 @@ struct MovingAverageAlignmentStrategy: TradingStrategy {
                 entry: entry,
                 stop: stop,
                 takeProfit: entry + risk * parameters.rewardRiskRatio,
-                reason: "MA25 > MA50 > MA100 > MA200 정배열 전환"
+                reason: "Donchian \(parameters.lookback)봉 상단을 ATR 버퍼와 함께 종가 돌파"
             )
-        case .bearish:
-            guard let stop = stopLoss(
-                side: .sell,
-                entry: entry,
-                candles: candles,
-                parameters: parameters
-            ) else { return .noSignal }
+        }
+
+        if previous.close >= previousLow - buffer,
+           latest.close < previousLow - buffer {
+            let entry = latest.close
+            let stop = entry + atr * parameters.stopATR
             let risk = stop - entry
             guard risk > 0 else { return .noSignal }
             return fixedTargetSignal(
@@ -285,71 +226,84 @@ struct MovingAverageAlignmentStrategy: TradingStrategy {
                 entry: entry,
                 stop: stop,
                 takeProfit: entry - risk * parameters.rewardRiskRatio,
-                reason: "MA25 < MA50 < MA100 < MA200 역배열 전환"
+                reason: "Donchian \(parameters.lookback)봉 하단을 ATR 버퍼와 함께 종가 이탈"
             )
         }
+
+        return .noSignal
     }
+}
 
-    private func movingAverageAlignment(candles: [Candle], endingAt index: Int) -> MovingAverageAlignment? {
-        guard let ma25 = candles.simpleMovingAverage(period: 25, endingAt: index),
-              let ma50 = candles.simpleMovingAverage(period: 50, endingAt: index),
-              let ma100 = candles.simpleMovingAverage(period: 100, endingAt: index),
-              let ma200 = candles.simpleMovingAverage(period: 200, endingAt: index) else {
-            return nil
-        }
+struct TimeSeriesMomentumStrategy: TradingStrategy {
+    static let identifier = "time-series-momentum"
+    private static let supportedTimeframes: Set<CandleTimeframe> = [.twelveHours]
 
-        if ma25 > ma50, ma50 > ma100, ma100 > ma200 {
-            return .bullish
-        }
-        if ma25 < ma50, ma50 < ma100, ma100 < ma200 {
-            return .bearish
-        }
-        return nil
-    }
+    let definition = StrategyDefinition(
+        id: Self.identifier,
+        name: "Time-Series 모멘텀",
+        summary: "최근 N봉 수익률이 임계값을 돌파하면 같은 방향 추세 추종",
+        defaultConfig: StrategyConfig(
+            strategyID: Self.identifier,
+            leverage: 2,
+            parameters: [:]
+        )
+    )
 
-    private func stopLoss(
-        side: TradeSide,
-        entry: Decimal,
-        candles: [Candle],
-        parameters: MovingAverageAlignmentParameters
-    ) -> Decimal? {
-        let percentStop: Decimal
-        switch side {
-        case .buy:
-            percentStop = entry * (1 - parameters.stopPercent)
-        case .sell:
-            percentStop = entry * (1 + parameters.stopPercent)
+    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        guard Self.supportedTimeframes.contains(context.timeframe) else { return .noSignal }
+        let parameters = TimeSeriesMomentumParameters.optimized(
+            for: context.timeframe,
+            overrides: config.parameters
+        )
+        let candles = context.closedCandles
+        guard candles.count > parameters.lookback + parameters.atrPeriod + 1,
+              let atr = candles.averageTrueRange(period: parameters.atrPeriod) else {
+            return .noSignal
         }
 
-        guard let referenceStop = referenceStop(
-            side: side,
-            candles: candles,
-            parameters: parameters
-        ) else {
-            return percentStop
+        let latest = candles[candles.count - 1]
+        let currentBase = candles[candles.count - 1 - parameters.lookback]
+        let previous = candles[candles.count - 2]
+        let previousBase = candles[candles.count - 2 - parameters.lookback]
+        guard latest.close > 0, currentBase.close > 0, previousBase.close > 0 else {
+            return .noSignal
         }
 
-        switch side {
-        case .buy:
-            return Swift.min(percentStop, referenceStop)
-        case .sell:
-            return Swift.max(percentStop, referenceStop)
+        let currentReturn = (latest.close - currentBase.close) / currentBase.close
+        let previousReturn = (previous.close - previousBase.close) / previousBase.close
+        if previousReturn <= parameters.threshold,
+           currentReturn > parameters.threshold {
+            let entry = latest.close
+            let stop = entry - atr * parameters.stopATR
+            let risk = entry - stop
+            guard risk > 0 else { return .noSignal }
+            return fixedTargetSignal(
+                context: context,
+                side: .buy,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry + risk * parameters.rewardRiskRatio,
+                reason: "\(parameters.lookback)봉 수익률이 +\(parameters.threshold.riskText)% 임계값을 상향 돌파"
+            )
         }
-    }
 
-    private func referenceStop(
-        side: TradeSide,
-        candles: [Candle],
-        parameters: MovingAverageAlignmentParameters
-    ) -> Decimal? {
-        switch parameters.stopMode {
-        case .entryPercent:
-            return nil
-        case .movingAverage50:
-            return candles.simpleMovingAverage(period: 50)
-        case .movingAverage100:
-            return candles.simpleMovingAverage(period: 100)
+        if previousReturn >= -parameters.threshold,
+           currentReturn < -parameters.threshold {
+            let entry = latest.close
+            let stop = entry + atr * parameters.stopATR
+            let risk = stop - entry
+            guard risk > 0 else { return .noSignal }
+            return fixedTargetSignal(
+                context: context,
+                side: .sell,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry - risk * parameters.rewardRiskRatio,
+                reason: "\(parameters.lookback)봉 수익률이 -\(parameters.threshold.riskText)% 임계값을 하향 이탈"
+            )
         }
+
+        return .noSignal
     }
 }
 
@@ -380,11 +334,6 @@ private extension TradingStrategy {
     }
 }
 
-private enum MovingAverageAlignment {
-    case bullish
-    case bearish
-}
-
 private struct VWMAParameters {
     static let period = 100
 
@@ -409,7 +358,7 @@ private struct VWMAParameters {
         }
 
         return VWMAParameters(
-            period: Int(truncating: NSDecimalNumber(decimal: overrides["period"] ?? Decimal(Self.period))),
+            period: intOverride("period", overrides: overrides, defaultValue: Self.period),
             nearPercent: overrides["nearPercent"] ?? defaults.nearPercent,
             stopBufferPercent: overrides["stopBufferPercent"] ?? defaults.stopBufferPercent,
             rewardRiskRatio: overrides["rewardRiskRatio"] ?? defaults.rewardRiskRatio
@@ -417,80 +366,110 @@ private struct VWMAParameters {
     }
 }
 
-private struct MovingAverageAlignmentParameters {
-    let stopPercent: Decimal
+private struct XParameters {
+    let pressureLookback: Int
+    let rangeLookback: Int
+    let volumeLookback: Int
+    let rangeMultiplier: Decimal
+    let volumeMultiplier: Decimal
+    let minimumCloseLocation: Decimal
+    let minimumOppositeWickRatio: Decimal
+    let minimumPressure: Decimal
     let rewardRiskRatio: Decimal
-    let stopMode: MovingAverageAlignmentStopMode
+
+    init(overrides: [String: Decimal]) {
+        pressureLookback = intOverride("pressureLookback", overrides: overrides, defaultValue: 24)
+        rangeLookback = intOverride("rangeLookback", overrides: overrides, defaultValue: 24)
+        volumeLookback = intOverride("volumeLookback", overrides: overrides, defaultValue: 96)
+        rangeMultiplier = overrides["rangeMultiplier"] ?? Decimal(string: "1.7")!
+        volumeMultiplier = overrides["volumeMultiplier"] ?? Decimal(string: "1.4")!
+        minimumCloseLocation = overrides["minimumCloseLocation"] ?? Decimal(string: "0.60")!
+        minimumOppositeWickRatio = overrides["minimumOppositeWickRatio"] ?? Decimal(string: "0.25")!
+        minimumPressure = overrides["minimumPressure"] ?? Decimal(string: "0.12")!
+        rewardRiskRatio = overrides["rewardRiskRatio"] ?? Decimal(string: "2.4")!
+    }
+}
+
+private struct DonchianBreakoutParameters {
+    let lookback: Int
+    let atrPeriod: Int
+    let breakoutBufferATR: Decimal
+    let stopATR: Decimal
+    let rewardRiskRatio: Decimal
 
     static func optimized(
         for timeframe: CandleTimeframe,
         overrides: [String: Decimal]
-    ) -> MovingAverageAlignmentParameters {
-        let defaults: MovingAverageAlignmentParameters
+    ) -> DonchianBreakoutParameters {
+        let defaults: DonchianBreakoutParameters
         switch timeframe {
         case .fifteenMinutes:
-            defaults = MovingAverageAlignmentParameters(stopPercent: Decimal(string: "0.025")!, rewardRiskRatio: Decimal(string: "4.0")!, stopMode: .movingAverage50)
+            defaults = DonchianBreakoutParameters(lookback: 40, atrPeriod: 14, breakoutBufferATR: Decimal(string: "0.15")!, stopATR: Decimal(string: "1.8")!, rewardRiskRatio: Decimal(string: "2.5")!)
         case .oneHour:
-            defaults = MovingAverageAlignmentParameters(stopPercent: Decimal(string: "0.035")!, rewardRiskRatio: Decimal(string: "5.0")!, stopMode: .entryPercent)
+            defaults = DonchianBreakoutParameters(lookback: 24, atrPeriod: 14, breakoutBufferATR: Decimal(string: "0.20")!, stopATR: Decimal(string: "1.8")!, rewardRiskRatio: Decimal(string: "2.8")!)
         case .fourHours:
-            defaults = MovingAverageAlignmentParameters(stopPercent: Decimal(string: "0.075")!, rewardRiskRatio: Decimal(string: "5.0")!, stopMode: .entryPercent)
+            defaults = DonchianBreakoutParameters(lookback: 20, atrPeriod: 14, breakoutBufferATR: Decimal(string: "0.20")!, stopATR: Decimal(string: "2.0")!, rewardRiskRatio: Decimal(string: "3.0")!)
         case .twelveHours:
-            defaults = MovingAverageAlignmentParameters(stopPercent: Decimal(string: "0.035")!, rewardRiskRatio: Decimal(string: "2.0")!, stopMode: .entryPercent)
+            defaults = DonchianBreakoutParameters(lookback: 20, atrPeriod: 14, breakoutBufferATR: Decimal(string: "0.15")!, stopATR: Decimal(string: "2.0")!, rewardRiskRatio: Decimal(string: "3.2")!)
         case .oneDay:
-            defaults = MovingAverageAlignmentParameters(stopPercent: Decimal(string: "0.075")!, rewardRiskRatio: Decimal(string: "5.0")!, stopMode: .entryPercent)
+            defaults = DonchianBreakoutParameters(lookback: 20, atrPeriod: 14, breakoutBufferATR: Decimal(string: "0.10")!, stopATR: Decimal(string: "2.0")!, rewardRiskRatio: Decimal(string: "3.0")!)
         }
 
-        return MovingAverageAlignmentParameters(
-            stopPercent: overrides["stopPercent"] ?? defaults.stopPercent,
-            rewardRiskRatio: overrides["rewardRiskRatio"] ?? defaults.rewardRiskRatio,
-            stopMode: defaults.stopMode
+        return DonchianBreakoutParameters(
+            lookback: intOverride("lookback", overrides: overrides, defaultValue: defaults.lookback),
+            atrPeriod: intOverride("atrPeriod", overrides: overrides, defaultValue: defaults.atrPeriod),
+            breakoutBufferATR: overrides["breakoutBufferATR"] ?? defaults.breakoutBufferATR,
+            stopATR: overrides["stopATR"] ?? defaults.stopATR,
+            rewardRiskRatio: overrides["rewardRiskRatio"] ?? defaults.rewardRiskRatio
         )
     }
 }
 
-private enum MovingAverageAlignmentStopMode {
-    case entryPercent
-    case movingAverage50
-    case movingAverage100
+private struct TimeSeriesMomentumParameters {
+    let lookback: Int
+    let threshold: Decimal
+    let atrPeriod: Int
+    let stopATR: Decimal
+    let rewardRiskRatio: Decimal
+
+    static func optimized(
+        for timeframe: CandleTimeframe,
+        overrides: [String: Decimal]
+    ) -> TimeSeriesMomentumParameters {
+        let defaults: TimeSeriesMomentumParameters
+        switch timeframe {
+        case .fifteenMinutes:
+            defaults = TimeSeriesMomentumParameters(lookback: 96, threshold: Decimal(string: "0.025")!, atrPeriod: 14, stopATR: Decimal(string: "2.0")!, rewardRiskRatio: Decimal(string: "2.5")!)
+        case .oneHour:
+            defaults = TimeSeriesMomentumParameters(lookback: 48, threshold: Decimal(string: "0.035")!, atrPeriod: 14, stopATR: Decimal(string: "2.0")!, rewardRiskRatio: Decimal(string: "2.8")!)
+        case .fourHours:
+            defaults = TimeSeriesMomentumParameters(lookback: 30, threshold: Decimal(string: "0.06")!, atrPeriod: 14, stopATR: Decimal(string: "2.2")!, rewardRiskRatio: Decimal(string: "3.0")!)
+        case .twelveHours:
+            defaults = TimeSeriesMomentumParameters(lookback: 20, threshold: Decimal(string: "0.08")!, atrPeriod: 14, stopATR: Decimal(string: "2.2")!, rewardRiskRatio: Decimal(string: "3.0")!)
+        case .oneDay:
+            defaults = TimeSeriesMomentumParameters(lookback: 20, threshold: Decimal(string: "0.10")!, atrPeriod: 14, stopATR: Decimal(string: "2.5")!, rewardRiskRatio: Decimal(string: "3.0")!)
+        }
+
+        return TimeSeriesMomentumParameters(
+            lookback: intOverride("lookback", overrides: overrides, defaultValue: defaults.lookback),
+            threshold: overrides["threshold"] ?? defaults.threshold,
+            atrPeriod: intOverride("atrPeriod", overrides: overrides, defaultValue: defaults.atrPeriod),
+            stopATR: overrides["stopATR"] ?? defaults.stopATR,
+            rewardRiskRatio: overrides["rewardRiskRatio"] ?? defaults.rewardRiskRatio
+        )
+    }
 }
 
-private extension Candle {
-    var isBullish: Bool {
-        close > open
-    }
-
-    var isBearish: Bool {
-        close < open
-    }
-
-    var bodySize: Decimal {
-        absoluteDecimal(close - open)
-    }
-
-    var closeLocation: Decimal {
-        let range = high - low
-        guard range > 0 else { return 1 }
-        return (close - low) / range
-    }
+private func intOverride(
+    _ key: String,
+    overrides: [String: Decimal],
+    defaultValue: Int
+) -> Int {
+    guard let value = overrides[key] else { return defaultValue }
+    return max(1, Int(truncating: NSDecimalNumber(decimal: value)))
 }
 
 private extension Array where Element == Candle {
-    func simpleMovingAverage(period: Int, endingAt index: Int? = nil) -> Decimal? {
-        let endIndex = index ?? count - 1
-        guard period > 0,
-              endIndex >= 0,
-              endIndex < count,
-              endIndex - period + 1 >= 0 else {
-            return nil
-        }
-
-        var sum: Decimal = 0
-        for candle in self[(endIndex - period + 1)...endIndex] {
-            sum += candle.close
-        }
-        return sum / Decimal(period)
-    }
-
     func volumeWeightedMovingAverage(period: Int, endingAt index: Int? = nil) -> Decimal? {
         let endIndex = index ?? count - 1
         guard period > 0,
@@ -508,5 +487,97 @@ private extension Array where Element == Candle {
         }
         guard volume > 0 else { return nil }
         return weightedClose / volume
+    }
+
+    func averageVolume(period: Int, endingAt index: Int? = nil) -> Decimal? {
+        let endIndex = index ?? count - 1
+        guard period > 0,
+              endIndex >= 0,
+              endIndex < count,
+              endIndex - period + 1 >= 0 else {
+            return nil
+        }
+
+        var total: Decimal = 0
+        for candle in self[(endIndex - period + 1)...endIndex] {
+            total += candle.volume
+        }
+        return total / Decimal(period)
+    }
+
+    func averageRange(period: Int, endingAt index: Int? = nil) -> Decimal? {
+        let endIndex = index ?? count - 1
+        guard period > 0,
+              endIndex >= 0,
+              endIndex < count,
+              endIndex - period + 1 >= 0 else {
+            return nil
+        }
+
+        var total: Decimal = 0
+        for candle in self[(endIndex - period + 1)...endIndex] {
+            total += candle.high - candle.low
+        }
+        return total / Decimal(period)
+    }
+
+    func directionalBodyPressure(lookback: Int, endingAt index: Int) -> Decimal? {
+        guard lookback > 0,
+              index >= 0,
+              index < count,
+              index - lookback + 1 >= 0 else {
+            return nil
+        }
+
+        var bodyTotal: Decimal = 0
+        var rangeTotal: Decimal = 0
+        for candle in self[(index - lookback + 1)...index] {
+            bodyTotal += candle.close - candle.open
+            rangeTotal += candle.high - candle.low
+        }
+        guard rangeTotal > 0 else { return nil }
+        return bodyTotal / rangeTotal
+    }
+
+    func highestHigh(lookback: Int, endingAt index: Int) -> Decimal? {
+        guard lookback > 0,
+              index >= 0,
+              index < count,
+              index - lookback + 1 >= 0 else {
+            return nil
+        }
+        return self[(index - lookback + 1)...index].map(\.high).max()
+    }
+
+    func lowestLow(lookback: Int, endingAt index: Int) -> Decimal? {
+        guard lookback > 0,
+              index >= 0,
+              index < count,
+              index - lookback + 1 >= 0 else {
+            return nil
+        }
+        return self[(index - lookback + 1)...index].map(\.low).min()
+    }
+
+    func averageTrueRange(period: Int, endingAt index: Int? = nil) -> Decimal? {
+        let endIndex = index ?? count - 1
+        guard period > 0,
+              endIndex > 0,
+              endIndex < count,
+              endIndex - period + 1 > 0 else {
+            return nil
+        }
+
+        var total: Decimal = 0
+        for candleIndex in (endIndex - period + 1)...endIndex {
+            let candle = self[candleIndex]
+            let previousClose = self[candleIndex - 1].close
+            total += Swift.max(
+                candle.high - candle.low,
+                absoluteDecimal(candle.high - previousClose),
+                absoluteDecimal(candle.low - previousClose)
+            )
+        }
+        return total / Decimal(period)
     }
 }

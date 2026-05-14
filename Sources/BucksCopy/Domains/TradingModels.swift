@@ -177,7 +177,7 @@ struct BacktestConfiguration: Codable, Equatable {
 
     static let `default` = BacktestConfiguration(
         symbol: FuturesSymbol("BTCUSDT"),
-        timeframe: .fifteenMinutes,
+        timeframe: .twelveHours,
         strategyConfig: StrategyConfig.default,
         initialCapital: 100,
         comparesSignalConfirmation: false
@@ -205,6 +205,7 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
     let entryPrice: Decimal
     let stopLoss: Decimal
     let takeProfit: Decimal
+    let partialTakeProfit: Decimal?
     let exitPrice: Decimal
     let outcome: BacktestTradeOutcome
     let rewardRiskRatio: Decimal
@@ -212,6 +213,9 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
     let leveragedStopLossPercent: Decimal
     let positionMarginRatio: Decimal
     let accountRiskPercent: Decimal
+    let partialTakeProfitFillRatio: Decimal
+    let finalTakeProfitFillRatio: Decimal
+    let stopLossFillRatio: Decimal
     let startingBalance: Decimal
     let endingBalance: Decimal
     let reason: String
@@ -229,6 +233,7 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
         entryPrice: Decimal,
         stopLoss: Decimal,
         takeProfit: Decimal,
+        partialTakeProfit: Decimal? = nil,
         exitPrice: Decimal,
         outcome: BacktestTradeOutcome,
         rewardRiskRatio: Decimal,
@@ -236,6 +241,9 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
         leveragedStopLossPercent: Decimal,
         positionMarginRatio: Decimal = 1,
         accountRiskPercent: Decimal = 0,
+        partialTakeProfitFillRatio: Decimal = 0,
+        finalTakeProfitFillRatio: Decimal = 0,
+        stopLossFillRatio: Decimal = 0,
         startingBalance: Decimal = 0,
         endingBalance: Decimal = 0,
         reason: String
@@ -248,6 +256,7 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
         self.entryPrice = entryPrice
         self.stopLoss = stopLoss
         self.takeProfit = takeProfit
+        self.partialTakeProfit = partialTakeProfit
         self.exitPrice = exitPrice
         self.outcome = outcome
         self.rewardRiskRatio = rewardRiskRatio
@@ -255,6 +264,9 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
         self.leveragedStopLossPercent = leveragedStopLossPercent
         self.positionMarginRatio = positionMarginRatio
         self.accountRiskPercent = accountRiskPercent
+        self.partialTakeProfitFillRatio = partialTakeProfitFillRatio
+        self.finalTakeProfitFillRatio = finalTakeProfitFillRatio
+        self.stopLossFillRatio = stopLossFillRatio
         self.startingBalance = startingBalance
         self.endingBalance = endingBalance
         self.reason = reason
@@ -498,7 +510,7 @@ struct DashboardState: Equatable {
     var symbolCatalog: [ContractSpec] = []
     var watchlist: [FuturesSymbol] = Self.defaultWatchlist
     var selectedSymbol: FuturesSymbol = FuturesSymbol("BTCUSDT")
-    var selectedTimeframe: CandleTimeframe = .fifteenMinutes
+    var selectedTimeframe: CandleTimeframe = .twelveHours
     var candles: [Candle] = []
     var candleStatus: CandleLoadStatus = .idle
     var candleHistoryStatus: CandleHistoryLoadStatus = .idle

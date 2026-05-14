@@ -205,88 +205,10 @@ struct SignalConfirmationProfile: Equatable {
     }
 
     static func researchDefault(
-        strategyID: String,
-        timeframe: CandleTimeframe
+        strategyID _: String,
+        timeframe _: CandleTimeframe
     ) -> SignalConfirmationProfile? {
-        switch (strategyID, timeframe) {
-        case (MovingAverageAlignmentStrategy.identifier, .fifteenMinutes):
-            return SignalConfirmationProfile(
-                name: "15m 이평선 RSI/지지저항/피보나치",
-                hardGateEvidenceIDs: [],
-                softGateEvidenceIDs: [
-                    SignalConfirmationEvidenceID.rsiMomentum,
-                    SignalConfirmationEvidenceID.supportResistance,
-                    SignalConfirmationEvidenceID.fibonacciPullback
-                ],
-                minimumSoftMatchesToAllow: 1,
-                riskTiers: [
-                    RiskTier(minimumSoftMatches: 1, maximumRiskMultiplier: Decimal(string: "0.65")!),
-                    RiskTier(minimumSoftMatches: 2, maximumRiskMultiplier: Decimal(string: "0.85")!),
-                    RiskTier(minimumSoftMatches: 3, maximumRiskMultiplier: 1)
-                ],
-                inactiveReason: nil
-            )
-        case (MovingAverageAlignmentStrategy.identifier, .oneHour):
-            return SignalConfirmationProfile(
-                name: "1H 이평선 MA 추세 정렬",
-                hardGateEvidenceIDs: [SignalConfirmationEvidenceID.trendAlignment],
-                softGateEvidenceIDs: [],
-                minimumSoftMatchesToAllow: 0,
-                riskTiers: [],
-                inactiveReason: nil
-            )
-        case (BlockedCandleShortStrategy.identifier, .fourHours):
-            return SignalConfirmationProfile(
-                name: "4H 막힘봉 지지저항/신호봉",
-                hardGateEvidenceIDs: [],
-                softGateEvidenceIDs: [
-                    SignalConfirmationEvidenceID.supportResistance,
-                    SignalConfirmationEvidenceID.candleQuality
-                ],
-                minimumSoftMatchesToAllow: 1,
-                riskTiers: [
-                    RiskTier(minimumSoftMatches: 1, maximumRiskMultiplier: Decimal(string: "0.75")!),
-                    RiskTier(minimumSoftMatches: 2, maximumRiskMultiplier: 1)
-                ],
-                inactiveReason: nil
-            )
-        case (MovingAverageAlignmentStrategy.identifier, .fourHours):
-            return SignalConfirmationProfile(
-                name: "4H 이평선 MA 추세 정렬",
-                hardGateEvidenceIDs: [SignalConfirmationEvidenceID.trendAlignment],
-                softGateEvidenceIDs: [],
-                minimumSoftMatchesToAllow: 0,
-                riskTiers: [],
-                inactiveReason: nil
-            )
-        case (VWMATouchTrendStrategy.identifier, .twelveHours):
-            return SignalConfirmationProfile(
-                name: "12H VWMA 보조지표 OFF",
-                hardGateEvidenceIDs: [],
-                softGateEvidenceIDs: [],
-                minimumSoftMatchesToAllow: 0,
-                riskTiers: [],
-                inactiveReason: "12H VWMA는 동조/비동조 성과 차이가 작아 전용 보조지표를 적용하지 않음"
-            )
-        case (VWMATouchTrendStrategy.identifier, .oneDay):
-            return SignalConfirmationProfile(
-                name: "1D VWMA 더블탑/바텀",
-                hardGateEvidenceIDs: [SignalConfirmationEvidenceID.doubleTopBottom],
-                softGateEvidenceIDs: [
-                    SignalConfirmationEvidenceID.fibonacciPullback,
-                    SignalConfirmationEvidenceID.candleQuality
-                ],
-                minimumSoftMatchesToAllow: 0,
-                riskTiers: [
-                    RiskTier(minimumSoftMatches: 0, maximumRiskMultiplier: Decimal(string: "0.80")!),
-                    RiskTier(minimumSoftMatches: 1, maximumRiskMultiplier: Decimal(string: "0.90")!),
-                    RiskTier(minimumSoftMatches: 2, maximumRiskMultiplier: 1)
-                ],
-                inactiveReason: nil
-            )
-        default:
-            return nil
-        }
+        nil
     }
 }
 

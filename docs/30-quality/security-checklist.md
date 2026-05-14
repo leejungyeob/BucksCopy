@@ -51,7 +51,8 @@
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal이 차단되는가
 - 레버리지 반영 손절 위험이 설정된 1회 최대 손실률보다 큰 signal은 차단 대신 포지션 투입비율이 축소되는가
 - 수수료 모델이 market/taker와 limit/maker 가정을 명시하고, maker 체결을 보장할 수 없는 주문을 maker로 과대평가하지 않는가
-- 진입 체결 후 TP/SL 거래소-side 보호 주문이 모두 등록되기 전까지 protected 상태로 표시하지 않는가
+- 진입 체결 후 TP1/TP2/SL 거래소-side 보호 주문이 모두 등록되기 전까지 protected 상태로 표시하지 않는가
+- TP1 체결 후 남은 물량의 SL이 profit-lock 가격으로 이동되기 전까지 remaining position을 protected로 과대 표시하지 않는가
 - TP/SL 보호 주문 등록 실패 시 실패한 주문별 최소 5회 재시도하고, 소진 시 fail-closed 정책으로 이어지는가
 - TP/SL clientOid가 재시도 중복 주문을 줄일 수 있도록 안정적으로 생성되는가
 - paper fill, rejected order, risk block이 구분되어 기록되는가

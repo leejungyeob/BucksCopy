@@ -23,7 +23,6 @@
 | [docs/20-architecture/system-overview.md](../20-architecture/system-overview.md) | 레이어와 책임 경계 | 구조 경계, target 구성, 의존 방향 변경 |
 | [docs/20-architecture/decision-log.md](../20-architecture/decision-log.md) | ADR-lite 결정 기록 | repo-wide 구조/정책 결정 |
 | [docs/30-quality/test-strategy.md](../30-quality/test-strategy.md) | 테스트/acceptance 기준 | 테스트 기대치 변경 |
-| [docs/30-quality/strategy-research.md](../30-quality/strategy-research.md) | 전략/보조지표 백테스트 연구 결과 | 전략 후보, 보조지표 동조/비동조 분석 변경 |
 | [docs/30-quality/security-checklist.md](../30-quality/security-checklist.md) | Bitget credential, storage, logging, trust boundary 점검 | auth/storage/order/network 정책 변경 |
 | [docs/40-agents/orchestration-model.md](../40-agents/orchestration-model.md) | L1/L2/L3 운영 모델 | 에이전트 운영 정책 변경 |
 | [docs/40-agents/routing-matrix.md](../40-agents/routing-matrix.md) | 요청 유형별 라우팅 | 라우팅 조건 변경 |

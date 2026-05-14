@@ -6,7 +6,7 @@ final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
         let symbol = FuturesSymbol("BTCUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
-        let registry = StrategyRegistry(strategies: [BlockedCandleShortStrategy()])
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
         let runner = PaperTradingRunner(
             strategyRegistry: registry,
             logStore: logStore,
@@ -20,7 +20,7 @@ final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
             strategyRegistry: registry
         )
 
-        try candleRepository.upsertCandles(blockedShortPattern(
+        try candleRepository.upsertCandles(donchianBreakoutCandles(
             symbol: symbol,
             timeframe: .fourHours,
             startOffset: 100
@@ -40,13 +40,13 @@ final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
         XCTAssertTrue(firstRun.evaluations.contains {
             $0.symbol == symbol &&
                 $0.timeframe == .fourHours &&
-                $0.strategyID == BlockedCandleShortStrategy.identifier
+                $0.strategyID == DonchianChannelBreakoutStrategy.identifier
         })
         XCTAssertTrue(secondRun.evaluations.isEmpty)
 
         let logs = try logStore.loadRecent(limit: 10)
         XCTAssertEqual(logs.count, 1)
-        XCTAssertTrue(logs[0].message.contains("blocked-candle-short"))
+        XCTAssertTrue(logs[0].message.contains(DonchianChannelBreakoutStrategy.identifier))
         XCTAssertTrue(logs[0].message.contains("4H"))
     }
 
@@ -54,8 +54,8 @@ final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
         let symbol = FuturesSymbol("BTCUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
-        let registry = StrategyRegistry(strategies: [BlockedCandleShortStrategy()])
-        let backfillRepository = MonitorBackfillRepository(candles: blockedShortPattern(
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
+        let backfillRepository = MonitorBackfillRepository(candles: donchianBreakoutCandles(
             symbol: symbol,
             timeframe: .fourHours,
             startOffset: 200
@@ -83,7 +83,7 @@ final class MultiTimeframePaperTradingMonitorTests: XCTestCase {
             timeframe: .fourHours,
             limit: 10
         )
-        XCTAssertEqual(storedCandles.count, 4)
+        XCTAssertEqual(storedCandles.count, 10)
     }
 }
 
@@ -132,16 +132,31 @@ private final class MonitorBackfillRepository: CandleBackfillRepository {
     }
 }
 
-private func blockedShortPattern(
+private func donchianBreakoutCandles(
     symbol: FuturesSymbol,
     timeframe: CandleTimeframe,
     startOffset: Int
 ) -> [Candle] {
-    [
-        monitorCandle(symbol: symbol, timeframe: timeframe, offset: startOffset, open: 100, high: 135, low: 99, close: 130),
-        monitorCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 1, open: 132, high: 170, low: 131, close: 150),
-        monitorCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 2, open: 151, high: 165, low: 150, close: 160),
-        monitorCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 3, open: 166, high: 166, low: 148, close: 150)
+    (0..<34).map { offset in
+        monitorCandle(
+            symbol: symbol,
+            timeframe: timeframe,
+            offset: startOffset + offset,
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100
+        )
+    } + [
+        monitorCandle(
+            symbol: symbol,
+            timeframe: timeframe,
+            offset: startOffset + 34,
+            open: 100,
+            high: 106,
+            low: 99,
+            close: 105
+        )
     ]
 }
 

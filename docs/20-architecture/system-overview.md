@@ -153,9 +153,8 @@ References:
 - Strategy logic consumes closed candle data unless a future feature explicitly models in-progress candles.
 - Built-in strategies must emit `entryPrice`, `stopLoss`, and `takeProfit` together when they produce a signal.
 - Built-in strategy inputs are limited to local closed OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget.
-- Built-in strategy set: blocked-candle short, blocked-candle long, VWMA100 touch trend, and MA25/50/100/200 alignment.
-- Strategy signals can optionally pass through a confirmation scoring layer before risk policy, but the default path is `OFF` so primary backtest results stay aligned with the main strategy result. Experimental modes are `Observe` (score and bucket results without blocking) and `Gate` (block signals below the threshold). The scoring layer uses trend, structure, pattern, momentum, volume, and volatility evidence with group caps to avoid counting the same market condition repeatedly.
-- Backtest comparison uses strategy-timeframe confirmation profiles for recommended combinations instead of a single global score Gate. Profiles can define `Hard Gate` evidence that blocks entry when missing, and `Soft Gate` evidence that scales down the configured maximum account risk before risk policy.
+- Built-in strategy set: X, VWMA100 touch trend, Donchian channel breakout, and Time-Series momentum.
+- Strategy signals use the main strategy output and risk policy as the default trading path. Auxiliary indicator Gate data has been removed from the active decision path after validation showed weak path stability.
 - Paper monitoring is independent from the chart-selected timeframe. When Paper is running, it evaluates every Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D`, using the recommended strategy list for each timeframe.
 - Paper monitoring stores a `(symbol, timeframe, strategy, closed candle open time)` key to avoid generating duplicate paper orders from the same closed candle.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
@@ -164,19 +163,20 @@ References:
 - Current trading fee estimates distinguish order intent:
   - Entry after a closed-candle signal is assumed to be market execution, so it uses taker fee.
   - Take-profit protection is modeled as exchange-side reduce-only limit execution, so the planning model uses maker fee.
-  - Stop-loss protection is modeled as exchange-side trigger market execution, so it uses taker fee.
-- Backtesting is manual-only from the UI. It loads local candles and runs the strategy engine on a detached background task, then publishes only the summary result to SwiftUI.
-- Backtesting can compare signal confirmation `OFF`, `Observe`, and `Applied` on the same candle set as an experimental side report. The primary backtest result remains the `OFF` main-strategy result so displayed totals and reported totals share one source of truth. The comparison report shows whether the strategy-timeframe confirmation profile improves net return, win rate, drawdown, and trade count before relying on the profile.
+  - Stop-loss protection is modeled as exchange-side trigger market execution, so it uses taker fee even when it is moved to a profit-lock price.
+- Backtesting is an engine capability and is not shown as a primary app panel; strategy checks should run against local closed candles without changing the Paper trading path.
 - Backtest capital is compounded from the configured starting amount. Each closed trade applies its position-sized net leveraged return percent to the current balance, and the final balance/net return are derived from that balance curve.
+- Backtest exits use two-stage take-profit by default: TP1 is the midpoint between entry and final target for 50% size, TP2 is the original final target for the remaining 50%, and after TP1 the remaining stop-loss moves to 25% of the entry-to-target distance.
 - Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
 - Paper execution records intent, simulated fill, rejected order, and risk decision separately.
 - Live execution requires a future accepted decision log entry, security review, and explicit UI switch.
 
 ## Exchange-Side Protection Orders
 
-- A live entry is not considered protected until both take-profit and stop-loss orders are accepted by Bitget.
-- The intended live sequence is market entry -> fill confirmation -> exchange-side TP/SL registration -> TP/SL registration confirmation.
-- TP is represented as a Bitget TPSL `profit_plan` with a limit `executePrice`; SL is represented as a `loss_plan` with market execution (`executePrice=0`).
+- A live entry is not considered protected until both take-profit legs and stop-loss orders are accepted by Bitget.
+- The intended live sequence is market entry -> fill confirmation -> exchange-side TP1/TP2/SL registration -> protection confirmation.
+- TP1 and TP2 are represented as Bitget TPSL `profit_plan` orders with limit `executePrice`; SL is represented as a `loss_plan` with market execution (`executePrice=0`).
+- When TP1 is filled, the future live runner must move the remaining SL to the profit-lock price before considering the remaining position protected.
 - Protection registration failures must be retried at least 5 times per failed protection order before the position is treated as protection-failed.
 - If retries are exhausted after a real entry fill, the future live runner must fail closed: emit a high-severity risk log and either market-close the position or enter an explicitly reviewed emergency state.
 - The current code includes the domain retry installer and Bitget TPSL adapter, but automatic live entry remains disabled until the live execution policy is accepted.
@@ -193,6 +193,10 @@ References:
 
 ## Strategy Research Notes
 
-- Current recommended routing: `15m`/`1H` use MA alignment, `4H` uses blocked-candle short plus MA alignment, and `12H`/`1D` use VWMA100 touch trend.
-- Blocked-candle short requires three consecutive bullish candles with shrinking bodies, a third high below the second high, and a strong bearish reversal candle.
-- Blocked-candle long mirrors the short setup with three consecutive bearish candles, shrinking bodies, a third low above the second low, and a strong bullish reversal candle.
+- Current recommended routing keeps the locally validated combinations from the `10x` leverage / `5%` per-trade account-risk backtest, plus the in-progress 15m X strategy route:
+  - `15m`: X
+  - `4H`: Donchian channel breakout
+  - `12H`: VWMA100 touch trend, Donchian channel breakout, Time-Series momentum
+  - `1D`: VWMA100 touch trend, Donchian channel breakout
+- `1H` currently has no recommended live/Paper strategy route.
+- Strategies that failed the latest return, drawdown, or trade-count filters were removed from the built-in registry and implementation.

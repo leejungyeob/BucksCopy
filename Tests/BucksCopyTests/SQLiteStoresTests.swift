@@ -150,6 +150,47 @@ final class SQLiteStoresTests: XCTestCase {
         XCTAssertEqual(logs, [log])
     }
 
+    func testTradeLogStoreSerializesConcurrentAppendAndLoad() throws {
+        let path = try temporaryDatabasePath()
+        let store = try SQLiteTradeEventLogStore(path: path)
+        let queue = DispatchQueue(label: "BucksCopy.SQLiteStoresTests.concurrent", attributes: .concurrent)
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var errors: [Error] = []
+
+        for index in 0..<80 {
+            group.enter()
+            queue.async {
+                defer { group.leave() }
+
+                do {
+                    try store.append(TradeEventLog(
+                        timestamp: Date(timeIntervalSince1970: TimeInterval(index)),
+                        category: .bot,
+                        symbol: FuturesSymbol("BTCUSDT"),
+                        message: "Concurrent log \(index)"
+                    ))
+                    _ = try store.loadRecent(limit: 10)
+                } catch {
+                    lock.lock()
+                    errors.append(error)
+                    lock.unlock()
+                }
+            }
+        }
+
+        XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
+        XCTAssertTrue(errors.isEmpty)
+        XCTAssertEqual(try store.loadRecent(limit: 100).count, 80)
+    }
+
+    func testSQLiteDatabaseErrorDescriptionKeepsUnderlyingMessage() {
+        XCTAssertEqual(
+            String(describing: SQLiteDatabaseError.prepareFailed("no such table: candles")),
+            "prepare failed: no such table: candles"
+        )
+    }
+
     private func temporaryDatabasePath() throws -> String {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

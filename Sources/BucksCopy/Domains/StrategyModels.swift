@@ -20,7 +20,7 @@ struct StrategyConfig: Codable, Equatable {
     var maximumPositionMarginPercent: Decimal
     var signalConfirmation: SignalConfirmationConfig
 
-    static let `default` = MovingAverageAlignmentStrategy().definition.defaultConfig
+    static let `default` = VWMATouchTrendStrategy().definition.defaultConfig
 
     init(
         strategyID: String,
@@ -129,10 +129,10 @@ struct StrategyRegistry {
 
     private static var defaultStrategies: [any TradingStrategy] {
         [
-            BlockedCandleLongStrategy(),
-            BlockedCandleShortStrategy(),
-            MovingAverageAlignmentStrategy(),
-            VWMATouchTrendStrategy()
+            DonchianChannelBreakoutStrategy(),
+            TimeSeriesMomentumStrategy(),
+            VWMATouchTrendStrategy(),
+            XStrategy()
         ]
     }
 }
@@ -140,18 +140,26 @@ struct StrategyRegistry {
 enum StrategyTimeframeRouting {
     static func recommendedStrategyIDs(for timeframe: CandleTimeframe) -> [String] {
         switch timeframe {
-        case .fifteenMinutes, .oneHour:
+        case .fifteenMinutes:
             return [
-                MovingAverageAlignmentStrategy.identifier
+                XStrategy.identifier
             ]
+        case .oneHour:
+            return []
         case .fourHours:
             return [
-                BlockedCandleShortStrategy.identifier,
-                MovingAverageAlignmentStrategy.identifier
+                DonchianChannelBreakoutStrategy.identifier
             ]
-        case .twelveHours, .oneDay:
+        case .twelveHours:
             return [
-                VWMATouchTrendStrategy.identifier
+                VWMATouchTrendStrategy.identifier,
+                DonchianChannelBreakoutStrategy.identifier,
+                TimeSeriesMomentumStrategy.identifier
+            ]
+        case .oneDay:
+            return [
+                VWMATouchTrendStrategy.identifier,
+                DonchianChannelBreakoutStrategy.identifier
             ]
         }
     }

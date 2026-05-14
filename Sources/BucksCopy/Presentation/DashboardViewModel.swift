@@ -521,12 +521,13 @@ final class DashboardViewModel: ObservableObject {
                 finishLocalCandleLoad(id: requestID)
             } catch {
                 guard activeLocalCandleLoadID == requestID else { return }
-                state.candleStatus = .failed(message: sanitizedError(error))
-                appendSessionLog(.init(
+                let message = sanitizedError(error)
+                state.candleStatus = .failed(message: message)
+                appendSessionLogOnce(key: "candles.load.failed.\(symbol.rawValue).\(timeframe.rawValue).\(message)", .init(
                     timestamp: clock.now,
                     category: .bot,
                     severity: .warning,
-                    message: sanitizedError(error)
+                    message: message
                 ))
                 finishLocalCandleLoad(id: requestID)
             }
@@ -577,13 +578,14 @@ final class DashboardViewModel: ObservableObject {
             startLiveCandleStream(symbol: symbol, timeframe: timeframe)
             startHistoricalCandleBackfill(symbol: symbol, timeframe: timeframe)
         } catch {
-            state.candleStatus = .failed(message: sanitizedError(error))
-            appendSessionLog(.init(
+            let message = sanitizedError(error)
+            state.candleStatus = .failed(message: message)
+            appendSessionLogOnce(key: "candles.refresh.failed.\(symbol.rawValue).\(timeframe.rawValue).\(message)", .init(
                 timestamp: clock.now,
                 category: .bot,
                 severity: .warning,
                 symbol: symbol,
-                message: sanitizedError(error)
+                message: message
             ))
         }
     }
@@ -700,12 +702,13 @@ final class DashboardViewModel: ObservableObject {
             if state.selectedSymbol == symbol, state.selectedTimeframe == timeframe {
                 state.candleHistoryStatus = .failed(message: sanitizedError(error))
             }
-            appendSessionLog(.init(
+            let message = sanitizedError(error)
+            appendSessionLogOnce(key: "candles.history.failed.\(symbol.rawValue).\(timeframe.rawValue).\(message)", .init(
                 timestamp: clock.now,
                 category: .bot,
                 severity: .warning,
                 symbol: symbol,
-                message: sanitizedError(error)
+                message: message
             ))
         }
     }
@@ -800,12 +803,13 @@ final class DashboardViewModel: ObservableObject {
             mergeLiveCandle(candle, symbol: symbol, timeframe: timeframe)
             state.candleStatus = .loaded(count: state.candles.count, source: "Bitget WebSocket")
         } catch {
-            appendSessionLog(.init(
+            let message = sanitizedError(error)
+            appendSessionLogOnce(key: "candles.live.failed.\(symbol.rawValue).\(timeframe.rawValue).\(message)", .init(
                 timestamp: clock.now,
                 category: .bot,
                 severity: .warning,
                 symbol: symbol,
-                message: sanitizedError(error)
+                message: message
             ))
         }
     }
@@ -1136,6 +1140,8 @@ final class DashboardViewModel: ObservableObject {
             return "백테스트에 필요한 캔들이 부족합니다. 최소 \(required)개 필요, 현재 \(actual)개입니다."
         case BacktestEngineError.invalidInitialCapital(let initialCapital):
             return "시작금액은 0보다 커야 합니다. 현재 \(initialCapital.riskText)"
+        case let error as SQLiteDatabaseError:
+            return "SQLite database error: \(error.description)"
         default:
             return "Operation failed: \(String(describing: type(of: error)))."
         }

@@ -26,7 +26,7 @@ final class SafetyTests: XCTestCase {
         }
     }
 
-    func testProtectionPlanBuildsTakeProfitLimitAndStopLossMarketOrders() throws {
+    func testProtectionPlanBuildsSplitTakeProfitLimitAndStopLossMarketOrders() throws {
         let signal = StrategySignal(
             id: UUID(),
             strategyID: "fixture",
@@ -47,15 +47,21 @@ final class SafetyTests: XCTestCase {
 
         let orders = plan.orders
 
-        XCTAssertEqual(orders.count, 2)
+        XCTAssertEqual(orders.count, 3)
         XCTAssertEqual(orders[0].kind, .takeProfit)
         XCTAssertEqual(orders[0].execution, .limit)
-        XCTAssertEqual(orders[0].executePrice, 120)
-        XCTAssertEqual(orders[1].kind, .stopLoss)
-        XCTAssertEqual(orders[1].execution, .market)
-        XCTAssertNil(orders[1].executePrice)
+        XCTAssertEqual(orders[0].executePrice, 110)
+        XCTAssertEqual(orders[0].size, Decimal(string: "0.005")!)
+        XCTAssertEqual(orders[1].kind, .takeProfit)
+        XCTAssertEqual(orders[1].execution, .limit)
+        XCTAssertEqual(orders[1].executePrice, 120)
+        XCTAssertEqual(orders[1].size, Decimal(string: "0.005")!)
+        XCTAssertEqual(orders[2].kind, .stopLoss)
+        XCTAssertEqual(orders[2].execution, .market)
+        XCTAssertNil(orders[2].executePrice)
         XCTAssertEqual(orders[0].holdSide, .long)
         XCTAssertEqual(orders[1].holdSide, .long)
+        XCTAssertEqual(orders[2].holdSide, .long)
     }
 
     func testProtectionInstallerRetriesFiveTimesAfterFailureBeforeSucceeding() async throws {
@@ -79,10 +85,11 @@ final class SafetyTests: XCTestCase {
 
         let receipts = try await installer.installProtection(plan)
 
-        XCTAssertEqual(receipts.count, 2)
+        XCTAssertEqual(receipts.count, 3)
         XCTAssertEqual(receipts[0].attempts, 6)
         XCTAssertEqual(receipts[1].attempts, 1)
-        XCTAssertEqual(placer.attemptsByKind[.takeProfit], 6)
+        XCTAssertEqual(receipts[2].attempts, 1)
+        XCTAssertEqual(placer.attemptsByKind[.takeProfit], 7)
         XCTAssertEqual(placer.attemptsByKind[.stopLoss], 1)
     }
 

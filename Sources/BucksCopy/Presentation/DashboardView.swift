@@ -48,17 +48,7 @@ struct DashboardView: View {
             onMaximumPositionMarginChange: viewModel.updateMaximumPositionMargin,
             onSignalConfirmationModeChange: viewModel.updateSignalConfirmationMode,
             onStartPaper: viewModel.startPaperBot,
-            onStopPaper: viewModel.stopPaperBot,
-            onBacktestSymbolChange: viewModel.selectBacktestSymbol,
-            onBacktestTimeframeChange: viewModel.selectBacktestTimeframe,
-            onBacktestStrategyChange: viewModel.updateBacktestStrategy,
-            onBacktestLeverageChange: viewModel.updateBacktestLeverage,
-            onBacktestMaximumRiskPerTradeChange: viewModel.updateBacktestMaximumRiskPerTrade,
-            onBacktestMaximumPositionMarginChange: viewModel.updateBacktestMaximumPositionMargin,
-            onBacktestInitialCapitalChange: viewModel.updateBacktestInitialCapital,
-            onBacktestSignalConfirmationModeChange: viewModel.updateBacktestSignalConfirmationMode,
-            onBacktestConfirmationComparisonEnabledChange: viewModel.updateBacktestConfirmationComparisonEnabled,
-            onRunBacktest: viewModel.runBacktest
+            onStopPaper: viewModel.stopPaperBot
         )
         .equatable()
     }
@@ -73,15 +63,7 @@ struct DashboardView: View {
             strategyDefinitions: viewModel.strategyDefinitions(for: viewModel.state.selectedTimeframe),
             strategyConfig: viewModel.state.strategyConfig,
             selectedLeverageRange: viewModel.selectedLeverageRange,
-            runState: viewModel.state.runState,
-            backtestConfiguration: viewModel.state.backtestConfiguration,
-            backtestStrategyDefinitions: viewModel.strategyDefinitions(
-                for: viewModel.state.backtestConfiguration.timeframe
-            ),
-            backtestLeverageRange: viewModel.backtestLeverageRange,
-            backtestStatus: viewModel.state.backtestStatus,
-            backtestResult: viewModel.state.backtestResult,
-            backtestComparisonResult: viewModel.state.backtestComparisonResult
+            runState: viewModel.state.runState
         )
     }
 
@@ -175,12 +157,6 @@ private struct DashboardLeftSnapshot: Equatable {
     let strategyConfig: StrategyConfig
     let selectedLeverageRange: ClosedRange<Int>
     let runState: StrategyRunState
-    let backtestConfiguration: BacktestConfiguration
-    let backtestStrategyDefinitions: [StrategyDefinition]
-    let backtestLeverageRange: ClosedRange<Int>
-    let backtestStatus: BacktestStatus
-    let backtestResult: BacktestResult?
-    let backtestComparisonResult: BacktestComparisonResult?
 
     var isConnected: Bool {
         if case .connected = credentialStatus {
@@ -203,16 +179,6 @@ private struct DashboardLeftColumn: View, Equatable {
     let onSignalConfirmationModeChange: (SignalConfirmationMode) -> Void
     let onStartPaper: () -> Void
     let onStopPaper: () -> Void
-    let onBacktestSymbolChange: (FuturesSymbol) -> Void
-    let onBacktestTimeframeChange: (CandleTimeframe) -> Void
-    let onBacktestStrategyChange: (String) -> Void
-    let onBacktestLeverageChange: (Int) -> Void
-    let onBacktestMaximumRiskPerTradeChange: (Decimal) -> Void
-    let onBacktestMaximumPositionMarginChange: (Decimal) -> Void
-    let onBacktestInitialCapitalChange: (Decimal) -> Void
-    let onBacktestSignalConfirmationModeChange: (SignalConfirmationMode) -> Void
-    let onBacktestConfirmationComparisonEnabledChange: (Bool) -> Void
-    let onRunBacktest: () -> Void
 
     static func == (lhs: DashboardLeftColumn, rhs: DashboardLeftColumn) -> Bool {
         lhs.snapshot == rhs.snapshot
@@ -253,25 +219,6 @@ private struct DashboardLeftColumn: View, Equatable {
                     runState: snapshot.runState,
                     onStart: onStartPaper,
                     onStop: onStopPaper
-                )
-                BacktestPanel(
-                    definitions: snapshot.backtestStrategyDefinitions,
-                    symbols: snapshot.watchlist,
-                    configuration: snapshot.backtestConfiguration,
-                    leverageRange: snapshot.backtestLeverageRange,
-                    status: snapshot.backtestStatus,
-                    result: snapshot.backtestResult,
-                    comparison: snapshot.backtestComparisonResult,
-                    onSymbolChange: onBacktestSymbolChange,
-                    onTimeframeChange: onBacktestTimeframeChange,
-                    onStrategyChange: onBacktestStrategyChange,
-                    onLeverageChange: onBacktestLeverageChange,
-                    onMaximumRiskPerTradeChange: onBacktestMaximumRiskPerTradeChange,
-                    onMaximumPositionMarginChange: onBacktestMaximumPositionMarginChange,
-                    onInitialCapitalChange: onBacktestInitialCapitalChange,
-                    onSignalConfirmationModeChange: onBacktestSignalConfirmationModeChange,
-                    onCompareSignalConfirmationChange: onBacktestConfirmationComparisonEnabledChange,
-                    onRun: onRunBacktest
                 )
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)

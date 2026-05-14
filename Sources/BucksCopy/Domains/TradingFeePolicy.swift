@@ -1,6 +1,11 @@
 import Foundation
 
 enum TradingFeePolicy {
+    enum ExitExecution {
+        case takeProfitLimit
+        case stopLossMarket
+    }
+
     static let futuresMakerFeeRate: Decimal = Decimal(2) / Decimal(10_000)
     static let futuresTakerFeeRate: Decimal = Decimal(6) / Decimal(10_000)
     static let referralRegisteredDiscountRate: Decimal = Decimal(2) / Decimal(10)
@@ -61,6 +66,38 @@ enum TradingFeePolicy {
             leverage: leverage,
             positionMarginRatio: positionMarginRatio
         )
+    }
+
+    static func netLeveragedReturnPercent(
+        grossLeveragedReturnPercent: Decimal,
+        exitExecution: ExitExecution,
+        leverage: Int,
+        positionMarginRatio: Decimal = 1
+    ) -> Decimal {
+        grossLeveragedReturnPercent - feePercent(
+            exitExecution: exitExecution,
+            leverage: leverage,
+            positionMarginRatio: positionMarginRatio
+        )
+    }
+
+    static func feePercent(
+        exitExecution: ExitExecution,
+        leverage: Int,
+        positionMarginRatio: Decimal = 1
+    ) -> Decimal {
+        switch exitExecution {
+        case .takeProfitLimit:
+            return marketEntryTakeProfitLimitFeePercent(
+                leverage: leverage,
+                positionMarginRatio: positionMarginRatio
+            )
+        case .stopLossMarket:
+            return marketEntryStopLossMarketFeePercent(
+                leverage: leverage,
+                positionMarginRatio: positionMarginRatio
+            )
+        }
     }
 
     private static func leveragedFeePercent(
