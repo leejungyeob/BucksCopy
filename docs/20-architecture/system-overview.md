@@ -151,9 +151,10 @@ References:
 - Strategy logic consumes closed candle data unless a future feature explicitly models in-progress candles.
 - Built-in strategies must emit `entryPrice`, `stopLoss`, and `takeProfit` together when they produce a signal.
 - Built-in strategy inputs are limited to local closed OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget.
-- Built-in strategy set: EMA trend pullback, VWMA reclaim, Bollinger/RSI reversion, volume breakout, RSI trend continuation, Keltner/ATR pullback, Donchian trend breakout, and SuperTrend/ATR continuation.
+- Built-in strategy set: blocked-candle short.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
-- Risk policy blocks signals below `2:1` reward/risk, invalid entry/stop/take layouts, and signals whose stop-loss percent multiplied by leverage is `>= 30%`.
+- Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, signals whose stop-loss percent multiplied by leverage is `>= 30%`, and signals whose leveraged take-profit does not exceed estimated round-trip trading fees.
+- Trading fee estimates use Bitget futures taker fees with a referral-registered discount assumption, applied on both entry and exit.
 - Backtesting is manual-only from the UI. It loads local candles and runs the strategy engine on a detached background task, then publishes only the summary result to SwiftUI.
 - Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
 - Paper execution records intent, simulated fill, rejected order, and risk decision separately.
@@ -161,9 +162,6 @@ References:
 
 ## Strategy Research Notes
 
-- RSI is used as a momentum/overbought-oversold filter, but trend ranges are considered so oversold is not treated as a standalone buy signal.
-- Bollinger Bands are used as a volatility envelope around a moving average; the mean-reversion strategy requires re-entry into the band.
-- ATR is used to scale stops to current volatility instead of using a fixed absolute price gap.
-- VWMA is used where volume should affect the moving average, and volume breakout requires current volume above its recent average.
-- Keltner channels and SuperTrend both depend on ATR, so they are used only with the common risk policy that rejects oversized leveraged stop risk.
-- Donchian breakout is retained as a lower-frequency trend candidate and should be ranked by actual local backtest results before enabling automation.
+- The active built-in strategy is blocked-candle short only.
+- Blocked-candle short requires three consecutive bullish candles with shrinking bodies, a third high below the second high, and a strong bearish reversal candle.
+- Previous broad indicator strategies are not active until local backtest data shows a usable edge.

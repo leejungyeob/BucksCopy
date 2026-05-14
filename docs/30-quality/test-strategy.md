@@ -48,9 +48,9 @@
 - strategy 매수 signal -> paper order intent 생성 -> risk policy 통과 -> simulated fill 기록
 - 백테스트 설정 -> BTCUSDT/ETHUSDT 중 선택 -> 시간봉 선택 -> 전략 선택 -> 수동 실행 -> UI는 즉시 running 상태가 되고 계산 완료 후 승률/손익비/차단 신호가 한국어로 표시
 - 백테스트 실행 중 전략/코인/시간봉 변경 -> 기존 작업 취소 -> 이전 결과가 새 설정에 섞이지 않음
-- 손익비 2:1 미만 또는 레버리지 반영 손절 위험 30% 이상 signal -> paper/backtest 모두 risk-blocked로 처리
+- 손익비 2:1 미만, 레버리지 반영 손절 위험 30% 이상, 또는 익절 기대 수익이 왕복 수수료 이하인 signal -> paper/backtest 모두 risk-blocked로 처리
 - 레버리지 stepper -> contract max가 10보다 크더라도 자동매매 설정은 10x 이하로 제한
-- NoopStrategy 선택 -> Paper start -> signal 없음 -> bot event log 저장
+- 선택한 전략 조건 미충족 -> Paper start -> signal 없음 -> bot event log 미저장
 
 ## 최소 검증 원칙
 

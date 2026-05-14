@@ -61,7 +61,7 @@ final class PaperTradingRunner {
                 timestamp: clock.now,
                 category: .paperOrder,
                 symbol: signal.symbol,
-                message: "Paper \(signal.side.rawValue) order created by \(signal.strategyID). Entry \(signal.entryPrice), stop loss \(signal.stopLoss), take profit \(signal.takeProfit), leverage \(config.leverage)x, reward/risk \(signal.plannedRewardRiskRatio?.riskText ?? "-"):1, leveraged stop risk \(signal.leveragedStopLossPercent(leverage: config.leverage)?.riskText ?? "-")%. Reason: \(signal.reason)"
+                message: "Paper \(signal.side.rawValue) order created by \(signal.strategyID). Entry \(signal.entryPrice), stop loss \(signal.stopLoss), take profit \(signal.takeProfit), leverage \(config.leverage)x, reward/risk \(signal.plannedRewardRiskRatio?.riskText ?? "-"):1, leveraged stop risk \(signal.leveragedStopLossPercent(leverage: config.leverage)?.riskText ?? "-")%, round-trip fee \(TradingFeePolicy.roundTripTakerFeePercent(leverage: config.leverage).riskText)%. Reason: \(signal.reason)"
             ))
         }
 

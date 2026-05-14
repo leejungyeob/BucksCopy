@@ -46,7 +46,7 @@
 - strategy가 order API를 직접 호출하지 않는가
 - Watchlist에 없는 심볼로 order intent가 만들어지지 않는가
 - 자동매매 레버리지가 10x 이하로 제한되는가
-- 손익비 2:1 미만 또는 레버리지 반영 손절 위험 30% 이상 signal이 차단되는가
+- 손익비 2:1 미만, 레버리지 반영 손절 위험 30% 이상, 또는 익절 기대 수익이 왕복 수수료 이하인 signal이 차단되는가
 - paper fill, rejected order, risk block이 구분되어 기록되는가
 - 잘못된 symbol/productType/timeframe 입력이 실패로 처리되는가
 - `POST /api/v2/mix/order/place-order` 호출 경로가 future live policy 전까지 실패로 닫혀 있는가

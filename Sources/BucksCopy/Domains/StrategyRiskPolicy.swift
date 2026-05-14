@@ -12,7 +12,9 @@ enum StrategyRiskPolicy {
     ) -> RiskDecision {
         let blockedReason: String?
 
-        if leverage > maximumAutoTradingLeverage {
+        if leverage <= 0 {
+            blockedReason = "자동매매 레버리지는 1x 이상이어야 합니다."
+        } else if leverage > maximumAutoTradingLeverage {
             blockedReason = "자동매매 레버리지는 최대 \(maximumAutoTradingLeverage)x까지만 허용됩니다."
         } else if signal.hasValidPriceLayout == false {
             blockedReason = "진입가, 손절가, 익절가 방향이 맞지 않아 신호를 제외했습니다."
@@ -26,6 +28,13 @@ enum StrategyRiskPolicy {
             blockedReason = "손절폭과 레버리지를 합친 예상 손실이 \(maximumLeveragedStopLossPercent.riskText)% 이상이라 제외했습니다. 현재 \(leveragedLoss.riskText)%"
         } else if signal.leveragedStopLossPercent(leverage: leverage) == nil {
             blockedReason = "손절 위험을 계산할 수 없어 신호를 제외했습니다."
+        } else if let leveragedReward = signal.leveragedTakeProfitPercent(leverage: leverage) {
+            let roundTripFee = TradingFeePolicy.roundTripTakerFeePercent(leverage: leverage)
+            blockedReason = leveragedReward <= roundTripFee
+                ? "익절 기대 수익이 왕복 수수료보다 작거나 같아 제외했습니다. 익절 \(leveragedReward.riskText)%, 수수료 \(roundTripFee.riskText)%"
+                : nil
+        } else if signal.leveragedTakeProfitPercent(leverage: leverage) == nil {
+            blockedReason = "익절 기대 수익을 계산할 수 없어 신호를 제외했습니다."
         } else {
             blockedReason = nil
         }
@@ -67,6 +76,12 @@ extension StrategySignal {
     func leveragedStopLossPercent(leverage: Int) -> Decimal? {
         guard let stopLossPercent else { return nil }
         return stopLossPercent * Decimal(leverage)
+    }
+
+    func leveragedTakeProfitPercent(leverage: Int) -> Decimal? {
+        guard entryPrice > 0, hasValidPriceLayout else { return nil }
+        let reward = absoluteDecimal(takeProfit - entryPrice)
+        return reward / entryPrice * 100 * Decimal(leverage)
     }
 }
 

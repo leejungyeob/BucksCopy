@@ -176,7 +176,7 @@ struct BacktestConfiguration: Codable, Equatable {
     static let `default` = BacktestConfiguration(
         symbol: FuturesSymbol("BTCUSDT"),
         timeframe: .fifteenMinutes,
-        strategyConfig: TrendPullbackStrategy().definition.defaultConfig
+        strategyConfig: BlockedCandleShortStrategy().definition.defaultConfig
     )
 }
 

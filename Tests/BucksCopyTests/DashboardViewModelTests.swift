@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class DashboardViewModelTests: XCTestCase {
-    func testTimeframeChangeReloadsCandlesForSelectedSymbol() throws {
+    func testTimeframeChangeReloadsCandlesForSelectedSymbol() async throws {
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
         let registry = StrategyRegistry()
@@ -27,6 +27,7 @@ final class DashboardViewModelTests: XCTestCase {
         viewModel.selectTimeframe(.oneHour)
 
         XCTAssertEqual(viewModel.state.selectedTimeframe, .oneHour)
+        try await waitUntil { viewModel.state.candles.count == 12 }
         XCTAssertEqual(viewModel.state.candles.count, 12)
         XCTAssertTrue(viewModel.state.candles.allSatisfy { $0.timeframe == .oneHour })
     }
@@ -222,7 +223,7 @@ final class DashboardViewModelTests: XCTestCase {
         state.backtestConfiguration = BacktestConfiguration(
             symbol: FuturesSymbol("BTCUSDT"),
             timeframe: .fifteenMinutes,
-            strategyConfig: TrendPullbackStrategy().definition.defaultConfig
+            strategyConfig: BlockedCandleShortStrategy().definition.defaultConfig
         )
 
         let candleRepository = InMemoryCandleRepository()

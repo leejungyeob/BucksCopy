@@ -142,10 +142,14 @@ struct BacktestEngine {
 
             let outcome: BacktestTradeOutcome = hitStop ? .loss : .win
             let exitPrice = hitStop ? signal.stopLoss : signal.takeProfit
-            let returnPercent = leveragedReturnPercent(
+            let grossReturnPercent = leveragedReturnPercent(
                 side: signal.side,
                 entryPrice: signal.entryPrice,
                 exitPrice: exitPrice,
+                leverage: leverage
+            )
+            let returnPercent = TradingFeePolicy.netLeveragedReturnPercent(
+                grossLeveragedReturnPercent: grossReturnPercent,
                 leverage: leverage
             )
 

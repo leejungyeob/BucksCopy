@@ -115,7 +115,7 @@ final class SQLiteStoresTests: XCTestCase {
             timestamp: Date(timeIntervalSince1970: 100),
             category: .bot,
             symbol: FuturesSymbol("ETHUSDT"),
-            message: "Paper bot evaluated Noop with no signal."
+            message: "Paper bot evaluated with no signal."
         )
 
         try firstStore.append(log)

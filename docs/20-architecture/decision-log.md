@@ -92,7 +92,7 @@
   - Bitget private API credential은 `APIKey`, `SecretKey`, `Passphrase` 세 값을 받고 Keychain-facing Data adapter에만 저장합니다.
   - Candle chart는 SwiftUI Canvas로 구현하고 `15m`, `1H`, `4H`, `12H`, `1D` 선택을 지원합니다.
   - 현재 포지션은 `GET /api/v2/mix/position/all-position`을 통해 읽기 전용으로 표시합니다.
-  - 자동매매 시작은 Paper runner만 실행하며, `NoopStrategy`와 strategy registry를 먼저 둡니다.
+  - 자동매매 시작은 Paper runner만 실행하며, strategy registry를 먼저 둡니다.
 - Consequences:
   - 모든 실제 내장 전략은 signal 생성 시 `entryPrice`, `stopLoss`, `takeProfit`을 함께 제공해야 합니다.
   - `POST /api/v2/mix/order/place-order`와 TPSL order API는 계속 disabled 상태입니다.
@@ -111,8 +111,23 @@
   - candle 로드와 전략 평가는 `Task.detached` 백그라운드 작업에서 수행하고, 결과 반영만 MainActor에서 처리합니다.
   - 백테스트 설정 UI는 menu picker 대신 버튼/리스트 기반 선택 컨트롤을 사용합니다.
   - 자동매매/백테스트 공통 risk policy는 최대 레버리지 `10x`, 최소 손익비 `2:1`, 레버리지 반영 손절 위험 `< 30%`를 강제합니다.
-  - 내장 전략은 EMA 눌림목, VWMA 회복, Bollinger/RSI 반등, 거래량 돌파, RSI 추세 지속, Keltner/ATR 눌림목, Donchian 추세 돌파, SuperTrend/ATR 지속으로 구성합니다.
+  - 내장 전략은 막힘봉 숏 단일 전략으로 구성하고, 이전 broad indicator 전략은 로컬 백테스트 edge가 확인될 때까지 제거합니다.
 - Consequences:
   - 백테스트 결과는 실제 로컬 candle 상태에 따라 달라지며, 50% 승률은 보장값이 아니라 앱에서 검증해야 하는 결과 기준입니다.
   - live order는 계속 비활성화하며, risk policy 통과는 Paper/backtest 허용 조건일 뿐 실거래 승인 조건이 아닙니다.
   - UI 패널 증가는 왼쪽 ScrollView와 compact BTC/ETH Watchlist로 흡수합니다.
+
+## 0007. Fee-Aware Paper and Backtest Risk Policy
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 백테스트 수익률이 거래 수수료를 반영하지 않으면 저폭 익절 전략의 기대값이 과대평가됩니다.
+  - 사용자는 레퍼럴 등록 기준 수수료를 반영하고, 익절 후에도 수수료보다 이익이 커야 한다는 조건을 요구했습니다.
+- Decision:
+  - Bitget futures taker fee를 entry/exit 양쪽에 적용한 왕복 수수료를 Paper/backtest 공통 정책으로 사용합니다.
+  - 레퍼럴 등록 할인은 중앙 `TradingFeePolicy` 상수로 분리하고, 실제 계정 수수료 조회가 붙기 전까지 기본 할인 가정으로 계산합니다.
+  - risk policy는 최소 `2:1` 손익비, 레버리지 반영 손절 위험 `< 30%`, 익절 기대 수익 `> 왕복 수수료`를 모두 만족해야 통과합니다.
+- Consequences:
+  - 백테스트 `netReturnPercent`와 trade return은 수수료 차감 후 값입니다.
+  - 실제 계정의 VIP/BGB/쿠폰/프로모션 수수료가 다르면 `TradingFeePolicy` 또는 향후 계정별 fee source를 교체해야 합니다.

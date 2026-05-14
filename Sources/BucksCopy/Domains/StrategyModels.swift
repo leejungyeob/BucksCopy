@@ -17,7 +17,7 @@ struct StrategyConfig: Codable, Equatable {
     var leverage: Int
     var parameters: [String: Decimal]
 
-    static let `default` = StrategyConfig(strategyID: NoopStrategy.identifier, leverage: 1, parameters: [:])
+    static let `default` = BlockedCandleShortStrategy().definition.defaultConfig
 }
 
 struct StrategyContext: Equatable {
@@ -84,21 +84,6 @@ protocol TradingStrategy {
     func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation
 }
 
-struct NoopStrategy: TradingStrategy {
-    static let identifier = "noop"
-
-    let definition = StrategyDefinition(
-        id: NoopStrategy.identifier,
-        name: "Noop",
-        summary: "No signal",
-        defaultConfig: .default
-    )
-
-    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
-        .noSignal
-    }
-}
-
 struct StrategyRegistry {
     private let strategies: [String: any TradingStrategy]
 
@@ -120,15 +105,7 @@ struct StrategyRegistry {
 
     private static var defaultStrategies: [any TradingStrategy] {
         [
-            NoopStrategy(),
-            TrendPullbackStrategy(),
-            VWMAReclaimStrategy(),
-            BollingerRSIReversionStrategy(),
-            VolumeBreakoutStrategy(),
-            RSITrendContinuationStrategy(),
-            KeltnerATRPullbackStrategy(),
-            DonchianTrendBreakoutStrategy(),
-            SuperTrendATRContinuationStrategy()
+            BlockedCandleShortStrategy()
         ]
     }
 }

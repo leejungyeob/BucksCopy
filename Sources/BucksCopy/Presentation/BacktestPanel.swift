@@ -14,7 +14,7 @@ struct BacktestPanel: View {
     let onRun: () -> Void
 
     private var strategyDefinitions: [StrategyDefinition] {
-        definitions.filter { $0.id != NoopStrategy.identifier }
+        definitions
     }
 
     var body: some View {
@@ -54,41 +54,38 @@ struct BacktestPanel: View {
                 }
 
                 SettingBlock(title: "전략") {
-                    ScrollView {
-                        LazyVStack(spacing: 4) {
-                            ForEach(strategyDefinitions) { definition in
-                                Button {
-                                    guard definition.id != configuration.strategyConfig.strategyID else { return }
-                                    onStrategyChange(definition.id)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 6) {
-                                            Text(definition.name)
-                                                .font(.callout.weight(.medium))
-                                                .lineLimit(1)
-                                            Spacer()
-                                            if definition.id == configuration.strategyConfig.strategyID {
-                                                Image(systemName: "checkmark")
-                                                    .font(.caption.weight(.semibold))
-                                                    .foregroundStyle(.green)
-                                            }
+                    VStack(spacing: 4) {
+                        ForEach(strategyDefinitions) { definition in
+                            Button {
+                                guard definition.id != configuration.strategyConfig.strategyID else { return }
+                                onStrategyChange(definition.id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(definition.name)
+                                            .font(.callout.weight(.medium))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        if definition.id == configuration.strategyConfig.strategyID {
+                                            Image(systemName: "checkmark")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.green)
                                         }
-                                        Text(definition.summary)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 6)
-                                    .background(definition.id == configuration.strategyConfig.strategyID ? Color.accentColor.opacity(0.14) : Color.clear)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    Text(definition.summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
                                 }
-                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(definition.id == configuration.strategyConfig.strategyID ? Color.accentColor.opacity(0.14) : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .frame(minHeight: 96, idealHeight: 118, maxHeight: 132)
                 }
 
                 Stepper(
@@ -248,7 +245,7 @@ private struct BacktestResultSummary: View {
                     }
                 }
 
-                Text("수수료와 슬리피지는 아직 반영하지 않았습니다.")
+                Text("레퍼럴 등록 taker 기준 왕복 수수료를 반영했습니다. 슬리피지는 미반영입니다.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             case (.running, nil):
