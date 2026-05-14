@@ -30,47 +30,47 @@ struct DashboardView: View {
     }
 
     private var leftColumn: some View {
-        ScrollView {
-            VStack(spacing: 10) {
-                if viewModel.state.isConnected {
-                    AccountSummaryPanel(viewModel: viewModel)
-                } else {
-                    CredentialPanel(viewModel: viewModel)
-                }
-                WatchlistPanel(
-                    symbols: viewModel.state.watchlist,
-                    selectedSymbol: viewModel.state.selectedSymbol,
-                    onSelect: viewModel.selectSymbol
+        DashboardLeftColumn(
+            snapshot: leftSnapshot,
+            onConnectCredential: { apiKey, secretKey, passphrase in
+                viewModel.connectCredential(
+                    apiKey: apiKey,
+                    secretKey: secretKey,
+                    passphrase: passphrase
                 )
-                StrategySettingsPanel(
-                    definitions: viewModel.strategyDefinitions,
-                    config: viewModel.state.strategyConfig,
-                    leverageRange: viewModel.selectedLeverageRange,
-                    onSelect: viewModel.updateStrategy,
-                    onLeverageChange: viewModel.updateLeverage
-                )
-                BotControlPanel(
-                    runState: viewModel.state.runState,
-                    onStart: viewModel.startPaperBot,
-                    onStop: viewModel.stopPaperBot
-                )
-                BacktestPanel(
-                    definitions: viewModel.strategyDefinitions,
-                    symbols: viewModel.state.watchlist,
-                    configuration: viewModel.state.backtestConfiguration,
-                    leverageRange: viewModel.backtestLeverageRange,
-                    status: viewModel.state.backtestStatus,
-                    result: viewModel.state.backtestResult,
-                    onSymbolChange: viewModel.selectBacktestSymbol,
-                    onTimeframeChange: viewModel.selectBacktestTimeframe,
-                    onStrategyChange: viewModel.updateBacktestStrategy,
-                    onLeverageChange: viewModel.updateBacktestLeverage,
-                    onRun: viewModel.runBacktest
-                )
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .scrollIndicators(.visible)
+            },
+            onRefreshCredential: viewModel.connectSavedCredential,
+            onDeleteCredential: viewModel.deleteCredential,
+            onSelectSymbol: viewModel.selectSymbol,
+            onSelectStrategy: viewModel.updateStrategy,
+            onLeverageChange: viewModel.updateLeverage,
+            onStartPaper: viewModel.startPaperBot,
+            onStopPaper: viewModel.stopPaperBot,
+            onBacktestSymbolChange: viewModel.selectBacktestSymbol,
+            onBacktestTimeframeChange: viewModel.selectBacktestTimeframe,
+            onBacktestStrategyChange: viewModel.updateBacktestStrategy,
+            onBacktestLeverageChange: viewModel.updateBacktestLeverage,
+            onRunBacktest: viewModel.runBacktest
+        )
+        .equatable()
+    }
+
+    private var leftSnapshot: DashboardLeftSnapshot {
+        DashboardLeftSnapshot(
+            credentialStatus: viewModel.state.credentialStatus,
+            account: viewModel.state.accounts.first,
+            positionCount: viewModel.state.positions.count,
+            watchlist: viewModel.state.watchlist,
+            selectedSymbol: viewModel.state.selectedSymbol,
+            strategyDefinitions: viewModel.strategyDefinitions,
+            strategyConfig: viewModel.state.strategyConfig,
+            selectedLeverageRange: viewModel.selectedLeverageRange,
+            runState: viewModel.state.runState,
+            backtestConfiguration: viewModel.state.backtestConfiguration,
+            backtestLeverageRange: viewModel.backtestLeverageRange,
+            backtestStatus: viewModel.state.backtestStatus,
+            backtestResult: viewModel.state.backtestResult
+        )
     }
 
     private var centerColumn: some View {
@@ -150,6 +150,102 @@ struct DashboardView: View {
         case .failed(let message):
             return "Candle load failed: \(message)"
         }
+    }
+}
+
+private struct DashboardLeftSnapshot: Equatable {
+    let credentialStatus: CredentialStatus
+    let account: AccountSnapshot?
+    let positionCount: Int
+    let watchlist: [FuturesSymbol]
+    let selectedSymbol: FuturesSymbol
+    let strategyDefinitions: [StrategyDefinition]
+    let strategyConfig: StrategyConfig
+    let selectedLeverageRange: ClosedRange<Int>
+    let runState: StrategyRunState
+    let backtestConfiguration: BacktestConfiguration
+    let backtestLeverageRange: ClosedRange<Int>
+    let backtestStatus: BacktestStatus
+    let backtestResult: BacktestResult?
+
+    var isConnected: Bool {
+        if case .connected = credentialStatus {
+            return true
+        }
+        return false
+    }
+}
+
+private struct DashboardLeftColumn: View, Equatable {
+    let snapshot: DashboardLeftSnapshot
+    let onConnectCredential: (String, String, String) -> Void
+    let onRefreshCredential: () -> Void
+    let onDeleteCredential: () -> Void
+    let onSelectSymbol: (FuturesSymbol) -> Void
+    let onSelectStrategy: (String) -> Void
+    let onLeverageChange: (Int) -> Void
+    let onStartPaper: () -> Void
+    let onStopPaper: () -> Void
+    let onBacktestSymbolChange: (FuturesSymbol) -> Void
+    let onBacktestTimeframeChange: (CandleTimeframe) -> Void
+    let onBacktestStrategyChange: (String) -> Void
+    let onBacktestLeverageChange: (Int) -> Void
+    let onRunBacktest: () -> Void
+
+    static func == (lhs: DashboardLeftColumn, rhs: DashboardLeftColumn) -> Bool {
+        lhs.snapshot == rhs.snapshot
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                if snapshot.isConnected {
+                    AccountSummaryPanel(
+                        account: snapshot.account,
+                        positionCount: snapshot.positionCount,
+                        onRefresh: onRefreshCredential,
+                        onDisconnect: onDeleteCredential
+                    )
+                } else {
+                    CredentialPanel(
+                        credentialStatus: snapshot.credentialStatus,
+                        onConnect: onConnectCredential
+                    )
+                }
+                WatchlistPanel(
+                    symbols: snapshot.watchlist,
+                    selectedSymbol: snapshot.selectedSymbol,
+                    onSelect: onSelectSymbol
+                )
+                StrategySettingsPanel(
+                    definitions: snapshot.strategyDefinitions,
+                    config: snapshot.strategyConfig,
+                    leverageRange: snapshot.selectedLeverageRange,
+                    onSelect: onSelectStrategy,
+                    onLeverageChange: onLeverageChange
+                )
+                BotControlPanel(
+                    runState: snapshot.runState,
+                    onStart: onStartPaper,
+                    onStop: onStopPaper
+                )
+                BacktestPanel(
+                    definitions: snapshot.strategyDefinitions,
+                    symbols: snapshot.watchlist,
+                    configuration: snapshot.backtestConfiguration,
+                    leverageRange: snapshot.backtestLeverageRange,
+                    status: snapshot.backtestStatus,
+                    result: snapshot.backtestResult,
+                    onSymbolChange: onBacktestSymbolChange,
+                    onTimeframeChange: onBacktestTimeframeChange,
+                    onStrategyChange: onBacktestStrategyChange,
+                    onLeverageChange: onBacktestLeverageChange,
+                    onRun: onRunBacktest
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .scrollIndicators(.visible)
     }
 }
 

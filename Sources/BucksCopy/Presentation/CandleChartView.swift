@@ -37,7 +37,7 @@ struct CandleChartView: View {
                 spacing: spacing
             )
 
-            Canvas { context, size in
+            Canvas(rendersAsynchronously: true) { context, size in
                 draw(
                     context: context,
                     size: size,
@@ -696,8 +696,15 @@ struct CandleChartView: View {
 
         let currentRightEdge = resolvedRightEdgeIndex(candleCount: candleCount)
         let anchorIndex = currentRightEdge - (chartRect.maxX - anchorX) / safeCandleSpacing(oldSpacing)
-        rightEdgeIndex = anchorIndex + (chartRect.maxX - anchorX) / safeCandleSpacing(nextSpacing)
+        let nextRightEdge = anchorIndex + (chartRect.maxX - anchorX) / safeCandleSpacing(nextSpacing)
+        rightEdgeIndex = nextRightEdge
         candleSpacing = nextSpacing
+        requestOlderCandlesIfNeeded(
+            rightEdgeIndex: nextRightEdge,
+            candleCount: candleCount,
+            chartRect: chartRect,
+            spacing: nextSpacing
+        )
     }
 
     private func chartDragTranslation(chartRect: CGRect) -> CGSize {

@@ -13,35 +13,32 @@ struct StrategySettingsPanel: View {
                 Text("자동매매 전략")
                     .font(.headline)
 
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(definitions) { definition in
-                            Button {
-                                guard definition.id != config.strategyID else { return }
-                                onSelect(definition.id)
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Text(definition.name)
-                                        .font(.callout)
-                                        .lineLimit(1)
-                                    Spacer()
-                                    if definition.id == config.strategyID {
-                                        Image(systemName: "checkmark")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.green)
-                                    }
+                VStack(spacing: 4) {
+                    ForEach(definitions) { definition in
+                        Button {
+                            guard definition.id != config.strategyID else { return }
+                            onSelect(definition.id)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(definition.name)
+                                    .font(.callout)
+                                    .lineLimit(1)
+                                Spacer()
+                                if definition.id == config.strategyID {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.green)
                                 }
-                                .frame(maxWidth: .infinity, minHeight: 26)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(definition.id == config.strategyID ? Color.accentColor.opacity(0.14) : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             }
-                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, minHeight: 26)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(definition.id == config.strategyID ? Color.accentColor.opacity(0.14) : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .frame(minHeight: 86, idealHeight: 104, maxHeight: 122)
 
                 Stepper(
                     value: Binding(

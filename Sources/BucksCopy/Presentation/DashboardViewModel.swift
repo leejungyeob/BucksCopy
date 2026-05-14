@@ -21,14 +21,16 @@ final class DashboardViewModel: ObservableObject {
     private let backtestEngine: BacktestEngine
     private let clock: Clock
     private let historyBackfillPolicy: CandleHistoryBackfillPolicy
+    private var localCandleLoadTask: Task<Void, Never>?
+    private var activeLocalCandleLoadID: UUID?
     private var candleRefreshTask: Task<Void, Never>?
     private var candleHistoryBackfillTask: Task<Void, Never>?
     private var candleStreamTask: Task<Void, Never>?
     private var positionStreamTask: Task<Void, Never>?
     private var positionPollingTask: Task<Void, Never>?
     private var backtestTask: Task<Void, Never>?
-    private let initialCandleDisplayLimit = 2_500
-    private var candleDisplayLimit = 2_500
+    private let initialCandleDisplayLimit = 1_200
+    private var candleDisplayLimit = 1_200
     private let maxCandleDisplayLimit = 50_000
     private var sessionLogs: [TradeEventLog] = []
     private var emittedSessionLogKeys: Set<String> = []
@@ -70,6 +72,7 @@ final class DashboardViewModel: ObservableObject {
     }
 
     deinit {
+        localCandleLoadTask?.cancel()
         candleRefreshTask?.cancel()
         candleHistoryBackfillTask?.cancel()
         candleStreamTask?.cancel()
@@ -394,26 +397,52 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func loadCandles() {
-        do {
-            state.candles = try candleRepository.loadCandles(
-                symbol: state.selectedSymbol,
-                timeframe: state.selectedTimeframe,
-                limit: candleDisplayLimit
-            )
-            state.candleStatus = .loaded(count: state.candles.count, source: "Local DB")
-        } catch {
-            state.candleStatus = .failed(message: sanitizedError(error))
-            appendSessionLog(.init(
-                timestamp: clock.now,
-                category: .bot,
-                severity: .warning,
-                message: sanitizedError(error)
-            ))
+        localCandleLoadTask?.cancel()
+
+        let requestID = UUID()
+        let symbol = state.selectedSymbol
+        let timeframe = state.selectedTimeframe
+        let limit = candleDisplayLimit
+        activeLocalCandleLoadID = requestID
+
+        localCandleLoadTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let candles = try await loadCandles(
+                    symbol: symbol,
+                    timeframe: timeframe,
+                    limit: limit
+                )
+                try Task.checkCancellation()
+                guard activeLocalCandleLoadID == requestID,
+                      state.selectedSymbol == symbol,
+                      state.selectedTimeframe == timeframe else {
+                    return
+                }
+                state.candles = candles
+                state.candleStatus = .loaded(count: candles.count, source: "Local DB")
+                finishLocalCandleLoad(id: requestID)
+            } catch is CancellationError {
+                finishLocalCandleLoad(id: requestID)
+            } catch {
+                guard activeLocalCandleLoadID == requestID else { return }
+                state.candleStatus = .failed(message: sanitizedError(error))
+                appendSessionLog(.init(
+                    timestamp: clock.now,
+                    category: .bot,
+                    severity: .warning,
+                    message: sanitizedError(error)
+                ))
+                finishLocalCandleLoad(id: requestID)
+            }
         }
     }
 
     func loadMoreLocalCandles() {
-        guard candleDisplayLimit < maxCandleDisplayLimit else { return }
+        guard candleDisplayLimit < maxCandleDisplayLimit,
+              activeLocalCandleLoadID == nil else {
+            return
+        }
         candleDisplayLimit = min(candleDisplayLimit * 2, maxCandleDisplayLimit)
         loadCandles()
     }
@@ -437,13 +466,14 @@ final class DashboardViewModel: ObservableObject {
                 timeframe: timeframe,
                 limit: 200
             )
-            try candleRepository.upsertCandles(remoteCandles)
+            try await upsertCandles(remoteCandles)
 
             guard state.selectedSymbol == symbol, state.selectedTimeframe == timeframe else {
                 return
             }
 
-            state.candles = try candleRepository.loadCandles(
+            cancelLocalCandleLoad()
+            state.candles = try await loadCandles(
                 symbol: symbol,
                 timeframe: timeframe,
                 limit: candleDisplayLimit
@@ -480,7 +510,8 @@ final class DashboardViewModel: ObservableObject {
         guard let candleBackfillRepository, let candleHistoryStore else { return }
 
         do {
-            if try candleHistoryStore.loadHistorySyncState(
+            if try await loadHistorySyncState(
+                store: candleHistoryStore,
                 symbol: symbol,
                 timeframe: timeframe
             )?.isComplete == true {
@@ -491,7 +522,7 @@ final class DashboardViewModel: ObservableObject {
                 return
             }
 
-            var endTime = try candleRepository.loadOldestCandleOpenTime(
+            var endTime = try await loadOldestCandleOpenTime(
                 symbol: symbol,
                 timeframe: timeframe
             ) ?? clock.now
@@ -512,54 +543,55 @@ final class DashboardViewModel: ObservableObject {
                     .sorted { $0.openTime < $1.openTime }
 
                 guard !olderCandles.isEmpty else {
-                    try candleHistoryStore.saveHistorySyncState(.init(
+                    try await saveHistorySyncState(.init(
                         productType: .usdtFutures,
                         symbol: symbol,
                         timeframe: timeframe,
                         isComplete: true,
-                        oldestOpenTime: try candleRepository.loadOldestCandleOpenTime(
+                        oldestOpenTime: try await loadOldestCandleOpenTime(
                             symbol: symbol,
                             timeframe: timeframe
                         ),
                         updatedAt: clock.now
-                    ))
+                    ), store: candleHistoryStore)
                     if state.selectedSymbol == symbol, state.selectedTimeframe == timeframe {
                         state.candleHistoryStatus = .complete(savedCount: savedCount)
                     }
                     return
                 }
 
-                try candleRepository.upsertCandles(olderCandles)
+                try await upsertCandles(olderCandles)
                 endTime = olderCandles.first?.openTime ?? endTime
                 savedCount += olderCandles.count
                 pageCount += 1
 
-                try candleHistoryStore.saveHistorySyncState(.init(
+                try await saveHistorySyncState(.init(
                     productType: .usdtFutures,
                     symbol: symbol,
                     timeframe: timeframe,
                     isComplete: false,
                     oldestOpenTime: endTime,
                     updatedAt: clock.now
-                ))
+                ), store: candleHistoryStore)
 
-                if state.selectedSymbol == symbol, state.selectedTimeframe == timeframe {
+                if shouldPublishHistoryProgress(pageCount: pageCount),
+                   state.selectedSymbol == symbol,
+                   state.selectedTimeframe == timeframe {
                     state.candleHistoryStatus = .syncing(savedCount: savedCount, pageCount: pageCount)
-                    loadCandles()
                 }
 
                 guard historyBackfillPolicy.pageDelayNanoseconds > 0 else { continue }
                 try await Task.sleep(nanoseconds: historyBackfillPolicy.pageDelayNanoseconds)
             }
 
-            try candleHistoryStore.saveHistorySyncState(.init(
+            try await saveHistorySyncState(.init(
                 productType: .usdtFutures,
                 symbol: symbol,
                 timeframe: timeframe,
                 isComplete: false,
                 oldestOpenTime: endTime,
                 updatedAt: clock.now
-            ))
+            ), store: candleHistoryStore)
             appendSessionLog(.init(
                 timestamp: clock.now,
                 category: .bot,
@@ -669,12 +701,8 @@ final class DashboardViewModel: ObservableObject {
                 candlesToUpsert.append(previous.withClosedState(true))
             }
             candlesToUpsert.append(candle)
-            try candleRepository.upsertCandles(candlesToUpsert)
-            state.candles = try candleRepository.loadCandles(
-                symbol: symbol,
-                timeframe: timeframe,
-                limit: candleDisplayLimit
-            )
+            try await upsertCandles(candlesToUpsert)
+            mergeLiveCandle(candle, symbol: symbol, timeframe: timeframe)
             state.candleStatus = .loaded(count: state.candles.count, source: "Bitget WebSocket")
         } catch {
             appendSessionLog(.init(
@@ -685,6 +713,39 @@ final class DashboardViewModel: ObservableObject {
                 message: sanitizedError(error)
             ))
         }
+    }
+
+    private func mergeLiveCandle(
+        _ candle: Candle,
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) {
+        guard state.selectedSymbol == symbol, state.selectedTimeframe == timeframe else {
+            return
+        }
+
+        var visibleCandles = state.candles
+        if let matchingIndex = visibleCandles.lastIndex(where: {
+            $0.symbol == symbol &&
+                $0.timeframe == timeframe &&
+                $0.openTime == candle.openTime
+        }) {
+            visibleCandles[matchingIndex] = candle
+        } else {
+            if let last = visibleCandles.last,
+               last.symbol == symbol,
+               last.timeframe == timeframe,
+               last.openTime < candle.openTime,
+               !last.isClosed {
+                visibleCandles[visibleCandles.count - 1] = last.withClosedState(true)
+            }
+            visibleCandles.append(candle)
+        }
+
+        if visibleCandles.count > candleDisplayLimit {
+            visibleCandles.removeFirst(visibleCandles.count - candleDisplayLimit)
+        }
+        state.candles = visibleCandles
     }
 
     func loadRecentLogs() {
@@ -779,6 +840,77 @@ final class DashboardViewModel: ObservableObject {
     private func cancelBacktestIfCurrent(_ configuration: BacktestConfiguration) {
         guard state.backtestConfiguration == configuration else { return }
         state.backtestStatus = .idle
+    }
+
+    private func loadCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        limit: Int
+    ) async throws -> [Candle] {
+        let repository = candleRepository
+        return try await Task.detached(priority: .userInitiated) {
+            try repository.loadCandles(
+                symbol: symbol,
+                timeframe: timeframe,
+                limit: limit
+            )
+        }.value
+    }
+
+    private func loadOldestCandleOpenTime(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) async throws -> Date? {
+        let repository = candleRepository
+        return try await Task.detached(priority: .utility) {
+            try repository.loadOldestCandleOpenTime(
+                symbol: symbol,
+                timeframe: timeframe
+            )
+        }.value
+    }
+
+    private func upsertCandles(_ candles: [Candle]) async throws {
+        guard !candles.isEmpty else { return }
+        let repository = candleRepository
+        try await Task.detached(priority: .utility) {
+            try repository.upsertCandles(candles)
+        }.value
+    }
+
+    private func loadHistorySyncState(
+        store: CandleHistoryStateStore,
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) async throws -> CandleHistorySyncState? {
+        try await Task.detached(priority: .utility) {
+            try store.loadHistorySyncState(symbol: symbol, timeframe: timeframe)
+        }.value
+    }
+
+    private func saveHistorySyncState(
+        _ state: CandleHistorySyncState,
+        store: CandleHistoryStateStore
+    ) async throws {
+        try await Task.detached(priority: .utility) {
+            try store.saveHistorySyncState(state)
+        }.value
+    }
+
+    private func shouldPublishHistoryProgress(pageCount: Int) -> Bool {
+        pageCount == 1 || pageCount.isMultiple(of: 10)
+    }
+
+    private func cancelLocalCandleLoad() {
+        localCandleLoadTask?.cancel()
+        localCandleLoadTask = nil
+        activeLocalCandleLoadID = nil
+    }
+
+    private func finishLocalCandleLoad(id: UUID) {
+        guard activeLocalCandleLoadID == id else { return }
+        activeLocalCandleLoadID = nil
+        localCandleLoadTask = nil
     }
 
     private func resetBacktest() {

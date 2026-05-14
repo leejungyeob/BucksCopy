@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct CredentialPanel: View {
-    @ObservedObject var viewModel: DashboardViewModel
+    let credentialStatus: CredentialStatus
+    let onConnect: (String, String, String) -> Void
+
     @State private var apiKey = ""
     @State private var secretKey = ""
     @State private var passphrase = ""
@@ -28,11 +30,7 @@ struct CredentialPanel: View {
                     .foregroundStyle(.secondary)
 
                 Button {
-                    viewModel.connectCredential(
-                        apiKey: apiKey,
-                        secretKey: secretKey,
-                        passphrase: passphrase
-                    )
+                    onConnect(apiKey, secretKey, passphrase)
                     apiKey = ""
                     secretKey = ""
                     passphrase = ""
@@ -47,7 +45,7 @@ struct CredentialPanel: View {
 
     @ViewBuilder
     private var statusBadge: some View {
-        switch viewModel.state.credentialStatus {
+        switch credentialStatus {
         case .disconnected:
             Badge(text: "Disconnected", color: .secondary)
         case .saved:
@@ -63,7 +61,10 @@ struct CredentialPanel: View {
 }
 
 struct AccountSummaryPanel: View {
-    @ObservedObject var viewModel: DashboardViewModel
+    let account: AccountSnapshot?
+    let positionCount: Int
+    let onRefresh: () -> Void
+    let onDisconnect: () -> Void
 
     var body: some View {
         DashboardPanel {
@@ -75,7 +76,7 @@ struct AccountSummaryPanel: View {
                     Badge(text: "Connected", color: .green)
                 }
 
-                if let account = viewModel.state.accounts.first {
+                if let account {
                     Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                         GridRow {
                             Text("Equity")
@@ -97,7 +98,7 @@ struct AccountSummaryPanel: View {
                         GridRow {
                             Text("Positions")
                                 .foregroundStyle(.secondary)
-                            Text("\(viewModel.state.positions.count)")
+                            Text("\(positionCount)")
                         }
                     }
                     .font(.callout.monospacedDigit())
@@ -109,11 +110,11 @@ struct AccountSummaryPanel: View {
 
                 HStack {
                     Button("Refresh") {
-                        viewModel.connectSavedCredential()
+                        onRefresh()
                     }
                     Spacer()
                     Button("Disconnect", role: .destructive) {
-                        viewModel.deleteCredential()
+                        onDisconnect()
                     }
                 }
             }

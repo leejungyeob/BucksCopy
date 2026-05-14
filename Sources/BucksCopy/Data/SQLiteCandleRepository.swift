@@ -31,7 +31,7 @@ final class SQLiteCandleRepository: CandleRepository, CandleHistoryStateStore {
             try statement.bind(ProductType.usdtFutures.rawValue, at: 1)
             try statement.bind(symbol.rawValue, at: 2)
             try statement.bind(timeframe.rawValue, at: 3)
-            let fetchLimit = max(limit * 5, limit)
+            let fetchLimit = max(limit, min(limit * 3, limit + 1_000))
             try statement.bind(fetchLimit, at: 4)
 
             var candles: [Candle] = []
