@@ -25,6 +25,31 @@ final class PaperTradingRunner {
         candles: [Candle],
         config: StrategyConfig
     ) throws -> StrategyEvaluation {
+        let candidate = try makeCandidate(
+            symbol: symbol,
+            watchlist: watchlist,
+            timeframe: timeframe,
+            candleOpenTime: candles.filter(\.isClosed).last?.openTime ?? clock.now,
+            candles: candles,
+            config: config
+        )
+
+        if let candidate {
+            try recordPaperOrder(candidate)
+            return .signal(candidate.signal)
+        }
+
+        return .noSignal
+    }
+
+    func makeCandidate(
+        symbol: FuturesSymbol,
+        watchlist: [FuturesSymbol],
+        timeframe: CandleTimeframe,
+        candleOpenTime: Date,
+        candles: [Candle],
+        config: StrategyConfig
+    ) throws -> PaperTradeCandidate? {
         guard watchlist.contains(symbol) else {
             throw TradingDomainError.selectedSymbolNotInWatchlist(symbol)
         }
@@ -70,7 +95,7 @@ final class PaperTradingRunner {
                     symbol: signal.symbol,
                     message: confirmationDecision.reason
                 ))
-                return .noSignal
+                return nil
             }
 
             let confirmedSignal = signal.addingConfirmation(confirmationDecision.score)
@@ -90,17 +115,46 @@ final class PaperTradingRunner {
                     symbol: confirmedSignal.symbol,
                     message: riskDecision.reason
                 ))
-                return .noSignal
+                return nil
             }
 
-            try logStore.append(TradeEventLog(
-                timestamp: clock.now,
-                category: .paperOrder,
-                symbol: confirmedSignal.symbol,
-                message: "Paper \(confirmedSignal.side.rawValue) order created by \(confirmedSignal.strategyID) on \(timeframe.rawValue). Entry \(confirmedSignal.entryPrice), stop loss \(confirmedSignal.stopLoss), TP1 \(confirmedSignal.partialTakeProfit) 50%, TP2 \(confirmedSignal.takeProfit) 50%, TP1 이후 SL \(confirmedSignal.profitLockStopLossAfterPartialTakeProfit), leverage \(config.leverage)x, margin \((riskDecision.positionMarginRatio * 100).riskText)%, account risk \(riskDecision.accountRiskPercent.riskText)%, reward/risk \(confirmedSignal.plannedRewardRiskRatio?.riskText ?? "-"):1, TP fee \(TradingFeePolicy.marketEntryTakeProfitLimitFeePercent(leverage: config.leverage, positionMarginRatio: riskDecision.positionMarginRatio).riskText)%, SL fee \(TradingFeePolicy.marketEntryStopLossMarketFeePercent(leverage: config.leverage, positionMarginRatio: riskDecision.positionMarginRatio).riskText)%. Reason: \(confirmedSignal.reason)"
-            ))
+            return PaperTradeCandidate(
+                signal: confirmedSignal,
+                timeframe: timeframe,
+                candleOpenTime: candleOpenTime,
+                leverage: config.leverage,
+                riskDecision: riskDecision
+            )
         }
 
-        return evaluation
+        return nil
+    }
+
+    func recordPaperOrder(
+        _ candidate: PaperTradeCandidate,
+        portfolioDecisionReason: String? = nil
+    ) throws {
+        let confirmedSignal = candidate.signal
+        let riskDecision = candidate.riskDecision
+        let decisionText = portfolioDecisionReason.map { " Portfolio decision: \($0)." } ?? ""
+
+        try logStore.append(TradeEventLog(
+            timestamp: clock.now,
+            category: .paperOrder,
+            symbol: confirmedSignal.symbol,
+            message: "Paper \(confirmedSignal.side.rawValue) order created by \(confirmedSignal.strategyID) on \(candidate.timeframe.rawValue). Entry \(confirmedSignal.entryPrice), stop loss \(confirmedSignal.stopLoss), TP1 \(confirmedSignal.partialTakeProfit) 50%, TP2 \(confirmedSignal.takeProfit) 50%, TP1 이후 SL \(confirmedSignal.profitLockStopLossAfterPartialTakeProfit), leverage \(candidate.leverage)x, margin \((riskDecision.positionMarginRatio * 100).riskText)%, account risk \(riskDecision.accountRiskPercent.riskText)%, reward/risk \(confirmedSignal.plannedRewardRiskRatio?.riskText ?? "-"):1, TP fee \(TradingFeePolicy.marketEntryTakeProfitLimitFeePercent(leverage: candidate.leverage, positionMarginRatio: riskDecision.positionMarginRatio).riskText)%, SL fee \(TradingFeePolicy.marketEntryStopLossMarketFeePercent(leverage: candidate.leverage, positionMarginRatio: riskDecision.positionMarginRatio).riskText)%. Reason: \(confirmedSignal.reason).\(decisionText)"
+        ))
+    }
+
+    func recordPortfolioDecision(
+        symbol: FuturesSymbol?,
+        message: String
+    ) throws {
+        try logStore.append(TradeEventLog(
+            timestamp: clock.now,
+            category: .signal,
+            symbol: symbol,
+            message: message
+        ))
     }
 }

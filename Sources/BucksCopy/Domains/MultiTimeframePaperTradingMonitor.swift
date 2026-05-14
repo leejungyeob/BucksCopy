@@ -55,10 +55,13 @@ actor MultiTimeframePaperTradingMonitor {
         watchlist: [FuturesSymbol],
         leverageBySymbol: [FuturesSymbol: Int],
         maximumRiskPerTradePercentBySymbol: [FuturesSymbol: Decimal] = [:],
-        maximumPositionMarginPercentBySymbol: [FuturesSymbol: Decimal] = [:]
+        maximumPositionMarginPercentBySymbol: [FuturesSymbol: Decimal] = [:],
+        openPositions: [PositionSnapshot] = [],
+        accountEquity: Decimal? = nil
     ) async -> PaperMonitorRunResult {
         var evaluations: [PaperMonitorEvaluation] = []
         var failures: [PaperMonitorFailure] = []
+        var candidates: [PaperTradeCandidate] = []
 
         for symbol in watchlist {
             for timeframe in CandleTimeframe.allCases {
@@ -84,20 +87,24 @@ actor MultiTimeframePaperTradingMonitor {
                             ?? config.maximumPositionMarginPercent
 
                         do {
-                            let evaluation = try paperRunner.start(
+                            let candidate = try paperRunner.makeCandidate(
                                 symbol: symbol,
                                 watchlist: watchlist,
                                 timeframe: timeframe,
+                                candleOpenTime: latestCandle.openTime,
                                 candles: candles,
                                 config: config
                             )
                             evaluatedCandleKeys.insert(key)
+                            if let candidate {
+                                candidates.append(candidate)
+                            }
                             evaluations.append(PaperMonitorEvaluation(
                                 symbol: symbol,
                                 timeframe: timeframe,
                                 strategyID: definition.id,
                                 candleOpenTime: latestCandle.openTime,
-                                evaluation: evaluation
+                                evaluation: candidate.map { .signal($0.signal) } ?? .noSignal
                             ))
                         } catch {
                             failures.append(PaperMonitorFailure(
@@ -121,7 +128,48 @@ actor MultiTimeframePaperTradingMonitor {
             }
         }
 
+        do {
+            try recordPortfolioDecision(
+                candidates: candidates,
+                openPositions: openPositions,
+                accountEquity: accountEquity
+            )
+        } catch {
+            failures.append(PaperMonitorFailure(
+                symbol: candidates.first?.signal.symbol ?? openPositions.first?.symbol ?? watchlist.first ?? FuturesSymbol("UNKNOWN"),
+                timeframe: candidates.first?.timeframe ?? .fifteenMinutes,
+                strategyID: candidates.first?.signal.strategyID,
+                message: String(describing: error)
+            ))
+        }
+
         return PaperMonitorRunResult(evaluations: evaluations, failures: failures)
+    }
+
+    private func recordPortfolioDecision(
+        candidates: [PaperTradeCandidate],
+        openPositions: [PositionSnapshot],
+        accountEquity: Decimal?
+    ) throws {
+        let decision = PortfolioSignalSelectionPolicy.decision(
+            candidates: candidates,
+            openPositions: openPositions,
+            accountEquity: accountEquity
+        )
+
+        switch decision {
+        case .noAction:
+            break
+        case .enter(let candidate, let reason):
+            try paperRunner.recordPaperOrder(candidate, portfolioDecisionReason: reason)
+        case .replace(_, let candidate, let reason):
+            try paperRunner.recordPaperOrder(candidate, portfolioDecisionReason: "Paper replacement policy. \(reason)")
+        case .holdExisting(_, let bestCandidate, let reason):
+            try paperRunner.recordPortfolioDecision(
+                symbol: bestCandidate.signal.symbol,
+                message: "Portfolio signal held: \(reason)"
+            )
+        }
     }
 
     private func latestCandles(

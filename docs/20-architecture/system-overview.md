@@ -157,6 +157,8 @@ References:
 - Strategy signals use the main strategy output and risk policy as the default trading path. Auxiliary indicator Gate data has been removed from the active decision path after validation showed weak path stability.
 - Paper monitoring is independent from the chart-selected timeframe. When Paper is running, it evaluates every Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D`, using the recommended strategy list for each timeframe.
 - Paper monitoring stores a `(symbol, timeframe, strategy, closed candle open time)` key to avoid generating duplicate paper orders from the same closed candle.
+- Paper monitoring now collects all same-run strategy/timeframe candidates first, then selects a single portfolio candidate. Priority is deterministic: highest planned reward/risk first, then highest expected net profit amount, then lower account risk.
+- If a new candidate outranks the best open position, Paper records a replacement decision: the current position is treated as market-close first, then the selected candidate becomes the new entry target. This remains a Paper decision until live execution is explicitly accepted.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
 - Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, leverage above `10x`, and signals whose take-profit cannot cover estimated round-trip trading fees.
 - Risk policy sizes each position so `stop-loss percent × leverage × margin allocation <= configured max loss per trade`. The default max loss per trade is `5%`, and UI configuration is capped at `15%`.
@@ -189,6 +191,8 @@ References:
 - When a closed candle arrives for a timeframe, every enabled strategy for that symbol and timeframe can be evaluated.
 - The visible chart timeframe is only a viewing/editing context. It must not disable monitoring of other enabled timeframes while Paper trading is running.
 - More active combinations should increase trade opportunities, but execution must still cap risk by Watchlist symbol, leverage, open position state, duplicate signal handling, and opposite-signal handling.
+- Portfolio arbitration is global for the Paper monitor run: simultaneous candidates compete with open positions, and only the top-ranked candidate can create a Paper order.
+- Open positions with TP/SL data are scored by remaining reward/risk from mark price to TP/SL and expected remaining profit amount. Positions without enough TP/SL data receive the lowest comparable priority because their remaining reward/risk cannot be proven.
 - Portfolio backtesting should eventually report both per-combination metrics and aggregate portfolio metrics so weak combinations can be removed without disabling the whole strategy family.
 
 ## Strategy Research Notes

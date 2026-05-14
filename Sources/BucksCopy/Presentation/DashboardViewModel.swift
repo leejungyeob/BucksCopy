@@ -868,7 +868,9 @@ final class DashboardViewModel: ObservableObject {
             watchlist: watchlist,
             leverageBySymbol: leverageBySymbol,
             maximumRiskPerTradePercentBySymbol: maximumRiskPerTradePercentBySymbol,
-            maximumPositionMarginPercentBySymbol: maximumPositionMarginPercentBySymbol
+            maximumPositionMarginPercentBySymbol: maximumPositionMarginPercentBySymbol,
+            openPositions: state.positions.filter { watchlist.contains($0.symbol) },
+            accountEquity: state.accounts.first { $0.marginCoin.uppercased() == "USDT" }?.accountEquity
         )
 
         if !result.evaluations.isEmpty {

@@ -52,6 +52,10 @@
 - 다중 전략 포트폴리오 설정 -> 한 시간봉에 여러 전략 활성화 -> closed candle마다 해당 symbol/timeframe의 활성 전략을 모두 평가
 - Paper monitor 시작 -> 현재 차트가 15m를 보고 있어도 Watchlist의 `15m`, `1H`, `4H`, `12H`, `1D` 닫힌 캔들을 모두 평가 -> 추천 전략 신호가 있으면 Paper 로그에 해당 시간봉이 기록
 - 같은 `symbol/timeframe/strategy/closed candle`을 반복 평가 -> Paper order가 중복 생성되지 않음
+- 같은 실행 주기에 여러 추천 전략 신호가 발생 -> 손익비가 가장 높은 후보 1개만 Paper order로 기록
+- 손익비가 같은 여러 신호가 발생 -> 계좌 기준 기대순익 금액이 가장 큰 후보를 선택
+- 진행 중 포지션보다 우선순위가 높은 새 신호 발생 -> Paper replacement decision에 기존 포지션 시장가 정리 후 신규 진입 대상으로 기록
+- 진행 중 포지션의 남은 손익비/기대수익이 새 신호 이상 -> 새 신호를 보류하고 기존 포지션 유지 decision 기록
 - 선택 화면 시간봉 변경 -> 표시 candle과 설정 UI만 바뀌고 실행 중 Paper monitor의 다른 시간봉 감시는 유지
 - 전략 × 시간봉 백테스트 -> 조합별 승률/순손익/거래 수/최대 낙폭 표시 -> 포트폴리오 합산 성과와 분리해 비교 가능
 - 동일 symbol/timeframe에서 여러 전략이 동시에 signal 생성 -> 중복 진입, 같은 방향 추가 진입, 반대 신호 처리 정책이 deterministic하게 적용

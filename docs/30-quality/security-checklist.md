@@ -45,7 +45,8 @@
 - live order path가 기본 비활성화되어 있는가
 - strategy가 order API를 직접 호출하지 않는가
 - Watchlist에 없는 심볼로 order intent가 만들어지지 않는가
-- 다중 전략이 같은 symbol/timeframe에서 동시에 signal을 만들 때 중복 주문과 과다 노출이 정책적으로 차단되는가
+- 다중 전략/시간봉이 동시에 signal을 만들 때 포트폴리오 중재 정책이 Paper order를 1개로 제한해 중복 주문과 과다 노출을 차단하는가
+- 진행 중 포지션을 새 신호로 교체하는 판단이 live order API 호출이 아니라 Paper decision 로그에만 남는가
 - 시간봉별 여러 전략 활성화가 Watchlist, 레버리지, 기존 포지션 제한을 우회하지 않는가
 - 자동매매 레버리지가 10x 이하로 제한되는가
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal이 차단되는가
