@@ -51,8 +51,11 @@
 - 다중 전략 포트폴리오 설정 -> 한 시간봉에 여러 전략 활성화 -> closed candle마다 해당 symbol/timeframe의 활성 전략을 모두 평가
 - 전략 × 시간봉 백테스트 -> 조합별 승률/순손익/거래 수/최대 낙폭 표시 -> 포트폴리오 합산 성과와 분리해 비교 가능
 - 동일 symbol/timeframe에서 여러 전략이 동시에 signal 생성 -> 중복 진입, 같은 방향 추가 진입, 반대 신호 처리 정책이 deterministic하게 적용
-- 손익비 2:1 미만, 레버리지 반영 손절 위험 30% 이상, 또는 익절 기대 수익이 왕복 수수료 이하인 signal -> paper/backtest 모두 risk-blocked로 처리
-- 수수료 모델 -> 현 구현은 entry/exit taker 보수 계산 -> 향후 order-type-aware 모델은 entry taker, take-profit maker 가능, stop-loss taker를 결과별로 계산
+- 손익비 2:1 미만, 레버리지 반영 손절 위험 30% 이상, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal -> paper/backtest 모두 risk-blocked로 처리
+- 수수료 모델 -> entry taker, take-profit maker, stop-loss taker를 결과별로 계산
+- 진입 체결 후 보호 주문 설치 -> TP limit 보호 주문과 SL market 보호 주문이 모두 거래소에 등록되어야 protected 상태로 처리
+- TP/SL 보호 주문 등록 실패 -> 실패한 주문별 최소 5회 재시도 -> 재시도 소진 시 protection-failed 상태와 fail-closed 경로 확인
+- 앱 재시작 -> 현재 포지션과 거래소-side TP/SL 보호 주문을 조회 -> 누락된 보호 주문 감지
 - 레버리지 stepper -> contract max가 10보다 크더라도 자동매매 설정은 10x 이하로 제한
 - 선택한 전략 조건 미충족 -> Paper start -> signal 없음 -> bot event log 미저장
 

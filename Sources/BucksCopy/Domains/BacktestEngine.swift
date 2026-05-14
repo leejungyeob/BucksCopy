@@ -150,6 +150,7 @@ struct BacktestEngine {
             )
             let returnPercent = TradingFeePolicy.netLeveragedReturnPercent(
                 grossLeveragedReturnPercent: grossReturnPercent,
+                outcome: outcome,
                 leverage: leverage
             )
 

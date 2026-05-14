@@ -48,8 +48,11 @@
 - 다중 전략이 같은 symbol/timeframe에서 동시에 signal을 만들 때 중복 주문과 과다 노출이 정책적으로 차단되는가
 - 시간봉별 여러 전략 활성화가 Watchlist, 레버리지, 기존 포지션 제한을 우회하지 않는가
 - 자동매매 레버리지가 10x 이하로 제한되는가
-- 손익비 2:1 미만, 레버리지 반영 손절 위험 30% 이상, 또는 익절 기대 수익이 왕복 수수료 이하인 signal이 차단되는가
+- 손익비 2:1 미만, 레버리지 반영 손절 위험 30% 이상, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal이 차단되는가
 - 수수료 모델이 market/taker와 limit/maker 가정을 명시하고, maker 체결을 보장할 수 없는 주문을 maker로 과대평가하지 않는가
+- 진입 체결 후 TP/SL 거래소-side 보호 주문이 모두 등록되기 전까지 protected 상태로 표시하지 않는가
+- TP/SL 보호 주문 등록 실패 시 실패한 주문별 최소 5회 재시도하고, 소진 시 fail-closed 정책으로 이어지는가
+- TP/SL clientOid가 재시도 중복 주문을 줄일 수 있도록 안정적으로 생성되는가
 - paper fill, rejected order, risk block이 구분되어 기록되는가
 - 잘못된 symbol/productType/timeframe 입력이 실패로 처리되는가
 - `POST /api/v2/mix/order/place-order` 호출 경로가 future live policy 전까지 실패로 닫혀 있는가

@@ -101,7 +101,8 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(log.category, .paperOrder)
         XCTAssertTrue(log.message.contains("Paper buy order"))
         XCTAssertTrue(log.message.contains("leverage 2x"))
-        XCTAssertTrue(log.message.contains("round-trip fee 0.19%"))
+        XCTAssertTrue(log.message.contains("TP fee 0.13%"))
+        XCTAssertTrue(log.message.contains("SL fee 0.19%"))
         XCTAssertTrue(log.isPersistentTradingRecord)
     }
 
@@ -145,13 +146,21 @@ final class StrategyTests: XCTestCase {
         XCTAssertTrue(decision.reason.contains("30"))
     }
 
-    func testFeePolicyUsesReferralRegisteredTakerFee() {
+    func testFeePolicyUsesReferralRegisteredMakerAndTakerFee() {
+        XCTAssertEqual(
+            TradingFeePolicy.referralRegisteredFuturesMakerFeeRate,
+            Decimal(16) / Decimal(100_000)
+        )
         XCTAssertEqual(
             TradingFeePolicy.referralRegisteredFuturesTakerFeeRate,
             Decimal(48) / Decimal(100_000)
         )
         XCTAssertEqual(
-            TradingFeePolicy.roundTripTakerFeePercent(leverage: 2),
+            TradingFeePolicy.marketEntryTakeProfitLimitFeePercent(leverage: 2),
+            Decimal(string: "0.128")!
+        )
+        XCTAssertEqual(
+            TradingFeePolicy.marketEntryStopLossMarketFeePercent(leverage: 2),
             Decimal(string: "0.192")!
         )
     }
@@ -206,7 +215,41 @@ final class StrategyTests: XCTestCase {
         XCTAssertGreaterThan(result.totalTrades, 0)
         XCTAssertEqual(result.winRatePercent, 100)
         XCTAssertGreaterThanOrEqual(result.averageRewardRiskRatio, 2)
-        XCTAssertEqual(result.trades.first?.leveragedReturnPercent, Decimal(string: "19.904"))
+        XCTAssertEqual(result.trades.first?.leveragedReturnPercent, Decimal(string: "19.936"))
+    }
+
+    func testBacktestEngineAppliesStopLossMarketFeeToLosingTrades() throws {
+        let registry = StrategyRegistry(strategies: [FixtureSignalStrategy()])
+        let engine = BacktestEngine(strategyRegistry: registry)
+        let candles = DemoDataSeeder.makeCandles(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            count: 80
+        ).map { candle in
+            Candle(
+                productType: candle.productType,
+                symbol: candle.symbol,
+                timeframe: candle.timeframe,
+                openTime: candle.openTime,
+                open: 100,
+                high: 101,
+                low: 89,
+                close: 100,
+                volume: candle.volume,
+                isClosed: true
+            )
+        }
+
+        let result = try engine.run(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            candles: candles,
+            config: StrategyConfig(strategyID: FixtureSignalStrategy.identifier, leverage: 1, parameters: [:])
+        )
+
+        XCTAssertGreaterThan(result.totalTrades, 0)
+        XCTAssertEqual(result.losingTrades, result.totalTrades)
+        XCTAssertEqual(result.trades.first?.leveragedReturnPercent, Decimal(string: "-10.096"))
     }
 
     func testBlockedCandleShortStrategyCreatesSignalWithDefinedLevels() throws {

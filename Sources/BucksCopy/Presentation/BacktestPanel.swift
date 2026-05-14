@@ -245,7 +245,7 @@ private struct BacktestResultSummary: View {
                     }
                 }
 
-                Text("레퍼럴 등록 taker 기준 왕복 수수료를 반영했습니다. 슬리피지는 미반영입니다.")
+                Text("진입 시장가, 익절 예약 지정가, 손절 예약 시장가 수수료를 반영했습니다. 슬리피지는 미반영입니다.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             case (.running, nil):

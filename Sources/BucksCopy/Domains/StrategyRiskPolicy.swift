@@ -29,9 +29,9 @@ enum StrategyRiskPolicy {
         } else if signal.leveragedStopLossPercent(leverage: leverage) == nil {
             blockedReason = "손절 위험을 계산할 수 없어 신호를 제외했습니다."
         } else if let leveragedReward = signal.leveragedTakeProfitPercent(leverage: leverage) {
-            let roundTripFee = TradingFeePolicy.roundTripTakerFeePercent(leverage: leverage)
-            blockedReason = leveragedReward <= roundTripFee
-                ? "익절 기대 수익이 왕복 수수료보다 작거나 같아 제외했습니다. 익절 \(leveragedReward.riskText)%, 수수료 \(roundTripFee.riskText)%"
+            let takeProfitFee = TradingFeePolicy.marketEntryTakeProfitLimitFeePercent(leverage: leverage)
+            blockedReason = leveragedReward <= takeProfitFee
+                ? "익절 기대 수익이 진입 시장가와 익절 예약 주문 수수료보다 작거나 같아 제외했습니다. 익절 \(leveragedReward.riskText)%, 수수료 \(takeProfitFee.riskText)%"
                 : nil
         } else if signal.leveragedTakeProfitPercent(leverage: leverage) == nil {
             blockedReason = "익절 기대 수익을 계산할 수 없어 신호를 제외했습니다."

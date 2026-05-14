@@ -78,6 +78,57 @@ final class BitgetRESTClient {
         return decoded.data
     }
 
+    func sendSignedPOST<Response: Decodable, Body: Encodable>(
+        path: String,
+        body: Body
+    ) async throws -> Response {
+        guard let credential = try credentialStore.load(), credential.isComplete else {
+            throw BitgetClientError.missingCredential
+        }
+        guard let url = Self.url(baseURL: baseURL, path: path, queryItems: []) else {
+            throw BitgetClientError.invalidURL
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let bodyData = try encoder.encode(body)
+        let bodyString = String(data: bodyData, encoding: .utf8) ?? ""
+        let timestamp = String(Int(clock.now.timeIntervalSince1970 * 1000))
+        let signature = signer.sign(
+            timestamp: timestamp,
+            method: "POST",
+            requestPath: path,
+            queryString: "",
+            body: bodyString,
+            secretKey: credential.secretKey
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = bodyData
+        request.addValue(credential.apiKey, forHTTPHeaderField: "ACCESS-KEY")
+        request.addValue(signature, forHTTPHeaderField: "ACCESS-SIGN")
+        request.addValue(credential.passphrase, forHTTPHeaderField: "ACCESS-PASSPHRASE")
+        request.addValue(timestamp, forHTTPHeaderField: "ACCESS-TIMESTAMP")
+        request.addValue("en-US", forHTTPHeaderField: "locale")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await session.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200..<300).contains(httpResponse.statusCode) {
+            throw BitgetClientError.httpStatus(httpResponse.statusCode)
+        }
+        guard !data.isEmpty else {
+            throw BitgetClientError.emptyData
+        }
+
+        let decoded = try JSONDecoder().decode(BitgetResponse<Response>.self, from: data)
+        guard decoded.code == "00000" else {
+            throw BitgetClientError.apiError(code: decoded.code, message: decoded.msg)
+        }
+        return decoded.data
+    }
+
     func sendPublicGET<Response: Decodable>(
         path: String,
         queryItems: [URLQueryItem]

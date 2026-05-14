@@ -117,6 +117,8 @@ enum TradingDomainError: Error, Equatable {
     case strategyNotFound(String)
     case liveTradingDisabled
     case selectedSymbolNotInWatchlist(FuturesSymbol)
+    case invalidProtectionPlan(String)
+    case protectionOrderRetryExhausted(kind: ExchangeProtectionOrderKind, attempts: Int)
 }
 
 struct OrderIntent: Codable, Equatable, Identifiable {

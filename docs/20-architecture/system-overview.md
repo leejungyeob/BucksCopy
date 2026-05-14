@@ -67,6 +67,7 @@ flowchart LR
 | Public WS | `candle1m` | Default live candle input for internal aggregation |
 | Private REST | `GET /api/v2/mix/account/accounts` | Credential test and account snapshot |
 | Private REST | `GET /api/v2/mix/position/all-position` | Position snapshot |
+| Private REST | `POST /api/v2/mix/order/place-tpsl-order` | Exchange-side TP/SL protection order adapter; not auto-enabled while live entry is disabled |
 | Private WS | `orders` | Order status tracking structure |
 | Disabled | `POST /api/v2/mix/order/place-order` | Live order placement blocked until future policy |
 
@@ -143,6 +144,7 @@ References:
 - [Bitget Futures Candle Data](https://www.bitget.com/api-doc/classic/contract/market/Get-Candle-Data)
 - [Bitget Futures Historical Candle Data](https://www.bitget.com/api-doc/contract/market/Get-History-Candle-Data)
 - [Bitget Futures Place Order](https://www.bitget.com/api-doc/contract/trade/Place-Order)
+- [Bitget Futures Stop-profit and Stop-loss Plan Orders](https://www.bitget.com/api-doc/contract/plan/Place-Tpsl-Order)
 - [Bitget Futures Order Channel](https://www.bitget.com/api-doc/classic/contract/websocket/private/Order-Channel)
 
 ## Trading Defaults
@@ -154,15 +156,23 @@ References:
 - Built-in strategy set: blocked-candle short.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
 - Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, signals whose stop-loss percent multiplied by leverage is `>= 30%`, and signals whose leveraged take-profit does not exceed estimated round-trip trading fees.
-- Current trading fee estimates are conservative: Bitget futures taker fees with a referral-registered discount assumption are applied on both entry and exit.
-- Target fee modeling should distinguish order intent:
+- Current trading fee estimates distinguish order intent:
   - Entry after a closed-candle signal is assumed to be market execution, so it uses taker fee.
-  - Take-profit can be modeled as reduce-only limit or conditional limit, but maker fee applies only when the order rests on the book and is filled as maker.
-  - Stop-loss trigger exits should be modeled as taker unless an explicit limit-stop fill model proves otherwise.
+  - Take-profit protection is modeled as exchange-side reduce-only limit execution, so the planning model uses maker fee.
+  - Stop-loss protection is modeled as exchange-side trigger market execution, so it uses taker fee.
 - Backtesting is manual-only from the UI. It loads local candles and runs the strategy engine on a detached background task, then publishes only the summary result to SwiftUI.
 - Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
 - Paper execution records intent, simulated fill, rejected order, and risk decision separately.
 - Live execution requires a future accepted decision log entry, security review, and explicit UI switch.
+
+## Exchange-Side Protection Orders
+
+- A live entry is not considered protected until both take-profit and stop-loss orders are accepted by Bitget.
+- The intended live sequence is market entry -> fill confirmation -> exchange-side TP/SL registration -> TP/SL registration confirmation.
+- TP is represented as a Bitget TPSL `profit_plan` with a limit `executePrice`; SL is represented as a `loss_plan` with market execution (`executePrice=0`).
+- Protection registration failures must be retried at least 5 times per failed protection order before the position is treated as protection-failed.
+- If retries are exhausted after a real entry fill, the future live runner must fail closed: emit a high-severity risk log and either market-close the position or enter an explicitly reviewed emergency state.
+- The current code includes the domain retry installer and Bitget TPSL adapter, but automatic live entry remains disabled until the live execution policy is accepted.
 
 ## Strategy Portfolio Plan
 

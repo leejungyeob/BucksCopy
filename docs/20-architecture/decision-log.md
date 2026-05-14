@@ -125,13 +125,13 @@
   - 백테스트 수익률이 거래 수수료를 반영하지 않으면 저폭 익절 전략의 기대값이 과대평가됩니다.
   - 사용자는 레퍼럴 등록 기준 수수료를 반영하고, 익절 후에도 수수료보다 이익이 커야 한다는 조건을 요구했습니다.
 - Decision:
-  - Bitget futures taker fee를 entry/exit 양쪽에 적용한 왕복 수수료를 Paper/backtest 공통 정책으로 사용합니다.
+  - Bitget futures fee를 Paper/backtest 공통 정책으로 사용하되, 진입 시장가=taker, 익절 예약 limit=maker, 손절 trigger market=taker로 구분합니다.
   - 레퍼럴 등록 할인은 중앙 `TradingFeePolicy` 상수로 분리하고, 실제 계정 수수료 조회가 붙기 전까지 기본 할인 가정으로 계산합니다.
-  - risk policy는 최소 `2:1` 손익비, 레버리지 반영 손절 위험 `< 30%`, 익절 기대 수익 `> 왕복 수수료`를 모두 만족해야 통과합니다.
-  - 향후 order-type-aware 모델은 진입 시장가=taker, 익절 reduce-only limit/conditional limit=maker 가능, 손절 trigger market=taker를 구분하되, maker 체결은 주문이 호가창에 머물러 유동성을 공급한 경우에만 인정합니다.
+  - risk policy는 최소 `2:1` 손익비, 레버리지 반영 손절 위험 `< 30%`, 익절 기대 수익 `> 진입 taker + 익절 maker 수수료`를 모두 만족해야 통과합니다.
+  - maker 체결은 주문이 호가창에 머물러 유동성을 공급한 경우에만 인정하며, 실제 체결 로그가 붙기 전까지 결과 해석에 주의합니다.
 - Consequences:
   - 백테스트 `netReturnPercent`와 trade return은 수수료 차감 후 값입니다.
-  - 현재 구현은 entry/exit 모두 taker로 계산하므로, 익절 limit maker 가능성을 반영한 모델보다 보수적인 결과를 냅니다.
+  - 승리 거래는 진입 taker + 익절 maker 수수료를 차감하고, 손실 거래는 진입 taker + 손절 taker 수수료를 차감합니다.
   - 실제 계정의 VIP/BGB/쿠폰/프로모션 수수료가 다르면 `TradingFeePolicy` 또는 향후 계정별 fee source를 교체해야 합니다.
 
 ## 0008. Timeframe-Scoped Multi-Strategy Portfolio
@@ -150,3 +150,20 @@
 - Consequences:
   - 향후 백테스트는 단일 전략 결과뿐 아니라 조합별 성과와 포트폴리오 합산 성과를 함께 보여줘야 합니다.
   - 거래 수 증가는 목표지만, Watchlist 단위 리스크와 포지션 중복 제한이 없으면 성과보다 손실 변동성이 먼저 커질 수 있습니다.
+
+## 0009. Exchange-Side TP/SL Protection Before Live Execution
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 앱이 꺼져도 포지션이 자동 정리되려면 TP/SL이 앱 내부 상태가 아니라 거래소 서버에 예약 주문으로 등록되어야 합니다.
+  - 진입 주문 체결 후 TP/SL 등록이 실패하면 포지션이 unprotected 상태로 남는 위험 구간이 생깁니다.
+- Decision:
+  - live 진입 기능을 켜기 전에 exchange-side TP/SL 보호 주문 경계를 먼저 구현합니다.
+  - 진입 체결 후 Bitget `place-tpsl-order`로 TP와 SL을 각각 등록하는 모델을 둡니다.
+  - TP는 `profit_plan` + limit `executePrice`, SL은 `loss_plan` + market execution `executePrice=0`으로 모델링합니다.
+  - TP/SL 보호 주문 등록 실패 시 실패한 보호 주문별로 최소 5회 재시도합니다.
+  - 재시도까지 실패하면 포지션은 protection-failed로 간주하고, future live runner는 즉시 경고와 fail-closed 청산 정책을 적용해야 합니다.
+- Consequences:
+  - 현재 구현은 보호 주문 도메인 모델, 재시도 installer, Bitget TPSL adapter를 제공하지만 live entry는 계속 비활성화합니다.
+  - 실제 활성화 전에는 중복 clientOid, 부분 체결 size, 기존 TP/SL 점유 수량, 앱 재시작 시 보호 주문 복구를 추가 검증해야 합니다.

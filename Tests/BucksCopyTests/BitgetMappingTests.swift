@@ -134,6 +134,39 @@ final class BitgetMappingTests: XCTestCase {
         XCTAssertEqual(position.createdAt?.timeIntervalSince1970 ?? 0, 1_695_649_246.169, accuracy: 0.001)
     }
 
+    func testTPSLRequestMapsTakeProfitToLimitAndStopLossToMarket() throws {
+        let signal = StrategySignal(
+            id: UUID(),
+            strategyID: "fixture",
+            symbol: FuturesSymbol("BTCUSDT"),
+            side: .sell,
+            entryPrice: 100,
+            stopLoss: 110,
+            takeProfit: 80,
+            reason: "fixture",
+            generatedAt: Date()
+        )
+        let plan = ExchangeProtectionPlan(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000321")!,
+            signal: signal,
+            size: Decimal(string: "0.25")!,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+
+        let takeProfitDTO = BitgetTPSLOrderRequestDTO(order: plan.orders[0])
+        let stopLossDTO = BitgetTPSLOrderRequestDTO(order: plan.orders[1])
+
+        XCTAssertEqual(takeProfitDTO.planType, "profit_plan")
+        XCTAssertEqual(takeProfitDTO.holdSide, "short")
+        XCTAssertEqual(takeProfitDTO.triggerPrice, "80")
+        XCTAssertEqual(takeProfitDTO.executePrice, "80")
+        XCTAssertEqual(stopLossDTO.planType, "loss_plan")
+        XCTAssertEqual(stopLossDTO.holdSide, "short")
+        XCTAssertEqual(stopLossDTO.triggerPrice, "110")
+        XCTAssertEqual(stopLossDTO.executePrice, "0")
+        XCTAssertEqual(stopLossDTO.productType, ProductType.usdtFutures.rawValue)
+    }
+
     func testCandleRowMappingUsesBitgetArrayOrder() throws {
         let json = """
         [

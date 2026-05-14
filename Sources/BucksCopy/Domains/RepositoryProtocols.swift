@@ -73,6 +73,10 @@ protocol LiveOrderPlacing {
     func placeLiveOrder(_ intent: OrderIntent) async throws
 }
 
+protocol PositionProtectionInstalling {
+    func installProtection(_ plan: ExchangeProtectionPlan) async throws -> [ExchangeProtectionReceipt]
+}
+
 protocol Clock {
     var now: Date { get }
 }

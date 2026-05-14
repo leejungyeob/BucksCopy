@@ -934,6 +934,10 @@ final class DashboardViewModel: ObservableObject {
             return "Strategy not found: \(id)"
         case TradingDomainError.selectedSymbolNotInWatchlist(let symbol):
             return "\(symbol.rawValue) is not in Watchlist."
+        case TradingDomainError.invalidProtectionPlan(let message):
+            return "Invalid protection plan: \(message)"
+        case TradingDomainError.protectionOrderRetryExhausted(let kind, let attempts):
+            return "Protection \(kind.rawValue) order failed after \(attempts) attempts."
         case BacktestEngineError.insufficientCandles(let required, let actual):
             return "백테스트에 필요한 캔들이 부족합니다. 최소 \(required)개 필요, 현재 \(actual)개입니다."
         default:

@@ -321,4 +321,8 @@ enum DecimalText {
         guard let value, !value.isEmpty else { return nil }
         return Decimal(string: value, locale: Locale(identifier: "en_US_POSIX"))
     }
+
+    static func string(_ value: Decimal) -> String {
+        NSDecimalNumber(decimal: value).stringValue
+    }
 }

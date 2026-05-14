@@ -31,6 +31,9 @@
 | 추측 | 근거 없으면 `확인 필요`와 확인 경로를 제시 |
 | 변경 범위 | 요청 없으면 좁은 diff 우선 |
 | 실거래 | v1 기본값은 Paper trading이며 live order는 명시 정책 전까지 구현/활성화 금지 |
+| 거래소 보호주문 | live 진입 기능을 활성화하기 전에도 진입 체결 후 TP/SL 거래소-side 예약 주문을 등록하는 경계를 먼저 구현하며, 보호주문 등록 실패 시 최소 5회 재시도해야 함 |
+| 보호 실패 처리 | 진입 체결 후 TP/SL 등록이 끝나기 전 포지션은 unprotected 상태로 간주하고, 재시도 소진 시 즉시 경고 및 fail-closed 청산 정책을 검토해야 함 |
+| 수수료 모델 | 기본 모델은 진입 시장가=taker, 익절 예약 limit=maker 가능, 손절 trigger market=taker로 분리하되 maker 체결 보장은 별도 검증 전 과대평가 금지 |
 | 거래 범위 | Bitget USDT-M Futures만 대상으로 하며 API 값은 `productType=USDT-FUTURES`로 고정 |
 | Watchlist | 전체 USDT-M Futures catalog를 불러오되 구독/자동매매는 사용자가 선택한 Watchlist 심볼만 대상 |
 | 심볼 후보 | `symbolStatus=normal`이고 `supportMarginCoins`에 `USDT`가 있는 심볼만 Watchlist 후보 |
