@@ -48,7 +48,11 @@
 - strategy 매수 signal -> paper order intent 생성 -> risk policy 통과 -> simulated fill 기록
 - 백테스트 설정 -> BTCUSDT/ETHUSDT 중 선택 -> 시간봉 선택 -> 전략 선택 -> 수동 실행 -> UI는 즉시 running 상태가 되고 계산 완료 후 승률/손익비/차단 신호가 한국어로 표시
 - 백테스트 실행 중 전략/코인/시간봉 변경 -> 기존 작업 취소 -> 이전 결과가 새 설정에 섞이지 않음
+- 다중 전략 포트폴리오 설정 -> 한 시간봉에 여러 전략 활성화 -> closed candle마다 해당 symbol/timeframe의 활성 전략을 모두 평가
+- 전략 × 시간봉 백테스트 -> 조합별 승률/순손익/거래 수/최대 낙폭 표시 -> 포트폴리오 합산 성과와 분리해 비교 가능
+- 동일 symbol/timeframe에서 여러 전략이 동시에 signal 생성 -> 중복 진입, 같은 방향 추가 진입, 반대 신호 처리 정책이 deterministic하게 적용
 - 손익비 2:1 미만, 레버리지 반영 손절 위험 30% 이상, 또는 익절 기대 수익이 왕복 수수료 이하인 signal -> paper/backtest 모두 risk-blocked로 처리
+- 수수료 모델 -> 현 구현은 entry/exit taker 보수 계산 -> 향후 order-type-aware 모델은 entry taker, take-profit maker 가능, stop-loss taker를 결과별로 계산
 - 레버리지 stepper -> contract max가 10보다 크더라도 자동매매 설정은 10x 이하로 제한
 - 선택한 전략 조건 미충족 -> Paper start -> signal 없음 -> bot event log 미저장
 

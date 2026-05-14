@@ -154,11 +154,24 @@ References:
 - Built-in strategy set: blocked-candle short.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
 - Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, signals whose stop-loss percent multiplied by leverage is `>= 30%`, and signals whose leveraged take-profit does not exceed estimated round-trip trading fees.
-- Trading fee estimates use Bitget futures taker fees with a referral-registered discount assumption, applied on both entry and exit.
+- Current trading fee estimates are conservative: Bitget futures taker fees with a referral-registered discount assumption are applied on both entry and exit.
+- Target fee modeling should distinguish order intent:
+  - Entry after a closed-candle signal is assumed to be market execution, so it uses taker fee.
+  - Take-profit can be modeled as reduce-only limit or conditional limit, but maker fee applies only when the order rests on the book and is filled as maker.
+  - Stop-loss trigger exits should be modeled as taker unless an explicit limit-stop fill model proves otherwise.
 - Backtesting is manual-only from the UI. It loads local candles and runs the strategy engine on a detached background task, then publishes only the summary result to SwiftUI.
 - Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
 - Paper execution records intent, simulated fill, rejected order, and risk decision separately.
 - Live execution requires a future accepted decision log entry, security review, and explicit UI switch.
+
+## Strategy Portfolio Plan
+
+- The long-term goal is not one universal strategy. The goal is to select roughly 4-5 high-quality strategies through local backtesting and run them as a portfolio.
+- The selection unit is `strategy × timeframe`, not strategy alone. A strategy can be enabled for multiple timeframes, and a single timeframe can have multiple enabled strategies.
+- Candidate combinations must be evaluated by win rate, net return after fees, trade count, drawdown, and blocked-signal frequency.
+- When a closed candle arrives for a timeframe, every enabled strategy for that symbol and timeframe can be evaluated.
+- More active combinations should increase trade opportunities, but execution must still cap risk by Watchlist symbol, leverage, open position state, duplicate signal handling, and opposite-signal handling.
+- Portfolio backtesting should eventually report both per-combination metrics and aggregate portfolio metrics so weak combinations can be removed without disabling the whole strategy family.
 
 ## Strategy Research Notes
 

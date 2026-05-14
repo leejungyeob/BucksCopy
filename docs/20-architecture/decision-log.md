@@ -128,6 +128,25 @@
   - Bitget futures taker fee를 entry/exit 양쪽에 적용한 왕복 수수료를 Paper/backtest 공통 정책으로 사용합니다.
   - 레퍼럴 등록 할인은 중앙 `TradingFeePolicy` 상수로 분리하고, 실제 계정 수수료 조회가 붙기 전까지 기본 할인 가정으로 계산합니다.
   - risk policy는 최소 `2:1` 손익비, 레버리지 반영 손절 위험 `< 30%`, 익절 기대 수익 `> 왕복 수수료`를 모두 만족해야 통과합니다.
+  - 향후 order-type-aware 모델은 진입 시장가=taker, 익절 reduce-only limit/conditional limit=maker 가능, 손절 trigger market=taker를 구분하되, maker 체결은 주문이 호가창에 머물러 유동성을 공급한 경우에만 인정합니다.
 - Consequences:
   - 백테스트 `netReturnPercent`와 trade return은 수수료 차감 후 값입니다.
+  - 현재 구현은 entry/exit 모두 taker로 계산하므로, 익절 limit maker 가능성을 반영한 모델보다 보수적인 결과를 냅니다.
   - 실제 계정의 VIP/BGB/쿠폰/프로모션 수수료가 다르면 `TradingFeePolicy` 또는 향후 계정별 fee source를 교체해야 합니다.
+
+## 0008. Timeframe-Scoped Multi-Strategy Portfolio
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 단일 전략만으로는 거래 수가 부족하고, 한 전략이 모든 시간봉에서 좋은 성과를 내기는 어렵습니다.
+  - 사용자는 승률과 순손익이 높은 전략을 4-5개 정도 선별하고, 각 시간봉마다 성과가 검증된 여러 전략을 동시에 운용하려고 합니다.
+- Decision:
+  - 전략 활성화 단위는 `strategy × timeframe` 조합으로 둡니다.
+  - 한 시간봉에는 여러 전략이 동시에 활성화될 수 있고, 한 전략도 여러 시간봉에서 활성화될 수 있습니다.
+  - 후보 조합은 수수료 차감 후 순손익, 승률, 거래 수, 최대 낙폭, 차단 신호 수로 평가합니다.
+  - closed candle이 확정되면 해당 symbol/timeframe에 활성화된 모든 전략을 평가할 수 있습니다.
+  - 다중 전략 운영 전에는 동일 심볼 중복 진입, 같은 방향 중복 신호, 반대 신호, 기존 포지션 보유 중 재진입 정책을 별도로 정의해야 합니다.
+- Consequences:
+  - 향후 백테스트는 단일 전략 결과뿐 아니라 조합별 성과와 포트폴리오 합산 성과를 함께 보여줘야 합니다.
+  - 거래 수 증가는 목표지만, Watchlist 단위 리스크와 포지션 중복 제한이 없으면 성과보다 손실 변동성이 먼저 커질 수 있습니다.
