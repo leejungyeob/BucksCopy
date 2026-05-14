@@ -9,6 +9,7 @@ final class StrategyTests: XCTestCase {
             DonchianChannelBreakoutStrategy.identifier,
             TimeSeriesMomentumStrategy.identifier,
             VWMATouchTrendStrategy.identifier,
+            XFrequencyStrategy.identifier,
             XStrategy.identifier
         ]))
     }
@@ -16,7 +17,10 @@ final class StrategyTests: XCTestCase {
     func testTimeframeRoutingUsesRecommendedStrategies() {
         XCTAssertEqual(
             StrategyTimeframeRouting.recommendedStrategyIDs(for: .fifteenMinutes),
-            [XStrategy.identifier]
+            [
+                XStrategy.identifier,
+                XFrequencyStrategy.identifier
+            ]
         )
         XCTAssertEqual(
             StrategyTimeframeRouting.recommendedStrategyIDs(for: .oneHour),
@@ -75,14 +79,15 @@ final class StrategyTests: XCTestCase {
         }
     }
 
-    func testXStrategyCreatesLongAfterSellPressureAbsorption() throws {
+    func testXStrategyCreatesLongAfterPhaseSpreadReclaim() throws {
         let strategy = XStrategy()
+        let candles = xLongCandles()
         let evaluation = try strategy.evaluate(
             StrategyContext(
                 symbol: FuturesSymbol("BTCUSDT"),
                 timeframe: .fifteenMinutes,
-                closedCandles: xLongCandles(),
-                generatedAt: Date(timeIntervalSince1970: 221 * 900)
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
             ),
             config: strategy.definition.defaultConfig
         )
@@ -93,19 +98,20 @@ final class StrategyTests: XCTestCase {
 
         XCTAssertEqual(signal.strategyID, XStrategy.identifier)
         XCTAssertEqual(signal.side, .buy)
-        XCTAssertEqual(signal.entryPrice, 102)
-        XCTAssertEqual(signal.stopLoss, 95)
-        XCTAssertEqual(signal.takeProfit, Decimal(string: "118.8")!)
+        XCTAssertEqual(signal.entryPrice, Decimal(string: "100.85")!)
+        XCTAssertLessThan(signal.stopLoss, signal.entryPrice)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, 2)
     }
 
-    func testXStrategyCreatesShortAfterBuyPressureAbsorption() throws {
+    func testXStrategyCreatesShortAfterPhaseSpreadReclaim() throws {
         let strategy = XStrategy()
+        let candles = xShortCandles()
         let evaluation = try strategy.evaluate(
             StrategyContext(
                 symbol: FuturesSymbol("BTCUSDT"),
                 timeframe: .fifteenMinutes,
-                closedCandles: xShortCandles(),
-                generatedAt: Date(timeIntervalSince1970: 221 * 900)
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
             ),
             config: strategy.definition.defaultConfig
         )
@@ -116,9 +122,9 @@ final class StrategyTests: XCTestCase {
 
         XCTAssertEqual(signal.strategyID, XStrategy.identifier)
         XCTAssertEqual(signal.side, .sell)
-        XCTAssertEqual(signal.entryPrice, 100)
-        XCTAssertEqual(signal.stopLoss, 107)
-        XCTAssertEqual(signal.takeProfit, Decimal(string: "83.2")!)
+        XCTAssertEqual(signal.entryPrice, Decimal(string: "99.15")!)
+        XCTAssertGreaterThan(signal.stopLoss, signal.entryPrice)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, 2)
     }
 
     func testXStrategyRejectsUnsupportedTimeframe() throws {
@@ -134,6 +140,54 @@ final class StrategyTests: XCTestCase {
         )
 
         XCTAssertEqual(evaluation, .noSignal)
+    }
+
+    func testXFrequencyStrategyCreatesLongAfterThreeBarReclaim() throws {
+        let strategy = XFrequencyStrategy()
+        let candles = xLongCandles()
+        let evaluation = try strategy.evaluate(
+            StrategyContext(
+                symbol: FuturesSymbol("BTCUSDT"),
+                timeframe: .fifteenMinutes,
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
+            ),
+            config: strategy.definition.defaultConfig
+        )
+
+        guard case .signal(let signal) = evaluation else {
+            return XCTFail("Expected X-Frequency long signal")
+        }
+
+        XCTAssertEqual(signal.strategyID, XFrequencyStrategy.identifier)
+        XCTAssertEqual(signal.side, .buy)
+        XCTAssertEqual(signal.entryPrice, Decimal(string: "100.85")!)
+        XCTAssertLessThan(signal.stopLoss, signal.entryPrice)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, 2)
+    }
+
+    func testXFrequencyStrategyCreatesShortAfterThreeBarReclaim() throws {
+        let strategy = XFrequencyStrategy()
+        let candles = xShortCandles()
+        let evaluation = try strategy.evaluate(
+            StrategyContext(
+                symbol: FuturesSymbol("BTCUSDT"),
+                timeframe: .fifteenMinutes,
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
+            ),
+            config: strategy.definition.defaultConfig
+        )
+
+        guard case .signal(let signal) = evaluation else {
+            return XCTFail("Expected X-Frequency short signal")
+        }
+
+        XCTAssertEqual(signal.strategyID, XFrequencyStrategy.identifier)
+        XCTAssertEqual(signal.side, .sell)
+        XCTAssertEqual(signal.entryPrice, Decimal(string: "99.15")!)
+        XCTAssertGreaterThan(signal.stopLoss, signal.entryPrice)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, 2)
     }
 
     func testPaperRunnerRejectsSymbolOutsideWatchlist() throws {
@@ -197,10 +251,10 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(log.category, .paperOrder)
         XCTAssertTrue(log.message.contains("Paper buy order"))
         XCTAssertTrue(log.message.contains("leverage 2x"))
-        XCTAssertTrue(log.message.contains("margin 60%"))
-        XCTAssertTrue(log.message.contains("account risk 12%"))
-        XCTAssertTrue(log.message.contains("TP fee 0.08%"))
-        XCTAssertTrue(log.message.contains("SL fee 0.12%"))
+        XCTAssertTrue(log.message.contains("margin 25%"))
+        XCTAssertTrue(log.message.contains("account risk 5%"))
+        XCTAssertTrue(log.message.contains("TP fee 0.03%"))
+        XCTAssertTrue(log.message.contains("SL fee 0.05%"))
         XCTAssertTrue(log.isPersistentTradingRecord)
     }
 
@@ -241,8 +295,8 @@ final class StrategyTests: XCTestCase {
         let decision = StrategyRiskPolicy.decision(for: signal, leverage: 8)
 
         XCTAssertTrue(decision.isAllowed)
-        XCTAssertEqual(decision.positionMarginRatio, Decimal(string: "0.375")!)
-        XCTAssertEqual(decision.accountRiskPercent, 12)
+        XCTAssertEqual(decision.positionMarginRatio, Decimal(string: "0.15625")!)
+        XCTAssertEqual(decision.accountRiskPercent, 5)
     }
 
     func testRiskPolicyCapsPositionByConfiguredMarginLimit() throws {
@@ -348,7 +402,7 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(result.trades.first?.partialTakeProfit, 110)
         XCTAssertEqual(result.trades.first?.partialTakeProfitFillRatio, Decimal(string: "0.5"))
         XCTAssertEqual(result.trades.first?.finalTakeProfitFillRatio, Decimal(string: "0.5"))
-        XCTAssertEqual(result.trades.first?.leveragedReturnPercent, Decimal(string: "14.936"))
+        XCTAssertEqual(result.trades.first?.leveragedReturnPercent, Decimal(string: "7.468"))
     }
 
     func testBacktestEngineMovesStopToProfitLockAfterPartialTakeProfit() throws {
@@ -373,7 +427,7 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(trade.partialTakeProfitFillRatio, Decimal(string: "0.5"))
         XCTAssertEqual(trade.finalTakeProfitFillRatio, 0)
         XCTAssertEqual(trade.stopLossFillRatio, Decimal(string: "0.5"))
-        XCTAssertEqual(trade.leveragedReturnPercent, Decimal(string: "7.42")!)
+        XCTAssertEqual(trade.leveragedReturnPercent, Decimal(string: "3.71")!)
     }
 
     func testBacktestEngineAppliesStopLossMarketFeeToLosingTrades() throws {
@@ -407,7 +461,7 @@ final class StrategyTests: XCTestCase {
 
         XCTAssertGreaterThan(result.totalTrades, 0)
         XCTAssertEqual(result.losingTrades, result.totalTrades)
-        XCTAssertEqual(result.trades.first?.leveragedReturnPercent, Decimal(string: "-10.096"))
+        XCTAssertEqual(result.trades.first?.leveragedReturnPercent, Decimal(string: "-5.048"))
     }
 
     func testBacktestEngineReportsRiskBlockReasons() throws {
@@ -451,10 +505,10 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(result.totalTrades, 2)
         XCTAssertEqual(result.initialCapital, 100)
         XCTAssertEqual(result.trades[0].startingBalance, 100)
-        XCTAssertEqual(result.trades[0].endingBalance, Decimal(string: "114.936")!)
-        XCTAssertEqual(result.trades[1].startingBalance, Decimal(string: "114.936")!)
-        XCTAssertEqual(result.finalBalance, Decimal(string: "103.33206144")!)
-        XCTAssertEqual(result.netReturnPercent, Decimal(string: "3.33206144")!)
+        XCTAssertEqual(result.trades[0].endingBalance, Decimal(string: "107.468")!)
+        XCTAssertEqual(result.trades[1].startingBalance, Decimal(string: "107.468")!)
+        XCTAssertEqual(result.finalBalance, Decimal(string: "102.04301536")!)
+        XCTAssertEqual(result.netReturnPercent, Decimal(string: "2.04301536")!)
     }
 
     func testVWMATouchTrendStrategyCreatesLongNearSupport() throws {
@@ -1068,39 +1122,39 @@ private func donchianBreakoutCandles() -> [Candle] {
 }
 
 private func xLongCandles() -> [Candle] {
-    let neutral = (0..<197).map { index in
-        makeStrategyCandle(offset: index, open: 101, high: 102, low: 100, close: 101)
+    let slowBase = (0..<288).map { index in
+        makeStrategyCandle(offset: index, open: 100, high: Decimal(string: "100.1")!, low: Decimal(string: "99.9")!, close: 100)
     }
-    let pressure = (197..<221).map { index in
-        makeStrategyCandle(offset: index, open: 102, high: 103, low: 99, close: 100)
+    let fastBase = (288..<383).map { index in
+        makeStrategyCandle(offset: index, open: Decimal(string: "100.6")!, high: Decimal(string: "100.7")!, low: Decimal(string: "100.5")!, close: Decimal(string: "100.6")!)
     }
-    let absorption = makeStrategyCandle(
-        offset: 221,
-        open: 100,
-        high: 105,
-        low: 95,
-        close: 102,
-        volume: 1_500
+    let reclaim = makeStrategyCandle(
+        offset: 383,
+        open: Decimal(string: "100.6")!,
+        high: Decimal(string: "100.9")!,
+        low: Decimal(string: "100.55")!,
+        close: Decimal(string: "100.85")!,
+        volume: 2_000
     )
-    return neutral + pressure + [absorption]
+    return slowBase + fastBase + [reclaim]
 }
 
 private func xShortCandles() -> [Candle] {
-    let neutral = (0..<197).map { index in
-        makeStrategyCandle(offset: index, open: 101, high: 102, low: 100, close: 101)
+    let slowBase = (0..<288).map { index in
+        makeStrategyCandle(offset: index, open: 100, high: Decimal(string: "100.1")!, low: Decimal(string: "99.9")!, close: 100)
     }
-    let pressure = (197..<221).map { index in
-        makeStrategyCandle(offset: index, open: 100, high: 103, low: 99, close: 102)
+    let fastBase = (288..<383).map { index in
+        makeStrategyCandle(offset: index, open: Decimal(string: "99.4")!, high: Decimal(string: "99.5")!, low: Decimal(string: "99.3")!, close: Decimal(string: "99.4")!)
     }
-    let absorption = makeStrategyCandle(
-        offset: 221,
-        open: 102,
-        high: 107,
-        low: 97,
-        close: 100,
-        volume: 1_500
+    let reclaim = makeStrategyCandle(
+        offset: 383,
+        open: Decimal(string: "99.4")!,
+        high: Decimal(string: "99.45")!,
+        low: Decimal(string: "99.1")!,
+        close: Decimal(string: "99.15")!,
+        volume: 2_000
     )
-    return neutral + pressure + [absorption]
+    return slowBase + fastBase + [reclaim]
 }
 
 private func makeStrategyCandle(

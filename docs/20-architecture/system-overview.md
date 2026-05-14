@@ -159,7 +159,7 @@ References:
 - Paper monitoring stores a `(symbol, timeframe, strategy, closed candle open time)` key to avoid generating duplicate paper orders from the same closed candle.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
 - Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, leverage above `10x`, and signals whose take-profit cannot cover estimated round-trip trading fees.
-- Risk policy sizes each position so `stop-loss percent × leverage × margin allocation <= configured max loss per trade`. The default max loss per trade is `12%`, and UI configuration is capped at `15%`.
+- Risk policy sizes each position so `stop-loss percent × leverage × margin allocation <= configured max loss per trade`. The default max loss per trade is `5%`, and UI configuration is capped at `15%`.
 - Current trading fee estimates distinguish order intent:
   - Entry after a closed-candle signal is assumed to be market execution, so it uses taker fee.
   - Take-profit protection is modeled as exchange-side reduce-only limit execution, so the planning model uses maker fee.
@@ -193,10 +193,12 @@ References:
 
 ## Strategy Research Notes
 
-- Current recommended routing keeps the locally validated combinations from the `10x` leverage / `5%` per-trade account-risk backtest, plus the in-progress 15m X strategy route:
-  - `15m`: X
+- Current recommended routing keeps the locally validated combinations from the `10x` leverage / `5%` per-trade account-risk backtest:
+  - `15m`: X, X-Frequency
   - `4H`: Donchian channel breakout
   - `12H`: VWMA100 touch trend, Donchian channel breakout, Time-Series momentum
   - `1D`: VWMA100 touch trend, Donchian channel breakout
+- The `15m` X route is now the Phase-Spread Reclaim strategy. On the latest local BTCUSDT 15m four-year backtest window it finished at `$216.139727` from `$100`, with `+116.14%` net return, `72.22%` win rate, `54` trades, `10.96%` max drawdown, and `2.02` profit factor under `10x` leverage / `5%` per-trade account-risk settings.
+- The `15m` X-Frequency route keeps the same phase-spread reclaim family but uses a wider spread gate and stronger `1.5x` volume gate for a medium-frequency target. On the same backtest window it finished at `$276.774724` from `$100`, with `+176.77%` net return, `60.19%` win rate, `216` trades, `39.88%` max drawdown, and `1.29` profit factor. It should still be treated as a higher-drawdown Paper candidate, not a default live candidate.
 - `1H` currently has no recommended live/Paper strategy route.
 - Strategies that failed the latest return, drawdown, or trade-count filters were removed from the built-in registry and implementation.

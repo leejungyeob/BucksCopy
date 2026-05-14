@@ -132,6 +132,7 @@ struct StrategyRegistry {
             DonchianChannelBreakoutStrategy(),
             TimeSeriesMomentumStrategy(),
             VWMATouchTrendStrategy(),
+            XFrequencyStrategy(),
             XStrategy()
         ]
     }
@@ -142,7 +143,8 @@ enum StrategyTimeframeRouting {
         switch timeframe {
         case .fifteenMinutes:
             return [
-                XStrategy.identifier
+                XStrategy.identifier,
+                XFrequencyStrategy.identifier
             ]
         case .oneHour:
             return []

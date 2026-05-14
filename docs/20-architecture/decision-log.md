@@ -209,7 +209,7 @@
   - 사용자는 연속 손실/일일 손실 정지형 가드레일보다, 진입마다 손실 한도를 맞추는 방식을 선호했습니다.
 - Decision:
   - 1회 최대 손실률을 전략 설정으로 둡니다.
-  - 기본값은 `12%`, UI에서 설정 가능한 최대값은 `15%`로 제한합니다.
+  - 기본값은 최초 `12%`였고, 현재 기본값은 0016 결정에 따라 `5%`입니다. UI에서 설정 가능한 최대값은 `15%`로 제한합니다.
   - 손절폭이 큰 신호는 차단하지 않고 `포지션 투입비율 = 최대 손실률 / (손절폭 × 레버리지)`로 축소합니다.
   - 백테스트 수익률과 수수료는 포지션 투입비율만큼 계좌 기준으로 스케일링합니다.
 - Consequences:
@@ -258,11 +258,59 @@
   - Keeping weak built-in strategies in the app creates false choices and increases backtest noise.
 - Decision:
   - Keep VWMA100 touch trend, Donchian channel breakout, and Time-Series momentum as validated built-in strategy implementations.
-  - Keep the in-progress 15m X strategy implementation and route it separately while it is being developed.
+  - Keep the then-in-progress 15m X strategy implementation and route it separately while it is being developed.
   - Recommended routing includes `15m X`, `4H Donchian`, `12H VWMA100`, `12H Donchian`, `12H Time-Series`, `1D VWMA100`, and `1D Donchian`.
   - Remove blocked-candle, moving-average alignment, Bollinger, and MACD strategy implementations from the built-in code path.
 - Consequences:
   - `1H` no longer has a recommended Paper route until a future strategy passes the same validation bar.
-  - `15m X` remains a development route and should not be treated as part of the six validated combinations until its own backtest passes.
+  - At the time of this decision, `15m X` was a development route and was not treated as part of the six validated combinations. See 0017 for the replacement strategy validation.
   - Historical cache/report files may still contain old strategy names, but active code and generated reports use only the pruned built-in registry.
   - Future strategy additions must be validated through the local backtest script before being added to routing.
+
+## 0016. Default Per-Trade Account Risk To 5 Percent
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 사용자는 기본 1회 최대 손실률을 더 보수적인 `5%` 기준으로 운용하기로 했습니다.
+  - 백테스트 표준 실행과 앱 기본 전략 설정이 서로 다른 리스크 기본값을 쓰면 결과 해석과 Paper 운용이 어긋날 수 있습니다.
+- Decision:
+  - `StrategyRiskPolicy.defaultMaximumRiskPerTradePercent` 기본값을 `5%`로 둡니다.
+  - Split TP 백테스트 리포트 러너의 기본 `--risk` 실행값도 `5%`로 맞춥니다.
+  - UI 최대 설정 가능 값은 기존처럼 `15%`로 유지해 명시적인 고위험 검증만 허용합니다.
+- Consequences:
+  - 동일한 전략 신호라도 기본 포지션 투입비율이 낮아져 손실과 수익이 모두 더 작게 스케일링됩니다.
+  - 기존 `12%` 기본값 기준 캐시/리포트는 새 기본 실행 결과와 비교할 때 리스크 조건 차이를 명시해야 합니다.
+
+## 0017. Replace 15m X With Phase-Spread Reclaim
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 기존 `15m X` 전략은 `10x` leverage / `5%` per-trade account-risk / 최신 로컬 15m 전체 구간에서 최종 잔고가 사실상 0에 수렴했고, 승률도 50% 기준에 미달했습니다.
+  - 사용자는 최근 4년 BTCUSDT 15m candle 기준으로 승률 50% 이상, 초기 $100, `10x` leverage, `5%` 최대 손실 조건을 통과하는 새 X 전략을 원했습니다.
+- Decision:
+  - `15m X`를 Phase-Spread Reclaim 전략으로 교체합니다.
+  - 전략은 `SMA96`과 `SMA384`의 좁은 phase spread에서 추세 방향 pullback이 fast mean을 찍고, 직전 고가/저가를 reclaim하며, candle close location과 volume expansion을 동시에 만족할 때만 진입합니다.
+  - 손절은 신호 candle 극값과 `ATR14` buffer를 함께 고려하고, 최종 목표가는 `2R`로 둡니다.
+  - 최신 4년 로컬 BTCUSDT 15m 구간 검증 결과: `$100 -> $216.139727`, `+116.14%`, 승률 `72.22%`, 거래 `39/15/54`, MDD `10.96%`, PF `2.02`.
+- Consequences:
+  - `15m X`는 더 이상 개발 전용 route가 아니라 Paper 후보 route로 유지합니다.
+  - 거래 수가 `54`회로 많지 않으므로, 실거래 전에는 다른 심볼/기간 walk-forward와 Paper 관찰을 추가해야 합니다.
+  - live entry는 계속 비활성화이며, 기존 보호주문/Keychain/로그 정책을 통과하기 전까지 자동 실거래로 승격하지 않습니다.
+
+## 0018. Add Medium-Frequency 15m X-Frequency Route
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 사용자는 기존 X보다 거래 빈도가 높지만 MDD가 과도하지 않도록, 최근 4년 기준 연간 약 50회 거래하는 15분봉 알고리즘으로 목표를 조정했습니다.
+  - 기준은 초기 `$100`, `10x` leverage, `5%` per-trade account-risk, BTCUSDT 로컬 15m candle 백테스트입니다.
+- Decision:
+  - `X-Frequency` 전략을 새 built-in strategy로 추가하고 15m 추천 라우팅에 `X` 다음 후보로 둡니다.
+  - 전략은 `X`와 같은 `SMA96/SMA384` phase-spread reclaim 계열이지만, spread gate를 `0.001...0.020`, volume gate를 `1.5x`, reclaim lookback을 `3`봉으로 조정해 빈도와 품질을 균형화합니다.
+  - 최신 4년 로컬 BTCUSDT 15m 구간 검증 결과: `$100 -> $276.774724`, `+176.77%`, 승률 `60.19%`, 거래 `130/86/216`, MDD `39.88%`, PF `1.29`.
+- Consequences:
+  - 거래 수는 약 `54`회/년으로 목표치에 근접하지만, MDD가 `39.88%`라 여전히 중위험 Paper 후보로 취급합니다.
+  - 기존 `X`를 첫 번째 15m route로 유지해 기본 선택은 더 낮은 MDD의 전략이 되도록 합니다.
+  - live entry는 계속 비활성화이며, 실거래 전에는 포트폴리오 동시신호, 중복 포지션, 심볼 확장, walk-forward 검증이 필요합니다.

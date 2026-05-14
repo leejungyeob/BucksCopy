@@ -3,7 +3,7 @@ import Foundation
 enum StrategyRiskPolicy {
     static let maximumAutoTradingLeverage = 10
     static let minimumRewardRiskRatio: Decimal = 2
-    static let defaultMaximumRiskPerTradePercent: Decimal = 12
+    static let defaultMaximumRiskPerTradePercent: Decimal = 5
     static let maximumConfigurableRiskPerTradePercent: Decimal = 15
     static let minimumConfigurableRiskPerTradePercent: Decimal = 1
     static let defaultMaximumPositionMarginPercent: Decimal = 100

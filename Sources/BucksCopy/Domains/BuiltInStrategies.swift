@@ -7,20 +7,23 @@ struct XStrategy: TradingStrategy {
     let definition = StrategyDefinition(
         id: Self.identifier,
         name: "X",
-        summary: "24봉 누적 압력과 반대 꼬리 흡수, range/volume 확장을 조합한 15분봉 독자 전략",
+        summary: "SMA96/SMA384 phase spread와 ATR/volume gate로 압축 추세의 15분봉 reclaim만 진입하는 독자 전략",
         defaultConfig: StrategyConfig(
             strategyID: Self.identifier,
             leverage: 2,
             parameters: [
-                "pressureLookback": 24,
-                "rangeLookback": 24,
+                "fastMeanPeriod": 96,
+                "slowMeanPeriod": 384,
+                "atrPeriod": 14,
                 "volumeLookback": 96,
-                "rangeMultiplier": Decimal(string: "1.7")!,
-                "volumeMultiplier": Decimal(string: "1.4")!,
-                "minimumCloseLocation": Decimal(string: "0.60")!,
-                "minimumOppositeWickRatio": Decimal(string: "0.25")!,
-                "minimumPressure": Decimal(string: "0.12")!,
-                "rewardRiskRatio": Decimal(string: "2.4")!
+                "minimumTrendSpread": Decimal(string: "0.004")!,
+                "maximumTrendSpread": Decimal(string: "0.006")!,
+                "minimumATRPercent": Decimal(string: "0.001")!,
+                "maximumATRPercent": Decimal(string: "0.007")!,
+                "minimumCloseLocation": Decimal(string: "0.80")!,
+                "volumeMultiplier": Decimal(string: "1.5")!,
+                "stopATRBuffer": Decimal(string: "0.15")!,
+                "rewardRiskRatio": Decimal(string: "2.0")!
             ],
             signalConfirmation: .disabled
         )
@@ -31,14 +34,127 @@ struct XStrategy: TradingStrategy {
 
         let candles = context.closedCandles
         let parameters = XParameters(overrides: config.parameters)
-        guard candles.count > 220,
-              let averageRange = candles.averageRange(
-                period: parameters.rangeLookback,
+        guard candles.count >= parameters.slowMeanPeriod,
+              let fastMean = candles.simpleMovingAverage(period: parameters.fastMeanPeriod),
+              let slowMean = candles.simpleMovingAverage(period: parameters.slowMeanPeriod),
+              let atr = candles.averageTrueRange(period: parameters.atrPeriod),
+              let averageVolume = candles.averageVolume(period: parameters.volumeLookback),
+              candles.count >= 2 else {
+            return .noSignal
+        }
+
+        let latest = candles[candles.count - 1]
+        let previous = candles[candles.count - 2]
+        let entry = latest.close
+        let range = latest.high - latest.low
+        guard entry > 0,
+              range > 0,
+              atr > 0,
+              averageVolume > 0,
+              latest.volume >= averageVolume * parameters.volumeMultiplier else {
+            return .noSignal
+        }
+
+        let trendSpread = absoluteDecimal(fastMean - slowMean) / entry
+        let atrPercent = atr / entry
+        guard trendSpread >= parameters.minimumTrendSpread,
+              trendSpread <= parameters.maximumTrendSpread,
+              atrPercent >= parameters.minimumATRPercent,
+              atrPercent <= parameters.maximumATRPercent else {
+            return .noSignal
+        }
+
+        let closeLocation = (latest.close - latest.low) / range
+
+        if fastMean > slowMean,
+           latest.low <= fastMean,
+           latest.close > fastMean,
+           latest.close > previous.high,
+           latest.close > latest.open,
+           closeLocation >= parameters.minimumCloseLocation {
+            let stop = Swift.min(latest.low, fastMean - atr * parameters.stopATRBuffer)
+            let risk = entry - stop
+            guard risk > 0 else { return .noSignal }
+            return fixedTargetSignal(
+                context: context,
+                side: .buy,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry + risk * parameters.rewardRiskRatio,
+                reason: "X: SMA96/SMA384 phase spread 압축 추세에서 SMA96 하단 터치 후 고가 reclaim"
+            )
+        }
+
+        if fastMean < slowMean,
+           latest.high >= fastMean,
+           latest.close < fastMean,
+           latest.close < previous.low,
+           latest.close < latest.open,
+           closeLocation <= 1 - parameters.minimumCloseLocation {
+            let stop = Swift.max(latest.high, fastMean + atr * parameters.stopATRBuffer)
+            let risk = stop - entry
+            guard risk > 0 else { return .noSignal }
+            return fixedTargetSignal(
+                context: context,
+                side: .sell,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry - risk * parameters.rewardRiskRatio,
+                reason: "X: SMA96/SMA384 phase spread 압축 추세에서 SMA96 상단 터치 후 저가 reclaim"
+            )
+        }
+
+        return .noSignal
+    }
+}
+
+struct XFrequencyStrategy: TradingStrategy {
+    static let identifier = "x-frequency"
+    private static let supportedTimeframes: Set<CandleTimeframe> = [.fifteenMinutes]
+
+    let definition = StrategyDefinition(
+        id: Self.identifier,
+        name: "X-Frequency",
+        summary: "X phase-spread reclaim을 연 50회 안팎으로 압축한 15분봉 중빈도 전략",
+        defaultConfig: StrategyConfig(
+            strategyID: Self.identifier,
+            leverage: 2,
+            parameters: [
+                "fastMeanPeriod": 96,
+                "slowMeanPeriod": 384,
+                "atrPeriod": 14,
+                "volumeLookback": 96,
+                "reclaimLookback": 3,
+                "minimumTrendSpread": Decimal(string: "0.001")!,
+                "maximumTrendSpread": Decimal(string: "0.020")!,
+                "minimumATRPercent": Decimal(string: "0.001")!,
+                "maximumATRPercent": Decimal(string: "0.007")!,
+                "minimumCloseLocation": Decimal(string: "0.80")!,
+                "volumeMultiplier": Decimal(string: "1.5")!,
+                "stopATRBuffer": Decimal(string: "0.25")!,
+                "rewardRiskRatio": Decimal(string: "2.0")!
+            ],
+            signalConfirmation: .disabled
+        )
+    )
+
+    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        guard Self.supportedTimeframes.contains(context.timeframe) else { return .noSignal }
+
+        let candles = context.closedCandles
+        let parameters = XFrequencyParameters(overrides: config.parameters)
+        guard candles.count >= parameters.slowMeanPeriod,
+              candles.count >= parameters.reclaimLookback + 1,
+              let fastMean = candles.simpleMovingAverage(period: parameters.fastMeanPeriod),
+              let slowMean = candles.simpleMovingAverage(period: parameters.slowMeanPeriod),
+              let atr = candles.averageTrueRange(period: parameters.atrPeriod),
+              let averageVolume = candles.averageVolume(period: parameters.volumeLookback),
+              let previousHigh = candles.highestHigh(
+                lookback: parameters.reclaimLookback,
                 endingAt: candles.count - 2
               ),
-              let averageVolume = candles.averageVolume(period: parameters.volumeLookback),
-              let pressure = candles.directionalBodyPressure(
-                lookback: parameters.pressureLookback,
+              let previousLow = candles.lowestLow(
+                lookback: parameters.reclaimLookback,
                 endingAt: candles.count - 2
               ) else {
             return .noSignal
@@ -49,22 +165,30 @@ struct XStrategy: TradingStrategy {
         let range = latest.high - latest.low
         guard entry > 0,
               range > 0,
-              averageRange > 0,
+              atr > 0,
               averageVolume > 0,
-              range >= averageRange * parameters.rangeMultiplier,
               latest.volume >= averageVolume * parameters.volumeMultiplier else {
             return .noSignal
         }
 
-        let closeLocation = (latest.close - latest.low) / range
-        let upperWickRatio = (latest.high - Swift.max(latest.open, latest.close)) / range
-        let lowerWickRatio = (Swift.min(latest.open, latest.close) - latest.low) / range
+        let trendSpread = absoluteDecimal(fastMean - slowMean) / entry
+        let atrPercent = atr / entry
+        guard trendSpread >= parameters.minimumTrendSpread,
+              trendSpread <= parameters.maximumTrendSpread,
+              atrPercent >= parameters.minimumATRPercent,
+              atrPercent <= parameters.maximumATRPercent else {
+            return .noSignal
+        }
 
-        if pressure <= -parameters.minimumPressure,
-           lowerWickRatio >= parameters.minimumOppositeWickRatio,
-           closeLocation >= parameters.minimumCloseLocation,
-           latest.close >= latest.open {
-            let stop = latest.low
+        let closeLocation = (latest.close - latest.low) / range
+
+        if fastMean > slowMean,
+           latest.low <= fastMean,
+           latest.close > fastMean,
+           latest.close > previousHigh,
+           latest.close > latest.open,
+           closeLocation >= parameters.minimumCloseLocation {
+            let stop = Swift.min(latest.low, fastMean - atr * parameters.stopATRBuffer)
             let risk = entry - stop
             guard risk > 0 else { return .noSignal }
             return fixedTargetSignal(
@@ -73,15 +197,17 @@ struct XStrategy: TradingStrategy {
                 entry: entry,
                 stop: stop,
                 takeProfit: entry + risk * parameters.rewardRiskRatio,
-                reason: "X: 24봉 매도 압력 뒤 하단 꼬리 흡수와 range/volume 확장 확인"
+                reason: "X-Frequency: SMA96/SMA384 phase spread 추세에서 3봉 고가 reclaim"
             )
         }
 
-        if pressure >= parameters.minimumPressure,
-           upperWickRatio >= parameters.minimumOppositeWickRatio,
-           closeLocation <= 1 - parameters.minimumCloseLocation,
-           latest.close <= latest.open {
-            let stop = latest.high
+        if fastMean < slowMean,
+           latest.high >= fastMean,
+           latest.close < fastMean,
+           latest.close < previousLow,
+           latest.close < latest.open,
+           closeLocation <= 1 - parameters.minimumCloseLocation {
+            let stop = Swift.max(latest.high, fastMean + atr * parameters.stopATRBuffer)
             let risk = stop - entry
             guard risk > 0 else { return .noSignal }
             return fixedTargetSignal(
@@ -90,7 +216,7 @@ struct XStrategy: TradingStrategy {
                 entry: entry,
                 stop: stop,
                 takeProfit: entry - risk * parameters.rewardRiskRatio,
-                reason: "X: 24봉 매수 압력 뒤 상단 꼬리 흡수와 range/volume 확장 확인"
+                reason: "X-Frequency: SMA96/SMA384 phase spread 추세에서 3봉 저가 reclaim"
             )
         }
 
@@ -367,26 +493,64 @@ private struct VWMAParameters {
 }
 
 private struct XParameters {
-    let pressureLookback: Int
-    let rangeLookback: Int
+    let fastMeanPeriod: Int
+    let slowMeanPeriod: Int
+    let atrPeriod: Int
     let volumeLookback: Int
-    let rangeMultiplier: Decimal
+    let minimumTrendSpread: Decimal
+    let maximumTrendSpread: Decimal
+    let minimumATRPercent: Decimal
+    let maximumATRPercent: Decimal
     let volumeMultiplier: Decimal
     let minimumCloseLocation: Decimal
-    let minimumOppositeWickRatio: Decimal
-    let minimumPressure: Decimal
+    let stopATRBuffer: Decimal
     let rewardRiskRatio: Decimal
 
     init(overrides: [String: Decimal]) {
-        pressureLookback = intOverride("pressureLookback", overrides: overrides, defaultValue: 24)
-        rangeLookback = intOverride("rangeLookback", overrides: overrides, defaultValue: 24)
+        fastMeanPeriod = intOverride("fastMeanPeriod", overrides: overrides, defaultValue: 96)
+        slowMeanPeriod = intOverride("slowMeanPeriod", overrides: overrides, defaultValue: 384)
+        atrPeriod = intOverride("atrPeriod", overrides: overrides, defaultValue: 14)
         volumeLookback = intOverride("volumeLookback", overrides: overrides, defaultValue: 96)
-        rangeMultiplier = overrides["rangeMultiplier"] ?? Decimal(string: "1.7")!
-        volumeMultiplier = overrides["volumeMultiplier"] ?? Decimal(string: "1.4")!
-        minimumCloseLocation = overrides["minimumCloseLocation"] ?? Decimal(string: "0.60")!
-        minimumOppositeWickRatio = overrides["minimumOppositeWickRatio"] ?? Decimal(string: "0.25")!
-        minimumPressure = overrides["minimumPressure"] ?? Decimal(string: "0.12")!
-        rewardRiskRatio = overrides["rewardRiskRatio"] ?? Decimal(string: "2.4")!
+        minimumTrendSpread = overrides["minimumTrendSpread"] ?? Decimal(string: "0.004")!
+        maximumTrendSpread = overrides["maximumTrendSpread"] ?? Decimal(string: "0.006")!
+        minimumATRPercent = overrides["minimumATRPercent"] ?? Decimal(string: "0.001")!
+        maximumATRPercent = overrides["maximumATRPercent"] ?? Decimal(string: "0.007")!
+        volumeMultiplier = overrides["volumeMultiplier"] ?? Decimal(string: "1.5")!
+        minimumCloseLocation = overrides["minimumCloseLocation"] ?? Decimal(string: "0.80")!
+        stopATRBuffer = overrides["stopATRBuffer"] ?? Decimal(string: "0.15")!
+        rewardRiskRatio = overrides["rewardRiskRatio"] ?? Decimal(string: "2.0")!
+    }
+}
+
+private struct XFrequencyParameters {
+    let fastMeanPeriod: Int
+    let slowMeanPeriod: Int
+    let atrPeriod: Int
+    let volumeLookback: Int
+    let reclaimLookback: Int
+    let minimumTrendSpread: Decimal
+    let maximumTrendSpread: Decimal
+    let minimumATRPercent: Decimal
+    let maximumATRPercent: Decimal
+    let volumeMultiplier: Decimal
+    let minimumCloseLocation: Decimal
+    let stopATRBuffer: Decimal
+    let rewardRiskRatio: Decimal
+
+    init(overrides: [String: Decimal]) {
+        fastMeanPeriod = intOverride("fastMeanPeriod", overrides: overrides, defaultValue: 96)
+        slowMeanPeriod = intOverride("slowMeanPeriod", overrides: overrides, defaultValue: 384)
+        atrPeriod = intOverride("atrPeriod", overrides: overrides, defaultValue: 14)
+        volumeLookback = intOverride("volumeLookback", overrides: overrides, defaultValue: 96)
+        reclaimLookback = intOverride("reclaimLookback", overrides: overrides, defaultValue: 3)
+        minimumTrendSpread = overrides["minimumTrendSpread"] ?? Decimal(string: "0.001")!
+        maximumTrendSpread = overrides["maximumTrendSpread"] ?? Decimal(string: "0.020")!
+        minimumATRPercent = overrides["minimumATRPercent"] ?? Decimal(string: "0.001")!
+        maximumATRPercent = overrides["maximumATRPercent"] ?? Decimal(string: "0.007")!
+        volumeMultiplier = overrides["volumeMultiplier"] ?? Decimal(string: "1.5")!
+        minimumCloseLocation = overrides["minimumCloseLocation"] ?? Decimal(string: "0.80")!
+        stopATRBuffer = overrides["stopATRBuffer"] ?? Decimal(string: "0.25")!
+        rewardRiskRatio = overrides["rewardRiskRatio"] ?? Decimal(string: "2.0")!
     }
 }
 
@@ -470,6 +634,22 @@ private func intOverride(
 }
 
 private extension Array where Element == Candle {
+    func simpleMovingAverage(period: Int, endingAt index: Int? = nil) -> Decimal? {
+        let endIndex = index ?? count - 1
+        guard period > 0,
+              endIndex >= 0,
+              endIndex < count,
+              endIndex - period + 1 >= 0 else {
+            return nil
+        }
+
+        var total: Decimal = 0
+        for candle in self[(endIndex - period + 1)...endIndex] {
+            total += candle.close
+        }
+        return total / Decimal(period)
+    }
+
     func volumeWeightedMovingAverage(period: Int, endingAt index: Int? = nil) -> Decimal? {
         let endIndex = index ?? count - 1
         guard period > 0,

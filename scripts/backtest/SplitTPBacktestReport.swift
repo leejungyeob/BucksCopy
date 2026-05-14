@@ -12,7 +12,7 @@ struct BacktestReportOptions {
     var oneHourCandleLimit = 20_000
     var timeframeFilter: CandleTimeframe?
     var leverage = 2
-    var maximumRiskPerTradePercent: Decimal = 12
+    var maximumRiskPerTradePercent: Decimal = 5
     var maximumPositionMarginPercent: Decimal = 100
 
     static func parse(arguments: [String]) throws -> BacktestReportOptions {
@@ -129,7 +129,7 @@ enum RunnerError: Error, CustomStringConvertible {
 
     static let usage = """
     사용법:
-      scripts/backtest/run_split_tp_backtest_report.sh [--symbol BTCUSDT] [--db PATH] [--output PATH] [--cache PATH] [--timeframe 15m] [--leverage 2] [--risk 12] [--margin 100] [--15m-limit 20000] [--1h-limit 20000] [--all|--recommended-only] [--no-cache|--refresh-cache]
+      scripts/backtest/run_split_tp_backtest_report.sh [--symbol BTCUSDT] [--db PATH] [--output PATH] [--cache PATH] [--timeframe 15m] [--leverage 2] [--risk 5] [--margin 100] [--15m-limit 20000] [--1h-limit 20000] [--all|--recommended-only] [--no-cache|--refresh-cache]
 
     기본값:
       symbol: BTCUSDT
@@ -137,7 +137,7 @@ enum RunnerError: Error, CustomStringConvertible {
       output: Derived/Reports/split-tp-backtest-BTCUSDT-all.md
       cache: Derived/Reports/split-tp-backtest-BTCUSDT-cache.json
       leverage: 2
-      risk: 12
+      risk: 5
       margin: 100
       15m-limit: 20000 (0이면 15분봉도 전체 캔들)
       1h-limit: 20000 (0이면 1시간봉도 전체 캔들)
