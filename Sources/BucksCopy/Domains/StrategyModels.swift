@@ -105,7 +105,10 @@ struct StrategyRegistry {
 
     private static var defaultStrategies: [any TradingStrategy] {
         [
-            BlockedCandleShortStrategy()
+            BlockedCandleLongStrategy(),
+            BlockedCandleShortStrategy(),
+            MovingAverageAlignmentStrategy(),
+            VWMATouchTrendStrategy()
         ]
     }
 }
