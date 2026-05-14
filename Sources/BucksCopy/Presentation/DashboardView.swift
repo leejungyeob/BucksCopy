@@ -42,7 +42,6 @@ struct DashboardView: View {
             onRefreshCredential: viewModel.connectSavedCredential,
             onDeleteCredential: viewModel.deleteCredential,
             onSelectSymbol: viewModel.selectSymbol,
-            onSelectStrategy: viewModel.updateStrategy,
             onLeverageChange: viewModel.updateLeverage,
             onMaximumRiskPerTradeChange: viewModel.updateMaximumRiskPerTrade,
             onMaximumPositionMarginChange: viewModel.updateMaximumPositionMargin,
@@ -60,7 +59,7 @@ struct DashboardView: View {
             positionCount: viewModel.state.positions.count,
             watchlist: viewModel.state.watchlist,
             selectedSymbol: viewModel.state.selectedSymbol,
-            strategyDefinitions: viewModel.strategyDefinitions(for: viewModel.state.selectedTimeframe),
+            activeStrategyRoutes: activeStrategyRoutes,
             strategyConfig: viewModel.state.strategyConfig,
             selectedLeverageRange: viewModel.selectedLeverageRange,
             runState: viewModel.state.runState
@@ -119,6 +118,14 @@ struct DashboardView: View {
         viewModel.state.positions.filter { $0.symbol == viewModel.state.selectedSymbol }
     }
 
+    private var activeStrategyRoutes: [ActiveStrategyRoute] {
+        CandleTimeframe.allCases.flatMap { timeframe in
+            viewModel.strategyDefinitions(for: timeframe).map {
+                ActiveStrategyRoute(timeframe: timeframe, definition: $0)
+            }
+        }
+    }
+
     private var candleStatusText: String {
         let historyText: String
         switch viewModel.state.candleHistoryStatus {
@@ -153,7 +160,7 @@ private struct DashboardLeftSnapshot: Equatable {
     let positionCount: Int
     let watchlist: [FuturesSymbol]
     let selectedSymbol: FuturesSymbol
-    let strategyDefinitions: [StrategyDefinition]
+    let activeStrategyRoutes: [ActiveStrategyRoute]
     let strategyConfig: StrategyConfig
     let selectedLeverageRange: ClosedRange<Int>
     let runState: StrategyRunState
@@ -172,7 +179,6 @@ private struct DashboardLeftColumn: View, Equatable {
     let onRefreshCredential: () -> Void
     let onDeleteCredential: () -> Void
     let onSelectSymbol: (FuturesSymbol) -> Void
-    let onSelectStrategy: (String) -> Void
     let onLeverageChange: (Int) -> Void
     let onMaximumRiskPerTradeChange: (Decimal) -> Void
     let onMaximumPositionMarginChange: (Decimal) -> Void
@@ -206,10 +212,8 @@ private struct DashboardLeftColumn: View, Equatable {
                     onSelect: onSelectSymbol
                 )
                 StrategySettingsPanel(
-                    definitions: snapshot.strategyDefinitions,
                     config: snapshot.strategyConfig,
                     leverageRange: snapshot.selectedLeverageRange,
-                    onSelect: onSelectStrategy,
                     onLeverageChange: onLeverageChange,
                     onMaximumRiskPerTradeChange: onMaximumRiskPerTradeChange,
                     onMaximumPositionMarginChange: onMaximumPositionMarginChange,
@@ -220,10 +224,87 @@ private struct DashboardLeftColumn: View, Equatable {
                     onStart: onStartPaper,
                     onStop: onStopPaper
                 )
+                ActiveStrategyPortfolioPanel(routes: snapshot.activeStrategyRoutes)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .scrollIndicators(.visible)
+    }
+}
+
+private struct ActiveStrategyRoute: Equatable, Identifiable {
+    let timeframe: CandleTimeframe
+    let definition: StrategyDefinition
+
+    var id: String {
+        "\(timeframe.rawValue):\(definition.id)"
+    }
+}
+
+private struct ActiveStrategyPortfolioPanel: View {
+    let routes: [ActiveStrategyRoute]
+    @State private var isExpanded = false
+
+    var body: some View {
+        DashboardPanel {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if routes.isEmpty {
+                        Text("현재 자동매매 평가 대상 전략이 없습니다.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(routes) { route in
+                            ActiveStrategyRouteRow(route: route)
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack(spacing: 8) {
+                    Text("현재 적용중인 매매전략")
+                        .font(.headline)
+                    Spacer()
+                    Text("\(routes.count)")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.secondary.opacity(0.14)))
+                }
+            }
+        }
+    }
+}
+
+private struct ActiveStrategyRouteRow: View {
+    let route: ActiveStrategyRoute
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(route.timeframe.rawValue)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+
+                Text(route.definition.name)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+            }
+
+            Text(route.definition.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 

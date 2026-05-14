@@ -1,10 +1,8 @@
 import SwiftUI
 
 struct StrategySettingsPanel: View {
-    let definitions: [StrategyDefinition]
     let config: StrategyConfig
     let leverageRange: ClosedRange<Int>
-    let onSelect: (String) -> Void
     let onLeverageChange: (Int) -> Void
     let onMaximumRiskPerTradeChange: (Decimal) -> Void
     let onMaximumPositionMarginChange: (Decimal) -> Void
@@ -13,35 +11,8 @@ struct StrategySettingsPanel: View {
     var body: some View {
         DashboardPanel {
             VStack(alignment: .leading, spacing: 10) {
-                Text("자동매매 전략")
+                Text("매매전략")
                     .font(.headline)
-
-                VStack(spacing: 4) {
-                    ForEach(definitions) { definition in
-                        Button {
-                            guard definition.id != config.strategyID else { return }
-                            onSelect(definition.id)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text(definition.name)
-                                    .font(.callout)
-                                    .lineLimit(1)
-                                Spacer()
-                                if definition.id == config.strategyID {
-                                    Image(systemName: "checkmark")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.green)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 26)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(definition.id == config.strategyID ? Color.accentColor.opacity(0.14) : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
 
                 Stepper(
                     value: Binding(
