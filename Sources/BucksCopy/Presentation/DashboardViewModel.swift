@@ -27,6 +27,7 @@ final class DashboardViewModel: ObservableObject {
     private var activeLocalCandleLoadID: UUID?
     private var candleRefreshTask: Task<Void, Never>?
     private var candleHistoryBackfillTask: Task<Void, Never>?
+    private var marketDataBootstrapTask: Task<Void, Never>?
     private var candleStreamTask: Task<Void, Never>?
     private var positionStreamTask: Task<Void, Never>?
     private var positionPollingTask: Task<Void, Never>?
@@ -86,6 +87,7 @@ final class DashboardViewModel: ObservableObject {
         localCandleLoadTask?.cancel()
         candleRefreshTask?.cancel()
         candleHistoryBackfillTask?.cancel()
+        marketDataBootstrapTask?.cancel()
         candleStreamTask?.cancel()
         positionStreamTask?.cancel()
         positionPollingTask?.cancel()
@@ -110,7 +112,8 @@ final class DashboardViewModel: ObservableObject {
             refreshSymbolCatalog()
             loadCandles()
             loadRecentLogs()
-            startCandleBackfill()
+            startSelectedLiveCandleStream()
+            startInitialMarketDataSync()
         } catch {
             state.credentialStatus = .failed(message: sanitizedError(error))
         }
@@ -247,7 +250,7 @@ final class DashboardViewModel: ObservableObject {
                 stopLiveCandleStream()
                 stopHistoricalCandleBackfill()
                 loadCandles()
-                startCandleBackfill()
+                startSelectedLiveCandleStream()
             }
 
             state.strategyConfig.leverage = clampedLeverage(
@@ -275,9 +278,8 @@ final class DashboardViewModel: ObservableObject {
         candleDisplayLimit = initialCandleDisplayLimit
         state.candleHistoryStatus = .idle
         stopLiveCandleStream()
-        stopHistoricalCandleBackfill()
         loadCandles()
-        startCandleBackfill()
+        startSelectedLiveCandleStream()
     }
 
     func selectTimeframe(_ timeframe: CandleTimeframe) {
@@ -290,9 +292,8 @@ final class DashboardViewModel: ObservableObject {
         candleDisplayLimit = initialCandleDisplayLimit
         state.candleHistoryStatus = .idle
         stopLiveCandleStream()
-        stopHistoricalCandleBackfill()
         loadCandles()
-        startCandleBackfill()
+        startSelectedLiveCandleStream()
     }
 
     func updateStrategy(_ strategyID: String) {
@@ -550,6 +551,123 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
+    private func startInitialMarketDataSync() {
+        let routes = state.watchlist.flatMap { symbol in
+            CandleTimeframe.allCases.map { timeframe in
+                (symbol: symbol, timeframe: timeframe)
+            }
+        }
+        guard !routes.isEmpty else {
+            state.marketDataBootstrapStatus = .complete(totalRoutes: 0, skippedRoutes: 0, savedCandles: 0)
+            return
+        }
+
+        guard candleBackfillRepository != nil else {
+            state.marketDataBootstrapStatus = .complete(totalRoutes: 0, skippedRoutes: 0, savedCandles: 0)
+            return
+        }
+
+        marketDataBootstrapTask?.cancel()
+        marketDataBootstrapTask = Task { [weak self] in
+            await self?.syncInitialMarketData(routes: routes)
+        }
+    }
+
+    private func syncInitialMarketData(
+        routes: [(symbol: FuturesSymbol, timeframe: CandleTimeframe)]
+    ) async {
+        guard let candleBackfillRepository else { return }
+
+        var completedRoutes = 0
+        var skippedRoutes = 0
+        var savedCandles = 0
+        let totalRoutes = routes.count
+
+        do {
+            for route in routes {
+                try Task.checkCancellation()
+
+                state.marketDataBootstrapStatus = .syncing(
+                    completedRoutes: completedRoutes,
+                    totalRoutes: totalRoutes,
+                    currentSymbol: route.symbol,
+                    currentTimeframe: route.timeframe,
+                    savedCandles: savedCandles,
+                    currentRouteProgress: 0
+                )
+
+                if try await isHistoryComplete(symbol: route.symbol, timeframe: route.timeframe) {
+                    skippedRoutes += 1
+                    completedRoutes += 1
+                    state.marketDataBootstrapStatus = .syncing(
+                        completedRoutes: completedRoutes,
+                        totalRoutes: totalRoutes,
+                        currentSymbol: route.symbol,
+                        currentTimeframe: route.timeframe,
+                        savedCandles: savedCandles,
+                        currentRouteProgress: 0
+                    )
+                    continue
+                }
+
+                let latestCandles = try await candleBackfillRepository.fetchCandles(
+                    symbol: route.symbol,
+                    timeframe: route.timeframe,
+                    limit: 200
+                )
+                try await upsertCandles(latestCandles)
+                savedCandles += latestCandles.count
+                try await reloadVisibleCandlesIfCurrent(
+                    symbol: route.symbol,
+                    timeframe: route.timeframe,
+                    source: "Local cache"
+                )
+
+                let historicalSavedCandles = try await syncHistoricalCandlesForInitialMarketData(
+                    symbol: route.symbol,
+                    timeframe: route.timeframe
+                ) { routeSavedCandles, routeProgress in
+                    self.state.marketDataBootstrapStatus = .syncing(
+                        completedRoutes: completedRoutes,
+                        totalRoutes: totalRoutes,
+                        currentSymbol: route.symbol,
+                        currentTimeframe: route.timeframe,
+                        savedCandles: savedCandles + routeSavedCandles,
+                        currentRouteProgress: routeProgress
+                    )
+                }
+                savedCandles += historicalSavedCandles
+                completedRoutes += 1
+
+                state.marketDataBootstrapStatus = .syncing(
+                    completedRoutes: completedRoutes,
+                    totalRoutes: totalRoutes,
+                    currentSymbol: route.symbol,
+                    currentTimeframe: route.timeframe,
+                    savedCandles: savedCandles,
+                    currentRouteProgress: 0
+                )
+            }
+
+            try await reloadVisibleCandlesIfCurrent(
+                symbol: state.selectedSymbol,
+                timeframe: state.selectedTimeframe,
+                source: "Local cache"
+            )
+            startSelectedLiveCandleStream()
+            state.marketDataBootstrapStatus = .complete(
+                totalRoutes: totalRoutes,
+                skippedRoutes: skippedRoutes,
+                savedCandles: savedCandles
+            )
+            state.candleHistoryStatus = .complete(savedCount: savedCandles)
+        } catch is CancellationError {
+            return
+        } catch {
+            state.marketDataBootstrapStatus = .failed(message: sanitizedError(error))
+        }
+    }
+
     func refreshCandlesFromBitget() async {
         guard let candleBackfillRepository else { return }
         let symbol = state.selectedSymbol
@@ -596,6 +714,100 @@ final class DashboardViewModel: ObservableObject {
         candleHistoryBackfillTask = Task { [weak self] in
             await self?.syncHistoricalCandles(symbol: symbol, timeframe: timeframe)
         }
+    }
+
+    private func isHistoryComplete(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) async throws -> Bool {
+        guard let candleHistoryStore else { return false }
+        return try await loadHistorySyncState(
+            store: candleHistoryStore,
+            symbol: symbol,
+            timeframe: timeframe
+        )?.isComplete == true
+    }
+
+    private func syncHistoricalCandlesForInitialMarketData(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        onProgress: @MainActor (_ savedCandles: Int, _ routeProgress: Double) -> Void
+    ) async throws -> Int {
+        guard let candleBackfillRepository, let candleHistoryStore else { return 0 }
+
+        var endTime = try await loadOldestCandleOpenTime(
+            symbol: symbol,
+            timeframe: timeframe
+        ) ?? clock.now
+        var savedCount = 0
+        var pageCount = 0
+        let estimatedPages = estimatedFourYearHistoryPages(for: timeframe)
+
+        while pageCount < historyBackfillPolicy.maxPagesPerRun {
+            try Task.checkCancellation()
+            let historicalCandles = try await candleBackfillRepository.fetchHistoricalCandles(
+                symbol: symbol,
+                timeframe: timeframe,
+                endingBefore: endTime,
+                limit: historyBackfillPolicy.pageLimit
+            )
+            let olderCandles = historicalCandles
+                .filter { $0.openTime < endTime }
+                .sorted { $0.openTime < $1.openTime }
+
+            guard !olderCandles.isEmpty else {
+                onProgress(savedCount, 0.99)
+                try await saveHistorySyncState(.init(
+                    productType: .usdtFutures,
+                    symbol: symbol,
+                    timeframe: timeframe,
+                    isComplete: true,
+                    oldestOpenTime: try await loadOldestCandleOpenTime(
+                        symbol: symbol,
+                        timeframe: timeframe
+                    ),
+                    updatedAt: clock.now
+                ), store: candleHistoryStore)
+                return savedCount
+            }
+
+            try await upsertCandles(olderCandles)
+            endTime = olderCandles.first?.openTime ?? endTime
+            savedCount += olderCandles.count
+            pageCount += 1
+            onProgress(
+                savedCount,
+                min(Double(pageCount) / Double(max(estimatedPages, 1)), 0.98)
+            )
+
+            try await saveHistorySyncState(.init(
+                productType: .usdtFutures,
+                symbol: symbol,
+                timeframe: timeframe,
+                isComplete: false,
+                oldestOpenTime: endTime,
+                updatedAt: clock.now
+            ), store: candleHistoryStore)
+
+            guard historyBackfillPolicy.pageDelayNanoseconds > 0 else { continue }
+            try await Task.sleep(nanoseconds: historyBackfillPolicy.pageDelayNanoseconds)
+        }
+
+        try await saveHistorySyncState(.init(
+            productType: .usdtFutures,
+            symbol: symbol,
+            timeframe: timeframe,
+            isComplete: false,
+            oldestOpenTime: endTime,
+            updatedAt: clock.now
+        ), store: candleHistoryStore)
+        return savedCount
+    }
+
+    private func estimatedFourYearHistoryPages(for timeframe: CandleTimeframe) -> Int {
+        let fourYears: TimeInterval = 4 * 365 * 24 * 60 * 60
+        let estimatedCandles = Int(ceil(fourYears / timeframe.duration))
+        return Int(ceil(Double(estimatedCandles) / Double(max(historyBackfillPolicy.pageLimit, 1))))
     }
 
     private func stopHistoricalCandleBackfill() {
@@ -722,6 +934,10 @@ final class DashboardViewModel: ObservableObject {
                 await self?.handleLiveCandle(candle, symbol: symbol, timeframe: timeframe)
             }
         }
+    }
+
+    private func startSelectedLiveCandleStream() {
+        startLiveCandleStream(symbol: state.selectedSymbol, timeframe: state.selectedTimeframe)
     }
 
     private func stopLiveCandleStream() {
@@ -1050,6 +1266,24 @@ final class DashboardViewModel: ObservableObject {
                 limit: limit
             )
         }.value
+    }
+
+    private func reloadVisibleCandlesIfCurrent(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        source: String
+    ) async throws {
+        guard state.selectedSymbol == symbol, state.selectedTimeframe == timeframe else {
+            return
+        }
+
+        cancelLocalCandleLoad()
+        state.candles = try await loadCandles(
+            symbol: symbol,
+            timeframe: timeframe,
+            limit: candleDisplayLimit
+        )
+        state.candleStatus = .loaded(count: state.candles.count, source: source)
     }
 
     private func loadOldestCandleOpenTime(

@@ -39,6 +39,7 @@
 - USDT-M Futures catalog 로드 -> `normal` + `USDT` margin 중 BTCUSDT/ETHUSDT만 앱 catalog와 Watchlist에 보관
 - Watchlist 선택 -> 선택된 심볼만 WebSocket 구독 -> 선택 해제된 심볼은 strategy 대상 제외
 - REST candle backfill 성공 -> 같은 심볼/타임프레임 WebSocket candle 구독 시작 -> push candle이 SQLite와 chart state에 upsert
+- Dashboard 시작 -> BTCUSDT/ETHUSDT Watchlist의 `15m`, `1H`, `4H`, `12H`, `1D` 저장 상태 확인 -> 미완료 라우트만 REST backfill -> 완료 라우트는 재다운로드 없이 건너뜀
 - Bitget position fixture -> read-only `PositionSnapshot` 매핑 -> live order API 호출 없음
 - WebSocket disconnect -> ping timeout 감지 -> backoff reconnect -> 중복 subscribe 없음
 - Watchlist가 단일 연결 권장선인 50채널을 초과 -> validation 실패 또는 명시적 연결 분리

@@ -146,6 +146,113 @@ final class DashboardViewModelTests: XCTestCase {
         try await waitUntil { viewModel.state.isConnected }
     }
 
+    func testBootstrapSeedsDefaultWatchlistAcrossAllTimeframes() async throws {
+        let symbols = [FuturesSymbol("BTCUSDT"), FuturesSymbol("ETHUSDT")]
+        var state = DashboardState()
+        state.watchlist = symbols
+        state.selectedSymbol = symbols[0]
+        state.selectedTimeframe = .twelveHours
+
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry()
+        let backfillRepository = RecordingBootstrapCandleBackfillRepository()
+        let viewModel = DashboardViewModel(
+            state: state,
+            credentialStore: InMemoryCredentialStore(),
+            accountRepository: nil,
+            positionRepository: nil,
+            candleRepository: candleRepository,
+            candleHistoryStore: candleRepository,
+            candleBackfillRepository: backfillRepository,
+            logStore: logStore,
+            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            strategyRegistry: registry,
+            historyBackfillPolicy: .test
+        )
+
+        viewModel.bootstrap()
+
+        try await waitUntil(timeout: 3) {
+            if case .complete(let totalRoutes, _, _) = viewModel.state.marketDataBootstrapStatus {
+                return totalRoutes == symbols.count * CandleTimeframe.allCases.count
+            }
+            return false
+        }
+
+        let expectedRoutes = bootstrapRouteKeys(symbols: symbols)
+        XCTAssertEqual(Set(backfillRepository.latestRequestKeys), expectedRoutes)
+        XCTAssertEqual(Set(backfillRepository.historicalRequestKeys), expectedRoutes)
+
+        for symbol in symbols {
+            for timeframe in CandleTimeframe.allCases {
+                let candles = try candleRepository.loadCandles(
+                    symbol: symbol,
+                    timeframe: timeframe,
+                    limit: 1
+                )
+                XCTAssertFalse(candles.isEmpty)
+                XCTAssertEqual(
+                    try candleRepository.loadHistorySyncState(
+                        symbol: symbol,
+                        timeframe: timeframe
+                    )?.isComplete,
+                    true
+                )
+            }
+        }
+    }
+
+    func testBootstrapSkipsRoutesWithCompleteSavedHistory() async throws {
+        let symbols = [FuturesSymbol("BTCUSDT"), FuturesSymbol("ETHUSDT")]
+        var state = DashboardState()
+        state.watchlist = symbols
+
+        let candleRepository = InMemoryCandleRepository()
+        for symbol in symbols {
+            for timeframe in CandleTimeframe.allCases {
+                try candleRepository.saveHistorySyncState(.init(
+                    productType: .usdtFutures,
+                    symbol: symbol,
+                    timeframe: timeframe,
+                    isComplete: true,
+                    oldestOpenTime: Date(timeIntervalSince1970: 0),
+                    updatedAt: Date(timeIntervalSince1970: 1)
+                ))
+            }
+        }
+
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry()
+        let backfillRepository = RecordingBootstrapCandleBackfillRepository()
+        let viewModel = DashboardViewModel(
+            state: state,
+            credentialStore: InMemoryCredentialStore(),
+            accountRepository: nil,
+            positionRepository: nil,
+            candleRepository: candleRepository,
+            candleHistoryStore: candleRepository,
+            candleBackfillRepository: backfillRepository,
+            logStore: logStore,
+            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            strategyRegistry: registry,
+            historyBackfillPolicy: .test
+        )
+
+        viewModel.bootstrap()
+
+        try await waitUntil(timeout: 2) {
+            if case .complete(let totalRoutes, let skippedRoutes, _) = viewModel.state.marketDataBootstrapStatus {
+                return totalRoutes == symbols.count * CandleTimeframe.allCases.count &&
+                    skippedRoutes == totalRoutes
+            }
+            return false
+        }
+
+        XCTAssertTrue(backfillRepository.latestRequestKeys.isEmpty)
+        XCTAssertTrue(backfillRepository.historicalRequestKeys.isEmpty)
+    }
+
     func testRefreshStartsWebSocketStreamAndAppliesLiveCandle() async throws {
         let symbol = FuturesSymbol("BTCUSDT")
         let candleRepository = InMemoryCandleRepository()
@@ -535,6 +642,18 @@ final class DashboardViewModelTests: XCTestCase {
         XCTFail("Timed out waiting for condition.")
     }
 
+    private func bootstrapRouteKeys(symbols: [FuturesSymbol]) -> Set<String> {
+        Set(symbols.flatMap { symbol in
+            CandleTimeframe.allCases.map { timeframe in
+                bootstrapRouteKey(symbol: symbol, timeframe: timeframe)
+            }
+        })
+    }
+
+    private func bootstrapRouteKey(symbol: FuturesSymbol, timeframe: CandleTimeframe) -> String {
+        "\(symbol.rawValue):\(timeframe.rawValue)"
+    }
+
     private func dashboardPassingConfirmationEngine() -> SignalConfirmationEngine {
         SignalConfirmationEngine(rules: [
             DashboardEvidenceRule(id: "trend", group: .trend, score: 20),
@@ -728,6 +847,74 @@ private final class StubCandleBackfillRepository: CandleBackfillRepository {
     ) async throws -> [Candle] {
         guard !historicalPages.isEmpty else { return [] }
         return historicalPages.removeFirst()
+    }
+}
+
+private final class RecordingBootstrapCandleBackfillRepository: CandleBackfillRepository {
+    private let lock = NSLock()
+    private var latestRequests: [String] = []
+    private var historicalRequests: [String] = []
+
+    var latestRequestKeys: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestRequests
+    }
+
+    var historicalRequestKeys: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return historicalRequests
+    }
+
+    func fetchCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        limit: Int
+    ) async throws -> [Candle] {
+        let requestIndex = recordLatest(symbol: symbol, timeframe: timeframe)
+        let close = Decimal(100 + requestIndex)
+        return [
+            Candle(
+                productType: .usdtFutures,
+                symbol: symbol,
+                timeframe: timeframe,
+                openTime: Date(timeIntervalSince1970: TimeInterval(requestIndex) * timeframe.duration),
+                open: close - 1,
+                high: close + 2,
+                low: close - 2,
+                close: close,
+                volume: 10,
+                isClosed: true
+            )
+        ]
+    }
+
+    func fetchHistoricalCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        endingBefore endTime: Date,
+        limit: Int
+    ) async throws -> [Candle] {
+        recordHistorical(symbol: symbol, timeframe: timeframe)
+        return []
+    }
+
+    private func recordLatest(symbol: FuturesSymbol, timeframe: CandleTimeframe) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        latestRequests.append(routeKey(symbol: symbol, timeframe: timeframe))
+        return latestRequests.count
+    }
+
+    private func recordHistorical(symbol: FuturesSymbol, timeframe: CandleTimeframe) {
+        lock.lock()
+        defer { lock.unlock() }
+        historicalRequests.append(routeKey(symbol: symbol, timeframe: timeframe))
+    }
+
+    private func routeKey(symbol: FuturesSymbol, timeframe: CandleTimeframe) -> String {
+        "\(symbol.rawValue):\(timeframe.rawValue)"
     }
 }
 

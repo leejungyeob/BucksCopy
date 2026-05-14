@@ -98,7 +98,8 @@ flowchart LR
 - v1 default storage is a SQLite-backed Data adapter. Do not store API key, secret, passphrase, or raw private account/order payloads in this DB.
 - Persist normalized 1m closed exchange candles and derived closed candles for `15m`, `1H`, `4H`, `12H`, and `1D`.
 - Use `(productType, symbol, granularity, openTime)` as the natural unique key so REST backfill and WebSocket updates are idempotent.
-- Current implementation: on app start or selected symbol/timeframe change, load local candles, call `GET /api/v2/mix/market/candles` for the latest window, upsert the result, reload the chart, then start the matching public WebSocket candle subscription.
+- Current implementation: on app start, load local candles, then seed every Dashboard Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D` through Bitget REST candle backfill unless that symbol/timeframe already has a complete local history cursor. The selected chart keeps a matching public WebSocket candle subscription for live updates.
+- Selected symbol/timeframe changes reload the local chart view and switch only the matching live WebSocket candle subscription; they do not restart historical backfill for that tab.
 - Target gap-fill implementation: load the last local closed candle per Watchlist symbol, request only the missing gap from Bitget, upsert the result, then resume WebSocket streaming.
 - If no local history exists, seed from the maximum officially queryable REST range, then continue accumulating locally from that point forward.
 - Keep in-progress candles either in memory or stored with an explicit non-closed state; strategy execution must ignore non-closed candles.

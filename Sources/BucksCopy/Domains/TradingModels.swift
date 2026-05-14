@@ -514,6 +514,7 @@ struct DashboardState: Equatable {
     var candles: [Candle] = []
     var candleStatus: CandleLoadStatus = .idle
     var candleHistoryStatus: CandleHistoryLoadStatus = .idle
+    var marketDataBootstrapStatus: MarketDataBootstrapStatus = .idle
     var accounts: [AccountSnapshot] = []
     var positions: [PositionSnapshot] = []
     var strategyConfig: StrategyConfig = .default
@@ -541,6 +542,33 @@ enum CandleLoadStatus: Equatable {
     case loading
     case loaded(count: Int, source: String)
     case failed(message: String)
+}
+
+enum MarketDataBootstrapStatus: Equatable {
+    case idle
+    case syncing(
+        completedRoutes: Int,
+        totalRoutes: Int,
+        currentSymbol: FuturesSymbol,
+        currentTimeframe: CandleTimeframe,
+        savedCandles: Int,
+        currentRouteProgress: Double
+    )
+    case complete(totalRoutes: Int, skippedRoutes: Int, savedCandles: Int)
+    case failed(message: String)
+
+    var progress: Double? {
+        switch self {
+        case .idle, .failed:
+            return nil
+        case .syncing(let completedRoutes, let totalRoutes, _, _, _, let currentRouteProgress):
+            guard totalRoutes > 0 else { return nil }
+            let clampedRouteProgress = min(max(currentRouteProgress, 0), 0.99)
+            return (Double(completedRoutes) + clampedRouteProgress) / Double(totalRoutes)
+        case .complete:
+            return 1
+        }
+    }
 }
 
 enum CandleHistoryLoadStatus: Equatable {

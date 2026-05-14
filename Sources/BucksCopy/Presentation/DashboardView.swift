@@ -73,8 +73,9 @@ struct DashboardView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(viewModel.state.selectedSymbol.rawValue)
                             .font(.title2.weight(.semibold))
-                        Text(candleStatusText)
-                            .foregroundStyle(.secondary)
+                        MarketDataBootstrapStatusView(
+                            status: viewModel.state.marketDataBootstrapStatus
+                        )
                     }
                     Spacer()
                     TimeframePicker(
@@ -125,31 +126,59 @@ struct DashboardView: View {
             }
         }
     }
+}
 
-    private var candleStatusText: String {
-        let historyText: String
-        switch viewModel.state.candleHistoryStatus {
-        case .idle:
-            historyText = ""
-        case .syncing(let savedCount, let pageCount):
-            historyText = " • history syncing \(savedCount) saved / \(pageCount) pages"
-        case .complete(let savedCount):
-            historyText = savedCount > 0
-                ? " • history saved \(savedCount)"
-                : " • history ready"
-        case .failed:
-            historyText = " • history sync failed"
+private struct MarketDataBootstrapStatusView: View {
+    let status: MarketDataBootstrapStatus
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let progress = status.progress {
+                ProgressView(value: progress)
+                    .controlSize(.small)
+                    .frame(width: 120)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 24)
+                    .opacity(isIdle ? 0 : 1)
+            }
+
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(statusColor)
+                .lineLimit(1)
         }
+    }
 
-        switch viewModel.state.candleStatus {
+    private var isIdle: Bool {
+        if case .idle = status { return true }
+        return false
+    }
+
+    private var statusColor: Color {
+        if case .failed = status {
+            return .red
+        }
+        return .secondary
+    }
+
+    private var message: String {
+        switch status {
         case .idle:
-            return "USDT-M Futures"
-        case .loading:
-            return "Loading candles from Bitget..."
-        case .loaded(let count, let source):
-            return "\(count) candles loaded from \(source)\(historyText)"
-        case .failed(let message):
-            return "Candle load failed: \(message)"
+            return "시장 데이터 확인 중"
+        case .syncing(_, _, let symbol, let timeframe, let savedCandles, _):
+            guard savedCandles > 0 else {
+                return "\(symbol.rawValue) \(timeframe.rawValue) 데이터 저장 중"
+            }
+            return "\(symbol.rawValue) \(timeframe.rawValue) 저장 중 · \(savedCandles)개"
+        case .complete(let totalRoutes, let skippedRoutes, _):
+            if totalRoutes > 0, skippedRoutes == totalRoutes {
+                return "저장된 시장 데이터 사용 중"
+            }
+            return "시장 데이터 준비 완료"
+        case .failed:
+            return "시장 데이터 동기화 실패"
         }
     }
 }
