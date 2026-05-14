@@ -36,9 +36,12 @@ struct TradeLogPanel: View {
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .frame(minHeight: 330)
+                .defaultScrollAnchor(.top)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+            .frame(maxHeight: .infinity, alignment: .topLeading)
         }
     }
 }

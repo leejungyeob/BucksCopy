@@ -20,6 +20,7 @@ struct CandleChartView: View {
     @State private var verticalOffsetRatio = 0.0
     @State private var priceRangeScale = 1.0
     @State private var activeDrag: ChartPointerDrag?
+    @State private var indicatorVisibility = ChartIndicatorVisibility.all
 
     private let defaultCandleSpacing = 0.9
     private let minCandleSpacing = 0.42
@@ -135,9 +136,41 @@ struct CandleChartView: View {
                 Image(systemName: "arrow.counterclockwise")
             }
             .help("Reset chart")
+
+            Menu {
+                Toggle("MA 25", isOn: $indicatorVisibility.movingAverage25)
+                Toggle("MA 50", isOn: $indicatorVisibility.movingAverage50)
+                Toggle("MA 100", isOn: $indicatorVisibility.movingAverage100)
+                Toggle("MA 200", isOn: $indicatorVisibility.movingAverage200)
+                Divider()
+                Toggle("VWMA 100", isOn: $indicatorVisibility.volumeWeightedMovingAverage100)
+            } label: {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+            }
+            .help("Indicators")
+
+            indicatorLegend
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
+    }
+
+    private var indicatorLegend: some View {
+        HStack(spacing: 5) {
+            ForEach(activeIndicatorStyles) { style in
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(style.color)
+                        .frame(width: 6, height: 6)
+                    Text(style.kind.label)
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(style.color)
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+            }
+        }
     }
 
     private func draw(
@@ -157,8 +190,14 @@ struct CandleChartView: View {
         }
 
         let visibleCandles = chartCandles[viewport.startIndex..<viewport.endIndex]
+        let indicatorSeries = visibleIndicatorSeries(candles: chartCandles, viewport: viewport)
         guard !visibleCandles.isEmpty,
-              let priceRange = priceRange(for: visibleCandles, positions: positions, chartRect: chartRect) else {
+              let priceRange = priceRange(
+                for: visibleCandles,
+                positions: positions,
+                indicatorSeries: indicatorSeries,
+                chartRect: chartRect
+              ) else {
             return
         }
 
@@ -166,6 +205,14 @@ struct CandleChartView: View {
             context: context,
             chartRect: chartRect,
             candles: visibleCandles,
+            rightEdgeIndex: viewport.rightEdgeIndex,
+            priceRange: priceRange,
+            spacing: spacing
+        )
+        drawIndicators(
+            context: context,
+            chartRect: chartRect,
+            series: indicatorSeries,
             rightEdgeIndex: viewport.rightEdgeIndex,
             priceRange: priceRange,
             spacing: spacing
@@ -252,6 +299,51 @@ struct CandleChartView: View {
         context.stroke(downWicks, with: .color(Color.red.opacity(0.82)), lineWidth: wickWidth)
         context.fill(upBodies, with: .color(Color.green.opacity(0.78)))
         context.fill(downBodies, with: .color(Color.red.opacity(0.9)))
+    }
+
+    private func drawIndicators(
+        context: GraphicsContext,
+        chartRect: CGRect,
+        series: [ChartIndicatorSeries],
+        rightEdgeIndex: Double,
+        priceRange: ClosedRange<Double>,
+        spacing: Double
+    ) {
+        guard !series.isEmpty else { return }
+
+        func y(_ price: Double) -> Double {
+            let ratio = (price - priceRange.lowerBound) / max(priceRange.upperBound - priceRange.lowerBound, 1)
+            return chartRect.maxY - chartRect.height * ratio
+        }
+
+        for line in series {
+            guard line.points.count >= 2,
+                  let style = indicatorStyle(for: line.kind) else { continue }
+
+            var path = Path()
+            var hasStarted = false
+            for point in line.points {
+                let x = chartRect.maxX - (rightEdgeIndex - Double(point.candleIndex)) * spacing
+                guard x >= chartRect.minX - spacing, x <= chartRect.maxX + spacing else {
+                    continue
+                }
+
+                let position = CGPoint(x: x, y: y(point.value.chartDouble))
+                if hasStarted {
+                    path.addLine(to: position)
+                } else {
+                    path.move(to: position)
+                    hasStarted = true
+                }
+            }
+
+            guard hasStarted else { continue }
+            context.stroke(
+                path,
+                with: .color(style.color.opacity(0.92)),
+                style: StrokeStyle(lineWidth: style.lineWidth, lineCap: .round, lineJoin: .round)
+            )
+        }
     }
 
     private func drawPositionLevels(
@@ -507,6 +599,7 @@ struct CandleChartView: View {
     private func priceRange(
         for candles: ArraySlice<Candle>,
         positions: [PositionSnapshot],
+        indicatorSeries: [ChartIndicatorSeries],
         chartRect: CGRect
     ) -> ClosedRange<Double>? {
         var minPrice = Double.greatestFiniteMagnitude
@@ -521,6 +614,13 @@ struct CandleChartView: View {
             for level in PositionChartLevel.levels(for: position) {
                 minPrice = min(minPrice, level.price)
                 maxPrice = max(maxPrice, level.price)
+            }
+        }
+
+        for series in indicatorSeries {
+            for point in series.points {
+                minPrice = min(minPrice, point.value.chartDouble)
+                maxPrice = max(maxPrice, point.value.chartDouble)
             }
         }
 
@@ -719,6 +819,34 @@ struct CandleChartView: View {
         clamp(visibleCapacity * 0.14, 12, 320)
     }
 
+    private func visibleIndicatorSeries(candles chartCandles: [Candle], viewport: ChartViewport) -> [ChartIndicatorSeries] {
+        let range = viewport.startIndex..<viewport.endIndex
+        return activeIndicatorStyles.compactMap { style in
+            switch style.kind {
+            case .simpleMovingAverage(let period):
+                return ChartIndicatorCalculator.simpleMovingAverage(
+                    period: period,
+                    candles: chartCandles,
+                    visibleRange: range
+                )
+            case .volumeWeightedMovingAverage(let period):
+                return ChartIndicatorCalculator.volumeWeightedMovingAverage(
+                    period: period,
+                    candles: chartCandles,
+                    visibleRange: range
+                )
+            }
+        }
+    }
+
+    private var activeIndicatorStyles: [ChartIndicatorStyle] {
+        ChartIndicatorStyle.all.filter { indicatorVisibility.isVisible($0.kind) }
+    }
+
+    private func indicatorStyle(for kind: ChartIndicatorKind) -> ChartIndicatorStyle? {
+        ChartIndicatorStyle.all.first { $0.kind == kind }
+    }
+
     private func safeCandleSpacing(_ spacing: Double) -> Double {
         max(spacing, 0.01)
     }
@@ -798,6 +926,55 @@ private struct ChartViewport {
 private enum ChartDragMode {
     case chart
     case priceAxis
+}
+
+private struct ChartIndicatorVisibility: Equatable {
+    var movingAverage25: Bool
+    var movingAverage50: Bool
+    var movingAverage100: Bool
+    var movingAverage200: Bool
+    var volumeWeightedMovingAverage100: Bool
+
+    static let all = ChartIndicatorVisibility(
+        movingAverage25: true,
+        movingAverage50: true,
+        movingAverage100: true,
+        movingAverage200: true,
+        volumeWeightedMovingAverage100: true
+    )
+
+    func isVisible(_ kind: ChartIndicatorKind) -> Bool {
+        switch kind {
+        case .simpleMovingAverage(25):
+            return movingAverage25
+        case .simpleMovingAverage(50):
+            return movingAverage50
+        case .simpleMovingAverage(100):
+            return movingAverage100
+        case .simpleMovingAverage(200):
+            return movingAverage200
+        case .volumeWeightedMovingAverage(100):
+            return volumeWeightedMovingAverage100
+        default:
+            return false
+        }
+    }
+}
+
+private struct ChartIndicatorStyle: Identifiable {
+    let kind: ChartIndicatorKind
+    let color: Color
+    let lineWidth: CGFloat
+
+    var id: String { kind.label }
+
+    static let all: [ChartIndicatorStyle] = [
+        ChartIndicatorStyle(kind: .simpleMovingAverage(period: 25), color: .orange, lineWidth: 1.1),
+        ChartIndicatorStyle(kind: .simpleMovingAverage(period: 50), color: .green, lineWidth: 1.1),
+        ChartIndicatorStyle(kind: .simpleMovingAverage(period: 100), color: Color(red: 0.35, green: 0.78, blue: 1), lineWidth: 1.2),
+        ChartIndicatorStyle(kind: .simpleMovingAverage(period: 200), color: .red, lineWidth: 1.25),
+        ChartIndicatorStyle(kind: .volumeWeightedMovingAverage(period: 100), color: .white, lineWidth: 1.45)
+    ]
 }
 
 private struct PositionChartLevel {
