@@ -19,54 +19,78 @@ final class SQLiteCandleRepository: CandleRepository, CandleHistoryStateStore {
         limit: Int
     ) throws -> [Candle] {
         try queue.sync {
-            let statement = try database.prepare(
-                """
-                SELECT product_type, symbol, timeframe, open_time, open, high, low, close, volume, is_closed
-                FROM candles
-                WHERE product_type = ? AND symbol = ? AND timeframe = ?
-                ORDER BY open_time DESC
-                LIMIT ?;
-                """
-            )
-            try statement.bind(ProductType.usdtFutures.rawValue, at: 1)
-            try statement.bind(symbol.rawValue, at: 2)
-            try statement.bind(timeframe.rawValue, at: 3)
+            try loadCandlesLocked(symbol: symbol, timeframe: timeframe, limit: limit)
+        }
+    }
+
+    func loadAllCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) throws -> [Candle] {
+        try queue.sync {
+            try loadCandlesLocked(symbol: symbol, timeframe: timeframe, limit: nil)
+        }
+    }
+
+    private func loadCandlesLocked(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        limit: Int?
+    ) throws -> [Candle] {
+        let limitClause = limit == nil ? "" : "LIMIT ?"
+        let statement = try database.prepare(
+            """
+            SELECT product_type, symbol, timeframe, open_time, open, high, low, close, volume, is_closed
+            FROM candles
+            WHERE product_type = ? AND symbol = ? AND timeframe = ?
+            ORDER BY open_time DESC
+            \(limitClause);
+            """
+        )
+        try statement.bind(ProductType.usdtFutures.rawValue, at: 1)
+        try statement.bind(symbol.rawValue, at: 2)
+        try statement.bind(timeframe.rawValue, at: 3)
+        if let limit {
             let fetchLimit = max(limit, min(limit * 3, limit + 1_000))
             try statement.bind(fetchLimit, at: 4)
+        }
 
-            var candles: [Candle] = []
-            while try statement.step() {
-                guard
-                    let productText = statement.string(at: 0),
-                    let productType = ProductType(rawValue: productText),
-                    let symbolText = statement.string(at: 1),
-                    let timeframeText = statement.string(at: 2),
-                    let timeframe = CandleTimeframe(rawValue: timeframeText)
-                else {
-                    continue
-                }
-
-                let openTime = Date(timeIntervalSince1970: statement.double(at: 3))
-                guard Self.isAlignedExchangeOpenTime(openTime, timeframe: timeframe) else {
-                    continue
-                }
-
-                candles.append(Candle(
-                    productType: productType,
-                    symbol: FuturesSymbol(symbolText),
-                    timeframe: timeframe,
-                    openTime: openTime,
-                    open: DecimalText.parse(statement.string(at: 4)),
-                    high: DecimalText.parse(statement.string(at: 5)),
-                    low: DecimalText.parse(statement.string(at: 6)),
-                    close: DecimalText.parse(statement.string(at: 7)),
-                    volume: DecimalText.parse(statement.string(at: 8)),
-                    isClosed: statement.int(at: 9) == 1
-                ))
+        var candles: [Candle] = []
+        while try statement.step() {
+            guard
+                let productText = statement.string(at: 0),
+                let productType = ProductType(rawValue: productText),
+                let symbolText = statement.string(at: 1),
+                let timeframeText = statement.string(at: 2),
+                let timeframe = CandleTimeframe(rawValue: timeframeText)
+            else {
+                continue
             }
 
-            return Array(candles.sorted { $0.openTime < $1.openTime }.suffix(limit))
+            let openTime = Date(timeIntervalSince1970: statement.double(at: 3))
+            guard Self.isAlignedExchangeOpenTime(openTime, timeframe: timeframe) else {
+                continue
+            }
+
+            candles.append(Candle(
+                productType: productType,
+                symbol: FuturesSymbol(symbolText),
+                timeframe: timeframe,
+                openTime: openTime,
+                open: DecimalText.parse(statement.string(at: 4)),
+                high: DecimalText.parse(statement.string(at: 5)),
+                low: DecimalText.parse(statement.string(at: 6)),
+                close: DecimalText.parse(statement.string(at: 7)),
+                volume: DecimalText.parse(statement.string(at: 8)),
+                isClosed: statement.int(at: 9) == 1
+            ))
         }
+
+        let sortedCandles = candles.sorted { $0.openTime < $1.openTime }
+        if let limit {
+            return Array(sortedCandles.suffix(limit))
+        }
+        return sortedCandles
     }
 
     func loadOldestCandleOpenTime(

@@ -120,6 +120,17 @@ final class InMemoryCandleRepository: CandleRepository, CandleHistoryStateStore 
             .suffix(limit))
     }
 
+    func loadAllCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) throws -> [Candle] {
+        lock.lock()
+        defer { lock.unlock() }
+        return candles
+            .filter { $0.symbol == symbol && $0.timeframe == timeframe }
+            .sorted { $0.openTime < $1.openTime }
+    }
+
     func loadOldestCandleOpenTime(
         symbol: FuturesSymbol,
         timeframe: CandleTimeframe

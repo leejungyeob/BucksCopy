@@ -32,6 +32,88 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.state.candles.allSatisfy { $0.timeframe == .oneHour })
     }
 
+    func testTimeframeChangeRoutesPaperStrategyToRecommendedDefault() {
+        let viewModel = makeViewModel(credentialStore: InMemoryCredentialStore())
+
+        viewModel.selectTimeframe(.twelveHours)
+
+        XCTAssertEqual(viewModel.state.selectedTimeframe, .twelveHours)
+        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, VWMATouchTrendStrategy.identifier)
+
+        viewModel.selectTimeframe(.fourHours)
+
+        XCTAssertEqual(viewModel.state.selectedTimeframe, .fourHours)
+        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, BlockedCandleShortStrategy.identifier)
+    }
+
+    func testBacktestTimeframeChangeRoutesStrategyToRecommendedDefault() {
+        let viewModel = makeViewModel(credentialStore: InMemoryCredentialStore())
+
+        viewModel.selectBacktestTimeframe(.oneDay)
+
+        XCTAssertEqual(viewModel.state.backtestConfiguration.timeframe, .oneDay)
+        XCTAssertEqual(
+            viewModel.state.backtestConfiguration.strategyConfig.strategyID,
+            VWMATouchTrendStrategy.identifier
+        )
+    }
+
+    func testStrategySelectionIgnoresStrategiesOutsideCurrentTimeframe() {
+        let viewModel = makeViewModel(credentialStore: InMemoryCredentialStore())
+        viewModel.selectTimeframe(.twelveHours)
+
+        viewModel.updateStrategy(MovingAverageAlignmentStrategy.identifier)
+
+        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, VWMATouchTrendStrategy.identifier)
+    }
+
+    func testPaperBotMonitorsRecommendedStrategiesAcrossAllTimeframes() async throws {
+        let symbol = FuturesSymbol("BTCUSDT")
+        var state = DashboardState()
+        state.watchlist = [symbol]
+        state.selectedSymbol = symbol
+        state.selectedTimeframe = .fifteenMinutes
+        state.strategyConfig = MovingAverageAlignmentStrategy().definition.defaultConfig
+
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry()
+        let viewModel = DashboardViewModel(
+            state: state,
+            credentialStore: InMemoryCredentialStore(),
+            accountRepository: nil,
+            positionRepository: nil,
+            candleRepository: candleRepository,
+            candleBackfillRepository: nil,
+            logStore: logStore,
+            paperRunner: PaperTradingRunner(
+                strategyRegistry: registry,
+                logStore: logStore,
+                confirmationEngine: dashboardPassingConfirmationEngine()
+            ),
+            strategyRegistry: registry,
+            paperMonitorIntervalNanoseconds: 20_000_000
+        )
+
+        try candleRepository.upsertCandles(blockedShortPattern(
+            symbol: symbol,
+            timeframe: .fourHours,
+            startOffset: 100
+        ))
+
+        viewModel.startPaperBot()
+        defer { viewModel.stopPaperBot() }
+
+        try await waitUntil(timeout: 2) {
+            viewModel.state.recentLogs.contains {
+                $0.message.contains(BlockedCandleShortStrategy.identifier) &&
+                    $0.message.contains("4H")
+            }
+        }
+
+        XCTAssertEqual(viewModel.state.selectedTimeframe, .fifteenMinutes)
+    }
+
     func testConnectCredentialStoresKeyAndConnects() async throws {
         let credentialStore = InMemoryCredentialStore()
         let viewModel = makeViewModel(credentialStore: credentialStore)
@@ -259,6 +341,151 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertLessThanOrEqual(viewModel.backtestLeverageRange.upperBound, 10)
     }
 
+    func testBacktestComparisonDoesNotReplacePrimaryResultWithGateResult() async throws {
+        let symbol = FuturesSymbol("BTCUSDT")
+        let timeframe = CandleTimeframe.fifteenMinutes
+        var config = BlockedCandleShortStrategy().definition.defaultConfig
+        config.signalConfirmation = SignalConfirmationConfig(
+            mode: .gate,
+            requiredScore: 10,
+            groupScoreCaps: SignalConfirmationConfig.optimizedDefault.groupScoreCaps
+        )
+
+        var state = DashboardState()
+        state.watchlist = [symbol]
+        state.backtestConfiguration = BacktestConfiguration(
+            symbol: symbol,
+            timeframe: timeframe,
+            strategyConfig: config,
+            initialCapital: 100,
+            comparesSignalConfirmation: true
+        )
+
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry(strategies: [BlockedCandleShortStrategy()])
+        let viewModel = DashboardViewModel(
+            state: state,
+            credentialStore: InMemoryCredentialStore(),
+            accountRepository: nil,
+            positionRepository: nil,
+            candleRepository: candleRepository,
+            candleBackfillRepository: nil,
+            logStore: logStore,
+            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            backtestEngine: BacktestEngine(
+                strategyRegistry: registry,
+                confirmationEngine: SignalConfirmationEngine(rules: [])
+            ),
+            strategyRegistry: registry
+        )
+
+        let warmup = (0..<36).map { offset in
+            dashboardCandle(
+                symbol: symbol,
+                timeframe: timeframe,
+                offset: offset,
+                open: 120,
+                high: 122,
+                low: 118,
+                close: 120
+            )
+        }
+        let exit = dashboardCandle(
+            symbol: symbol,
+            timeframe: timeframe,
+            offset: 40,
+            open: 149,
+            high: 151,
+            low: 99,
+            close: 105
+        )
+        try candleRepository.upsertCandles(
+            warmup + blockedShortPattern(symbol: symbol, timeframe: timeframe, startOffset: 36) + [exit]
+        )
+
+        viewModel.runBacktest()
+
+        try await waitUntil {
+            if case .complete = viewModel.state.backtestStatus {
+                return true
+            }
+            return false
+        }
+
+        XCTAssertGreaterThan(viewModel.state.backtestResult?.totalTrades ?? 0, 0)
+        XCTAssertEqual(
+            viewModel.state.backtestResult?.totalTrades,
+            viewModel.state.backtestComparisonResult?.withoutSignalConfirmation.totalTrades
+        )
+        XCTAssertEqual(viewModel.state.backtestComparisonResult?.withSignalConfirmation.totalTrades, 0)
+    }
+
+    func testBacktestUsesAllStoredCandlesInsteadOfDisplayLimit() async throws {
+        let symbol = FuturesSymbol("BTCUSDT")
+        let timeframe = CandleTimeframe.fifteenMinutes
+        let repository = BacktestAllHistoryCandleRepository(
+            candles: (0..<36).map { offset in
+                dashboardCandle(
+                    symbol: symbol,
+                    timeframe: timeframe,
+                    offset: offset,
+                    open: 120,
+                    high: 122,
+                    low: 118,
+                    close: 120
+                )
+            } + blockedShortPattern(
+                symbol: symbol,
+                timeframe: timeframe,
+                startOffset: 36
+            ) + [
+                dashboardCandle(
+                    symbol: symbol,
+                    timeframe: timeframe,
+                    offset: 40,
+                    open: 149,
+                    high: 151,
+                    low: 99,
+                    close: 105
+                )
+            ]
+        )
+        var state = DashboardState()
+        state.watchlist = [symbol]
+        state.backtestConfiguration = BacktestConfiguration(
+            symbol: symbol,
+            timeframe: timeframe,
+            strategyConfig: BlockedCandleShortStrategy().definition.defaultConfig
+        )
+        let registry = StrategyRegistry(strategies: [BlockedCandleShortStrategy()])
+        let logStore = InMemoryTradeEventLogStore()
+        let viewModel = DashboardViewModel(
+            state: state,
+            credentialStore: InMemoryCredentialStore(),
+            accountRepository: nil,
+            positionRepository: nil,
+            candleRepository: repository,
+            candleBackfillRepository: nil,
+            logStore: logStore,
+            paperRunner: PaperTradingRunner(strategyRegistry: registry, logStore: logStore),
+            strategyRegistry: registry
+        )
+
+        viewModel.runBacktest()
+
+        try await waitUntil {
+            if case .complete = viewModel.state.backtestStatus {
+                return true
+            }
+            return false
+        }
+
+        XCTAssertTrue(repository.didLoadAllCandles)
+        XCTAssertEqual(repository.limitedLoadCount, 0)
+        XCTAssertEqual(viewModel.state.backtestResult?.totalTrades, 1)
+    }
+
     func testConnectStartsPositionStreamAndAppliesLivePositions() async throws {
         let positionStreamService = TestPositionStreamService()
         let logStore = InMemoryTradeEventLogStore()
@@ -329,6 +556,13 @@ final class DashboardViewModelTests: XCTestCase {
         XCTFail("Timed out waiting for condition.")
     }
 
+    private func dashboardPassingConfirmationEngine() -> SignalConfirmationEngine {
+        SignalConfirmationEngine(rules: [
+            DashboardEvidenceRule(id: "trend", group: .trend, score: 20),
+            DashboardEvidenceRule(id: "momentum", group: .momentum, score: 5)
+        ])
+    }
+
     private func makeCandle(
         symbol: FuturesSymbol,
         openTime: Date,
@@ -388,6 +622,91 @@ final class DashboardViewModelTests: XCTestCase {
             maxLeverage: maxLeverage
         )
     }
+
+    private func blockedShortPattern(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        startOffset: Int
+    ) -> [Candle] {
+        [
+            dashboardCandle(symbol: symbol, timeframe: timeframe, offset: startOffset, open: 100, high: 135, low: 99, close: 130),
+            dashboardCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 1, open: 132, high: 170, low: 131, close: 150),
+            dashboardCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 2, open: 151, high: 165, low: 150, close: 160),
+            dashboardCandle(symbol: symbol, timeframe: timeframe, offset: startOffset + 3, open: 166, high: 166, low: 148, close: 150)
+        ]
+    }
+
+    private func dashboardCandle(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        offset: Int,
+        open: Decimal,
+        high: Decimal,
+        low: Decimal,
+        close: Decimal
+    ) -> Candle {
+        Candle(
+            productType: .usdtFutures,
+            symbol: symbol,
+            timeframe: timeframe,
+            openTime: Date(timeIntervalSince1970: TimeInterval(offset) * timeframe.duration),
+            open: open,
+            high: high,
+            low: low,
+            close: close,
+            volume: 1_000,
+            isClosed: true
+        )
+    }
+}
+
+private struct DashboardEvidenceRule: SignalConfirmationRule {
+    let id: String
+    let group: SignalEvidenceGroup
+    let score: Decimal
+
+    func evaluate(baseSignal: StrategySignal, context: StrategyContext) -> SignalEvidence? {
+        SignalEvidence(id: id, group: group, score: score, reason: id)
+    }
+}
+
+private final class BacktestAllHistoryCandleRepository: CandleRepository {
+    private let candles: [Candle]
+    private(set) var didLoadAllCandles = false
+    private(set) var limitedLoadCount = 0
+
+    init(candles: [Candle]) {
+        self.candles = candles.sorted { $0.openTime < $1.openTime }
+    }
+
+    func loadCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        limit: Int
+    ) throws -> [Candle] {
+        limitedLoadCount += 1
+        return []
+    }
+
+    func loadAllCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) throws -> [Candle] {
+        didLoadAllCandles = true
+        return candles.filter { $0.symbol == symbol && $0.timeframe == timeframe }
+    }
+
+    func loadOldestCandleOpenTime(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) throws -> Date? {
+        candles
+            .filter { $0.symbol == symbol && $0.timeframe == timeframe }
+            .map(\.openTime)
+            .min()
+    }
+
+    func upsertCandles(_ candles: [Candle]) throws {}
 }
 
 private final class StubCandleBackfillRepository: CandleBackfillRepository {

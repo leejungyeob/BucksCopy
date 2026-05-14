@@ -18,6 +18,8 @@ final class DashboardViewModel: ObservableObject {
     private let candleStreamService: CandleStreamService?
     private let logStore: TradeEventLogStore
     private let paperRunner: PaperTradingRunner
+    private let paperMonitor: MultiTimeframePaperTradingMonitor
+    private let paperMonitorIntervalNanoseconds: UInt64
     private let backtestEngine: BacktestEngine
     private let clock: Clock
     private let historyBackfillPolicy: CandleHistoryBackfillPolicy
@@ -29,6 +31,7 @@ final class DashboardViewModel: ObservableObject {
     private var positionStreamTask: Task<Void, Never>?
     private var positionPollingTask: Task<Void, Never>?
     private var backtestTask: Task<Void, Never>?
+    private var paperMonitorTask: Task<Void, Never>?
     private let initialCandleDisplayLimit = 1_200
     private var candleDisplayLimit = 1_200
     private let maxCandleDisplayLimit = 50_000
@@ -51,7 +54,8 @@ final class DashboardViewModel: ObservableObject {
         backtestEngine: BacktestEngine? = nil,
         strategyRegistry: StrategyRegistry,
         clock: Clock = SystemClock(),
-        historyBackfillPolicy: CandleHistoryBackfillPolicy = .live
+        historyBackfillPolicy: CandleHistoryBackfillPolicy = .live,
+        paperMonitorIntervalNanoseconds: UInt64 = 30_000_000_000
     ) {
         self.state = state
         self.credentialStore = credentialStore
@@ -65,6 +69,13 @@ final class DashboardViewModel: ObservableObject {
         self.candleStreamService = candleStreamService
         self.logStore = logStore
         self.paperRunner = paperRunner
+        self.paperMonitor = MultiTimeframePaperTradingMonitor(
+            candleRepository: candleRepository,
+            candleBackfillRepository: candleBackfillRepository,
+            paperRunner: paperRunner,
+            strategyRegistry: strategyRegistry
+        )
+        self.paperMonitorIntervalNanoseconds = paperMonitorIntervalNanoseconds
         self.backtestEngine = backtestEngine ?? BacktestEngine(strategyRegistry: strategyRegistry)
         self.strategyRegistry = strategyRegistry
         self.clock = clock
@@ -79,10 +90,15 @@ final class DashboardViewModel: ObservableObject {
         positionStreamTask?.cancel()
         positionPollingTask?.cancel()
         backtestTask?.cancel()
+        paperMonitorTask?.cancel()
     }
 
     var strategyDefinitions: [StrategyDefinition] {
         strategyRegistry.definitions
+    }
+
+    func strategyDefinitions(for timeframe: CandleTimeframe) -> [StrategyDefinition] {
+        strategyRegistry.definitions(recommendedFor: timeframe)
     }
 
     func bootstrap() {
@@ -266,6 +282,11 @@ final class DashboardViewModel: ObservableObject {
 
     func selectTimeframe(_ timeframe: CandleTimeframe) {
         state.selectedTimeframe = timeframe
+        state.strategyConfig = routedStrategyConfig(
+            state.strategyConfig,
+            for: timeframe,
+            symbol: state.selectedSymbol
+        )
         candleDisplayLimit = initialCandleDisplayLimit
         state.candleHistoryStatus = .idle
         stopLiveCandleStream()
@@ -275,7 +296,8 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func updateStrategy(_ strategyID: String) {
-        guard let definition = strategyRegistry.definition(id: strategyID) else { return }
+        guard StrategyTimeframeRouting.isRecommended(strategyID: strategyID, for: state.selectedTimeframe),
+              let definition = strategyRegistry.definition(id: strategyID) else { return }
         var nextConfig = state.strategyConfig
         nextConfig.strategyID = definition.id
         nextConfig.parameters = definition.defaultConfig.parameters
@@ -285,6 +307,22 @@ final class DashboardViewModel: ObservableObject {
 
     func updateLeverage(_ leverage: Int) {
         state.strategyConfig.leverage = clampedLeverage(leverage, for: state.selectedSymbol)
+    }
+
+    func updateMaximumRiskPerTrade(_ maximumRiskPerTradePercent: Decimal) {
+        state.strategyConfig.maximumRiskPerTradePercent = clampedMaximumRiskPerTradePercent(
+            maximumRiskPerTradePercent
+        )
+    }
+
+    func updateMaximumPositionMargin(_ maximumPositionMarginPercent: Decimal) {
+        state.strategyConfig.maximumPositionMarginPercent = clampedMaximumPositionMarginPercent(
+            maximumPositionMarginPercent
+        )
+    }
+
+    func updateSignalConfirmationMode(_ mode: SignalConfirmationMode) {
+        state.strategyConfig.signalConfirmation.mode = mode
     }
 
     func selectBacktestSymbol(_ symbol: FuturesSymbol) {
@@ -299,11 +337,19 @@ final class DashboardViewModel: ObservableObject {
 
     func selectBacktestTimeframe(_ timeframe: CandleTimeframe) {
         state.backtestConfiguration.timeframe = timeframe
+        state.backtestConfiguration.strategyConfig = routedStrategyConfig(
+            state.backtestConfiguration.strategyConfig,
+            for: timeframe,
+            symbol: state.backtestConfiguration.symbol
+        )
         resetBacktest()
     }
 
     func updateBacktestStrategy(_ strategyID: String) {
-        guard let definition = strategyRegistry.definition(id: strategyID) else { return }
+        guard StrategyTimeframeRouting.isRecommended(
+            strategyID: strategyID,
+            for: state.backtestConfiguration.timeframe
+        ), let definition = strategyRegistry.definition(id: strategyID) else { return }
         var nextConfiguration = state.backtestConfiguration
         nextConfiguration.strategyConfig.strategyID = definition.id
         nextConfiguration.strategyConfig.parameters = definition.defaultConfig.parameters
@@ -323,29 +369,60 @@ final class DashboardViewModel: ObservableObject {
         resetBacktest()
     }
 
+    func updateBacktestMaximumRiskPerTrade(_ maximumRiskPerTradePercent: Decimal) {
+        state.backtestConfiguration.strategyConfig.maximumRiskPerTradePercent = clampedMaximumRiskPerTradePercent(
+            maximumRiskPerTradePercent
+        )
+        resetBacktest()
+    }
+
+    func updateBacktestMaximumPositionMargin(_ maximumPositionMarginPercent: Decimal) {
+        state.backtestConfiguration.strategyConfig.maximumPositionMarginPercent = clampedMaximumPositionMarginPercent(
+            maximumPositionMarginPercent
+        )
+        resetBacktest()
+    }
+
+    func updateBacktestInitialCapital(_ initialCapital: Decimal) {
+        state.backtestConfiguration.initialCapital = clampedBacktestInitialCapital(initialCapital)
+        resetBacktest()
+    }
+
+    func updateBacktestSignalConfirmationMode(_ mode: SignalConfirmationMode) {
+        state.backtestConfiguration.strategyConfig.signalConfirmation.mode = mode
+        resetBacktest()
+    }
+
+    func updateBacktestConfirmationComparisonEnabled(_ isEnabled: Bool) {
+        state.backtestConfiguration.comparesSignalConfirmation = isEnabled
+        resetBacktest()
+    }
+
     func updateLogLanguage(_ language: TradeLogLanguage) {
         state.logLanguage = language
     }
 
     func startPaperBot() {
-        do {
-            state.runState = .runningPaper(startedAt: clock.now)
-            _ = try paperRunner.start(
-                symbol: state.selectedSymbol,
-                watchlist: state.watchlist,
-                timeframe: state.selectedTimeframe,
-                candles: state.candles.filter(\.isClosed),
-                config: state.strategyConfig
-            )
-            loadRecentLogs()
-        } catch {
-            appendSessionLog(.init(
-                timestamp: clock.now,
-                category: .bot,
-                severity: .error,
-                symbol: state.selectedSymbol,
-                message: sanitizedError(error)
-            ))
+        paperMonitorTask?.cancel()
+
+        state.runState = .runningPaper(startedAt: clock.now)
+        appendSessionLog(.init(
+            timestamp: clock.now,
+            category: .bot,
+            message: "Paper monitor started for Watchlist across all timeframes."
+        ))
+
+        paperMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.runPaperMonitorOnce()
+
+                do {
+                    try await Task.sleep(nanoseconds: self.paperMonitorIntervalNanoseconds)
+                } catch {
+                    return
+                }
+            }
         }
     }
 
@@ -355,29 +432,45 @@ final class DashboardViewModel: ObservableObject {
         let configuration = state.backtestConfiguration
         let candleRepository = self.candleRepository
         let backtestEngine = self.backtestEngine
-        let candleLimit = maxCandleDisplayLimit
         let startedAt = clock.now
 
         state.backtestStatus = .running(startedAt: startedAt)
         state.backtestResult = nil
+        state.backtestComparisonResult = nil
 
         backtestTask = Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 try Task.checkCancellation()
-                let candles = try candleRepository.loadCandles(
+                let candles = try candleRepository.loadAllCandles(
                     symbol: configuration.symbol,
-                    timeframe: configuration.timeframe,
-                    limit: candleLimit
+                    timeframe: configuration.timeframe
                 )
                 try Task.checkCancellation()
-                let result = try backtestEngine.run(
-                    symbol: configuration.symbol,
-                    timeframe: configuration.timeframe,
-                    candles: candles,
-                    config: configuration.strategyConfig
-                )
-                try Task.checkCancellation()
-                await self?.completeBacktest(result, configuration: configuration)
+                if configuration.comparesSignalConfirmation {
+                    let comparison = try backtestEngine.runSignalConfirmationComparison(
+                        symbol: configuration.symbol,
+                        timeframe: configuration.timeframe,
+                        candles: candles,
+                        config: configuration.strategyConfig,
+                        initialCapital: configuration.initialCapital
+                    )
+                    try Task.checkCancellation()
+                    await self?.completeBacktest(
+                        comparison.withoutSignalConfirmation,
+                        comparison: comparison,
+                        configuration: configuration
+                    )
+                } else {
+                    let result = try backtestEngine.run(
+                        symbol: configuration.symbol,
+                        timeframe: configuration.timeframe,
+                        candles: candles,
+                        config: configuration.strategyConfig,
+                        initialCapital: configuration.initialCapital
+                    )
+                    try Task.checkCancellation()
+                    await self?.completeBacktest(result, comparison: nil, configuration: configuration)
+                }
             } catch is CancellationError {
                 await self?.cancelBacktestIfCurrent(configuration)
             } catch {
@@ -387,6 +480,8 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func stopPaperBot() {
+        paperMonitorTask?.cancel()
+        paperMonitorTask = nil
         state.runState = .stopped
         appendSessionLog(.init(
             timestamp: clock.now,
@@ -748,6 +843,46 @@ final class DashboardViewModel: ObservableObject {
         state.candles = visibleCandles
     }
 
+    private func runPaperMonitorOnce() async {
+        let watchlist = state.watchlist
+        guard !watchlist.isEmpty else { return }
+
+        var leverageBySymbol: [FuturesSymbol: Int] = [:]
+        var maximumRiskPerTradePercentBySymbol: [FuturesSymbol: Decimal] = [:]
+        var maximumPositionMarginPercentBySymbol: [FuturesSymbol: Decimal] = [:]
+        for symbol in watchlist {
+            leverageBySymbol[symbol] = clampedLeverage(state.strategyConfig.leverage, for: symbol)
+            maximumRiskPerTradePercentBySymbol[symbol] = clampedMaximumRiskPerTradePercent(
+                state.strategyConfig.maximumRiskPerTradePercent
+            )
+            maximumPositionMarginPercentBySymbol[symbol] = clampedMaximumPositionMarginPercent(
+                state.strategyConfig.maximumPositionMarginPercent
+            )
+        }
+
+        let result = await paperMonitor.evaluateOnce(
+            watchlist: watchlist,
+            leverageBySymbol: leverageBySymbol,
+            maximumRiskPerTradePercentBySymbol: maximumRiskPerTradePercentBySymbol,
+            maximumPositionMarginPercentBySymbol: maximumPositionMarginPercentBySymbol
+        )
+
+        if !result.evaluations.isEmpty {
+            loadRecentLogs()
+        }
+
+        for failure in result.failures.prefix(3) {
+            let strategyPart = failure.strategyID ?? "candles"
+            appendSessionLogOnce(key: "paper-monitor.failure.\(failure.symbol.rawValue).\(failure.timeframe.rawValue).\(strategyPart)", .init(
+                timestamp: clock.now,
+                category: .bot,
+                severity: .warning,
+                symbol: failure.symbol,
+                message: "Paper monitor skipped \(failure.timeframe.rawValue) \(strategyPart): \(failure.message)"
+            ))
+        }
+    }
+
     func loadRecentLogs() {
         refreshVisibleLogs()
     }
@@ -806,18 +941,70 @@ final class DashboardViewModel: ObservableObject {
         return min(max(leverage, range.lowerBound), range.upperBound)
     }
 
+    private func clampedMaximumRiskPerTradePercent(_ value: Decimal) -> Decimal {
+        StrategyRiskPolicy.clampedMaximumRiskPerTradePercent(value)
+    }
+
+    private func clampedMaximumPositionMarginPercent(_ value: Decimal) -> Decimal {
+        StrategyRiskPolicy.clampedMaximumPositionMarginPercent(value)
+    }
+
+    private func routedStrategyConfig(
+        _ config: StrategyConfig,
+        for timeframe: CandleTimeframe,
+        symbol: FuturesSymbol
+    ) -> StrategyConfig {
+        if StrategyTimeframeRouting.isRecommended(strategyID: config.strategyID, for: timeframe) {
+            var nextConfig = config
+            nextConfig.leverage = clampedLeverage(nextConfig.leverage, for: symbol)
+            nextConfig.maximumRiskPerTradePercent = clampedMaximumRiskPerTradePercent(
+                nextConfig.maximumRiskPerTradePercent
+            )
+            nextConfig.maximumPositionMarginPercent = clampedMaximumPositionMarginPercent(
+                nextConfig.maximumPositionMarginPercent
+            )
+            return nextConfig
+        }
+
+        guard let defaultID = StrategyTimeframeRouting.recommendedStrategyIDs(for: timeframe).first,
+              let definition = strategyRegistry.definition(id: defaultID) else {
+            var nextConfig = config
+            nextConfig.leverage = clampedLeverage(nextConfig.leverage, for: symbol)
+            nextConfig.maximumRiskPerTradePercent = clampedMaximumRiskPerTradePercent(
+                nextConfig.maximumRiskPerTradePercent
+            )
+            nextConfig.maximumPositionMarginPercent = clampedMaximumPositionMarginPercent(
+                nextConfig.maximumPositionMarginPercent
+            )
+            return nextConfig
+        }
+
+        var nextConfig = definition.defaultConfig
+        nextConfig.leverage = clampedLeverage(config.leverage, for: symbol)
+        nextConfig.maximumRiskPerTradePercent = clampedMaximumRiskPerTradePercent(
+            config.maximumRiskPerTradePercent
+        )
+        nextConfig.maximumPositionMarginPercent = clampedMaximumPositionMarginPercent(
+            config.maximumPositionMarginPercent
+        )
+        nextConfig.signalConfirmation = config.signalConfirmation
+        return nextConfig
+    }
+
     private func completeBacktest(
         _ result: BacktestResult,
+        comparison: BacktestComparisonResult?,
         configuration: BacktestConfiguration
     ) {
         guard state.backtestConfiguration == configuration else { return }
         state.backtestResult = result
+        state.backtestComparisonResult = comparison
         state.backtestStatus = .complete
         appendSessionLog(.init(
             timestamp: clock.now,
             category: .bot,
             symbol: configuration.symbol,
-            message: "Backtest complete: \(result.totalTrades) trade(s), win rate \(result.winRatePercent.riskText)%, net \(result.netReturnPercent.riskText)%."
+            message: "Backtest complete: \(result.totalTrades) trade(s), win rate \(result.winRatePercent.riskText)%, final balance \(result.finalBalance.riskText), net \(result.netReturnPercent.riskText)%."
         ))
     }
 
@@ -827,6 +1014,7 @@ final class DashboardViewModel: ObservableObject {
     ) {
         guard state.backtestConfiguration == configuration else { return }
         state.backtestResult = nil
+        state.backtestComparisonResult = nil
         state.backtestStatus = .failed(message: sanitizedError(error))
         appendSessionLog(.init(
             timestamp: clock.now,
@@ -840,6 +1028,7 @@ final class DashboardViewModel: ObservableObject {
     private func cancelBacktestIfCurrent(_ configuration: BacktestConfiguration) {
         guard state.backtestConfiguration == configuration else { return }
         state.backtestStatus = .idle
+        state.backtestComparisonResult = nil
     }
 
     private func loadCandles(
@@ -918,6 +1107,11 @@ final class DashboardViewModel: ObservableObject {
         backtestTask = nil
         state.backtestStatus = .idle
         state.backtestResult = nil
+        state.backtestComparisonResult = nil
+    }
+
+    private func clampedBacktestInitialCapital(_ initialCapital: Decimal) -> Decimal {
+        max(initialCapital, 1)
     }
 
     private func sanitizedError(_ error: Error) -> String {
@@ -940,6 +1134,8 @@ final class DashboardViewModel: ObservableObject {
             return "Protection \(kind.rawValue) order failed after \(attempts) attempts."
         case BacktestEngineError.insufficientCandles(let required, let actual):
             return "백테스트에 필요한 캔들이 부족합니다. 최소 \(required)개 필요, 현재 \(actual)개입니다."
+        case BacktestEngineError.invalidInitialCapital(let initialCapital):
+            return "시작금액은 0보다 커야 합니다. 현재 \(initialCapital.riskText)"
         default:
             return "Operation failed: \(String(describing: type(of: error)))."
         }

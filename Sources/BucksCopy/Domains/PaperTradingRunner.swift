@@ -3,15 +3,18 @@ import Foundation
 final class PaperTradingRunner {
     private let strategyRegistry: StrategyRegistry
     private let logStore: TradeEventLogStore
+    private let confirmationEngine: SignalConfirmationEngine
     private let clock: Clock
 
     init(
         strategyRegistry: StrategyRegistry,
         logStore: TradeEventLogStore,
+        confirmationEngine: SignalConfirmationEngine = SignalConfirmationEngine(),
         clock: Clock = SystemClock()
     ) {
         self.strategyRegistry = strategyRegistry
         self.logStore = logStore
+        self.confirmationEngine = confirmationEngine
         self.clock = clock
     }
 
@@ -41,9 +44,42 @@ final class PaperTradingRunner {
         case .noSignal:
             break
         case .signal(let signal):
+            let confirmationDecision: SignalConfirmationDecision
+            if let profile = SignalConfirmationProfile.researchDefault(
+                strategyID: config.strategyID,
+                timeframe: timeframe
+            ) {
+                confirmationDecision = confirmationEngine.decision(
+                    for: signal,
+                    context: context,
+                    config: config.signalConfirmation,
+                    profile: profile
+                )
+            } else {
+                confirmationDecision = confirmationEngine.decision(
+                    for: signal,
+                    context: context,
+                    config: config.signalConfirmation
+                )
+            }
+            guard confirmationDecision.isAllowed else {
+                try logStore.append(TradeEventLog(
+                    timestamp: clock.now,
+                    category: .signal,
+                    severity: .warning,
+                    symbol: signal.symbol,
+                    message: confirmationDecision.reason
+                ))
+                return .noSignal
+            }
+
+            let confirmedSignal = signal.addingConfirmation(confirmationDecision.score)
             let riskDecision = StrategyRiskPolicy.decision(
-                for: signal,
+                for: confirmedSignal,
                 leverage: config.leverage,
+                maximumRiskPerTradePercent: config.maximumRiskPerTradePercent *
+                    confirmationDecision.maximumRiskPerTradeMultiplier,
+                maximumPositionMarginPercent: config.maximumPositionMarginPercent,
                 decidedAt: clock.now
             )
             guard riskDecision.isAllowed else {
@@ -51,7 +87,7 @@ final class PaperTradingRunner {
                     timestamp: clock.now,
                     category: .risk,
                     severity: .warning,
-                    symbol: signal.symbol,
+                    symbol: confirmedSignal.symbol,
                     message: riskDecision.reason
                 ))
                 return .noSignal
@@ -60,8 +96,8 @@ final class PaperTradingRunner {
             try logStore.append(TradeEventLog(
                 timestamp: clock.now,
                 category: .paperOrder,
-                symbol: signal.symbol,
-                message: "Paper \(signal.side.rawValue) order created by \(signal.strategyID). Entry \(signal.entryPrice), stop loss \(signal.stopLoss), take profit \(signal.takeProfit), leverage \(config.leverage)x, reward/risk \(signal.plannedRewardRiskRatio?.riskText ?? "-"):1, leveraged stop risk \(signal.leveragedStopLossPercent(leverage: config.leverage)?.riskText ?? "-")%, TP fee \(TradingFeePolicy.marketEntryTakeProfitLimitFeePercent(leverage: config.leverage).riskText)%, SL fee \(TradingFeePolicy.marketEntryStopLossMarketFeePercent(leverage: config.leverage).riskText)%. Reason: \(signal.reason)"
+                symbol: confirmedSignal.symbol,
+                message: "Paper \(confirmedSignal.side.rawValue) order created by \(confirmedSignal.strategyID) on \(timeframe.rawValue). Entry \(confirmedSignal.entryPrice), stop loss \(confirmedSignal.stopLoss), take profit \(confirmedSignal.takeProfit), leverage \(config.leverage)x, margin \((riskDecision.positionMarginRatio * 100).riskText)%, account risk \(riskDecision.accountRiskPercent.riskText)%, reward/risk \(confirmedSignal.plannedRewardRiskRatio?.riskText ?? "-"):1, TP fee \(TradingFeePolicy.marketEntryTakeProfitLimitFeePercent(leverage: config.leverage, positionMarginRatio: riskDecision.positionMarginRatio).riskText)%, SL fee \(TradingFeePolicy.marketEntryStopLossMarketFeePercent(leverage: config.leverage, positionMarginRatio: riskDecision.positionMarginRatio).riskText)%. Reason: \(confirmedSignal.reason)"
             ))
         }
 

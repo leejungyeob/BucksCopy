@@ -153,14 +153,21 @@ References:
 - Strategy logic consumes closed candle data unless a future feature explicitly models in-progress candles.
 - Built-in strategies must emit `entryPrice`, `stopLoss`, and `takeProfit` together when they produce a signal.
 - Built-in strategy inputs are limited to local closed OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget.
-- Built-in strategy set: blocked-candle short.
+- Built-in strategy set: blocked-candle short, blocked-candle long, VWMA100 touch trend, and MA25/50/100/200 alignment.
+- Strategy signals can optionally pass through a confirmation scoring layer before risk policy, but the default path is `OFF` so primary backtest results stay aligned with the main strategy result. Experimental modes are `Observe` (score and bucket results without blocking) and `Gate` (block signals below the threshold). The scoring layer uses trend, structure, pattern, momentum, volume, and volatility evidence with group caps to avoid counting the same market condition repeatedly.
+- Backtest comparison uses strategy-timeframe confirmation profiles for recommended combinations instead of a single global score Gate. Profiles can define `Hard Gate` evidence that blocks entry when missing, and `Soft Gate` evidence that scales down the configured maximum account risk before risk policy.
+- Paper monitoring is independent from the chart-selected timeframe. When Paper is running, it evaluates every Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D`, using the recommended strategy list for each timeframe.
+- Paper monitoring stores a `(symbol, timeframe, strategy, closed candle open time)` key to avoid generating duplicate paper orders from the same closed candle.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
-- Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, signals whose stop-loss percent multiplied by leverage is `>= 30%`, and signals whose leveraged take-profit does not exceed estimated round-trip trading fees.
+- Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, leverage above `10x`, and signals whose take-profit cannot cover estimated round-trip trading fees.
+- Risk policy sizes each position so `stop-loss percent × leverage × margin allocation <= configured max loss per trade`. The default max loss per trade is `12%`, and UI configuration is capped at `15%`.
 - Current trading fee estimates distinguish order intent:
   - Entry after a closed-candle signal is assumed to be market execution, so it uses taker fee.
   - Take-profit protection is modeled as exchange-side reduce-only limit execution, so the planning model uses maker fee.
   - Stop-loss protection is modeled as exchange-side trigger market execution, so it uses taker fee.
 - Backtesting is manual-only from the UI. It loads local candles and runs the strategy engine on a detached background task, then publishes only the summary result to SwiftUI.
+- Backtesting can compare signal confirmation `OFF`, `Observe`, and `Applied` on the same candle set as an experimental side report. The primary backtest result remains the `OFF` main-strategy result so displayed totals and reported totals share one source of truth. The comparison report shows whether the strategy-timeframe confirmation profile improves net return, win rate, drawdown, and trade count before relying on the profile.
+- Backtest capital is compounded from the configured starting amount. Each closed trade applies its position-sized net leveraged return percent to the current balance, and the final balance/net return are derived from that balance curve.
 - Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
 - Paper execution records intent, simulated fill, rejected order, and risk decision separately.
 - Live execution requires a future accepted decision log entry, security review, and explicit UI switch.
@@ -180,11 +187,12 @@ References:
 - The selection unit is `strategy × timeframe`, not strategy alone. A strategy can be enabled for multiple timeframes, and a single timeframe can have multiple enabled strategies.
 - Candidate combinations must be evaluated by win rate, net return after fees, trade count, drawdown, and blocked-signal frequency.
 - When a closed candle arrives for a timeframe, every enabled strategy for that symbol and timeframe can be evaluated.
+- The visible chart timeframe is only a viewing/editing context. It must not disable monitoring of other enabled timeframes while Paper trading is running.
 - More active combinations should increase trade opportunities, but execution must still cap risk by Watchlist symbol, leverage, open position state, duplicate signal handling, and opposite-signal handling.
 - Portfolio backtesting should eventually report both per-combination metrics and aggregate portfolio metrics so weak combinations can be removed without disabling the whole strategy family.
 
 ## Strategy Research Notes
 
-- The active built-in strategy is blocked-candle short only.
+- Current recommended routing: `15m`/`1H` use MA alignment, `4H` uses blocked-candle short plus MA alignment, and `12H`/`1D` use VWMA100 touch trend.
 - Blocked-candle short requires three consecutive bullish candles with shrinking bodies, a third high below the second high, and a strong bearish reversal candle.
-- Previous broad indicator strategies are not active until local backtest data shows a usable edge.
+- Blocked-candle long mirrors the short setup with three consecutive bearish candles, shrinking bodies, a third low above the second low, and a strong bullish reversal candle.

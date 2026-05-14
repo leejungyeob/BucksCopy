@@ -172,11 +172,15 @@ struct BacktestConfiguration: Codable, Equatable {
     var symbol: FuturesSymbol
     var timeframe: CandleTimeframe
     var strategyConfig: StrategyConfig
+    var initialCapital: Decimal = 100
+    var comparesSignalConfirmation: Bool = false
 
     static let `default` = BacktestConfiguration(
         symbol: FuturesSymbol("BTCUSDT"),
         timeframe: .fifteenMinutes,
-        strategyConfig: BlockedCandleShortStrategy().definition.defaultConfig
+        strategyConfig: StrategyConfig.default,
+        initialCapital: 100,
+        comparesSignalConfirmation: false
     )
 }
 
@@ -206,7 +210,15 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
     let rewardRiskRatio: Decimal
     let leveragedReturnPercent: Decimal
     let leveragedStopLossPercent: Decimal
+    let positionMarginRatio: Decimal
+    let accountRiskPercent: Decimal
+    let startingBalance: Decimal
+    let endingBalance: Decimal
     let reason: String
+
+    var profitLossAmount: Decimal {
+        endingBalance - startingBalance
+    }
 
     init(
         id: UUID = UUID(),
@@ -222,6 +234,10 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
         rewardRiskRatio: Decimal,
         leveragedReturnPercent: Decimal,
         leveragedStopLossPercent: Decimal,
+        positionMarginRatio: Decimal = 1,
+        accountRiskPercent: Decimal = 0,
+        startingBalance: Decimal = 0,
+        endingBalance: Decimal = 0,
         reason: String
     ) {
         self.id = id
@@ -237,6 +253,10 @@ struct BacktestTrade: Codable, Equatable, Identifiable {
         self.rewardRiskRatio = rewardRiskRatio
         self.leveragedReturnPercent = leveragedReturnPercent
         self.leveragedStopLossPercent = leveragedStopLossPercent
+        self.positionMarginRatio = positionMarginRatio
+        self.accountRiskPercent = accountRiskPercent
+        self.startingBalance = startingBalance
+        self.endingBalance = endingBalance
         self.reason = reason
     }
 }
@@ -253,16 +273,222 @@ struct BacktestResult: Codable, Equatable {
     let skippedSignals: Int
     let blockedSignals: Int
     let openSignals: Int
+    let confirmationBlockedSignals: Int
+    let initialCapital: Decimal
+    let finalBalance: Decimal
     let netReturnPercent: Decimal
     let maxDrawdownPercent: Decimal
     let averageRewardRiskRatio: Decimal
     let profitFactor: Decimal
+    let blockedSignalSummaries: [BacktestBlockedSignalSummary]
+    let confirmationBlockedSignalSummaries: [BacktestBlockedSignalSummary]
+    let averageConfirmationScore: Decimal
+    let confirmationScoreBuckets: [BacktestConfirmationScoreBucket]
     let trades: [BacktestTrade]
     let completedAt: Date
 
     var winRatePercent: Decimal {
         guard totalTrades > 0 else { return 0 }
         return Decimal(winningTrades) / Decimal(totalTrades) * 100
+    }
+
+    var netProfitAmount: Decimal {
+        finalBalance - initialCapital
+    }
+
+    var averagePositionMarginPercent: Decimal {
+        guard !trades.isEmpty else { return 0 }
+        return trades.reduce(Decimal(0)) { $0 + $1.positionMarginRatio * 100 } / Decimal(trades.count)
+    }
+
+    var averageAccountRiskPercent: Decimal {
+        guard !trades.isEmpty else { return 0 }
+        return trades.reduce(Decimal(0)) { $0 + $1.accountRiskPercent } / Decimal(trades.count)
+    }
+}
+
+struct BacktestBlockedSignalSummary: Codable, Equatable, Identifiable {
+    let reason: String
+    let count: Int
+
+    var id: String { reason }
+}
+
+struct BacktestConfirmationScoreBucket: Codable, Equatable, Identifiable {
+    let bucket: SignalConfirmationScoreBucket
+    let signalCount: Int
+    let tradeCount: Int
+    let winningTrades: Int
+    let losingTrades: Int
+    let confirmationBlockedSignals: Int
+    let riskBlockedSignals: Int
+    let openSignals: Int
+    let netProfitAmount: Decimal
+    let netReturnPercent: Decimal
+    let averageScore: Decimal
+
+    var id: String { bucket.rawValue }
+
+    var winRatePercent: Decimal {
+        guard tradeCount > 0 else { return 0 }
+        return Decimal(winningTrades) / Decimal(tradeCount) * 100
+    }
+}
+
+struct BacktestSignalConfirmationOptimizationCandidate: Codable, Equatable, Identifiable {
+    let requiredScore: Decimal
+    let totalTrades: Int
+    let confirmationBlockedSignals: Int
+    let netReturnPercent: Decimal
+    let netReturnDeltaPercent: Decimal
+    let winRatePercent: Decimal
+    let winRateDeltaPercent: Decimal
+    let maxDrawdownPercent: Decimal
+    let maxDrawdownDeltaPercent: Decimal
+
+    var id: String { requiredScore.riskText }
+}
+
+struct BacktestSignalConfirmationOptimizationReport: Codable, Equatable {
+    let minimumTradeCount: Int
+    let recommendedMode: SignalConfirmationMode
+    let recommendedRequiredScore: Decimal?
+    let reason: String
+    let candidates: [BacktestSignalConfirmationOptimizationCandidate]
+
+    var recommendedCandidate: BacktestSignalConfirmationOptimizationCandidate? {
+        guard let recommendedRequiredScore else { return nil }
+        return candidates.first { $0.requiredScore == recommendedRequiredScore }
+    }
+
+    var recommendationText: String {
+        switch recommendedMode {
+        case .off:
+            return "OFF"
+        case .observe:
+            return "Observe"
+        case .gate:
+            guard let recommendedRequiredScore else { return "Gate" }
+            return "Gate \(recommendedRequiredScore.riskText)점"
+        }
+    }
+}
+
+struct BacktestComparisonResult: Codable, Equatable {
+    let withoutSignalConfirmation: BacktestResult
+    let observedSignalConfirmation: BacktestResult
+    let withSignalConfirmation: BacktestResult
+    let optimizationReport: BacktestSignalConfirmationOptimizationReport
+
+    var netReturnDeltaPercent: Decimal {
+        withSignalConfirmation.netReturnPercent - withoutSignalConfirmation.netReturnPercent
+    }
+
+    var finalBalanceDelta: Decimal {
+        withSignalConfirmation.finalBalance - withoutSignalConfirmation.finalBalance
+    }
+
+    var winRateDeltaPercent: Decimal {
+        withSignalConfirmation.winRatePercent - withoutSignalConfirmation.winRatePercent
+    }
+
+    var tradeCountDelta: Int {
+        withSignalConfirmation.totalTrades - withoutSignalConfirmation.totalTrades
+    }
+
+    var maxDrawdownDeltaPercent: Decimal {
+        withSignalConfirmation.maxDrawdownPercent - withoutSignalConfirmation.maxDrawdownPercent
+    }
+
+    var observeNetReturnDeltaPercent: Decimal {
+        observedSignalConfirmation.netReturnPercent - withoutSignalConfirmation.netReturnPercent
+    }
+
+    var missedUpsidePercentPoints: Decimal {
+        tradeImpactSummary.missedUpsidePercentPoints
+    }
+
+    var defendedDownsidePercentPoints: Decimal {
+        tradeImpactSummary.defendedDownsidePercentPoints
+    }
+
+    var missedUpsideTradeCount: Int {
+        tradeImpactSummary.missedUpsideTradeCount
+    }
+
+    var defendedDownsideTradeCount: Int {
+        tradeImpactSummary.defendedDownsideTradeCount
+    }
+
+    var netFilteredOutTradeCount: Int {
+        rawNetFilteredOutTradeCount
+    }
+
+    func primaryResult(mode: SignalConfirmationMode) -> BacktestResult {
+        switch mode {
+        case .off:
+            return withoutSignalConfirmation
+        case .observe:
+            return observedSignalConfirmation
+        case .gate:
+            return withSignalConfirmation
+        }
+    }
+
+    private var tradeImpactSummary: BacktestComparisonTradeImpactSummary {
+        let filteredOutTradeCount = rawNetFilteredOutTradeCount
+        guard filteredOutTradeCount > 0 else {
+            return BacktestComparisonTradeImpactSummary()
+        }
+
+        let appliedTradeKeys = Set(withSignalConfirmation.trades.map(BacktestComparisonTradeKey.init))
+        let missingBaselineTrades = withoutSignalConfirmation.trades
+            .filter { !appliedTradeKeys.contains(BacktestComparisonTradeKey($0)) }
+            .sorted { $0.entryTime < $1.entryTime }
+            .suffix(filteredOutTradeCount)
+
+        return missingBaselineTrades.reduce(
+            into: BacktestComparisonTradeImpactSummary()
+        ) { summary, trade in
+            let baselineReturn = trade.leveragedReturnPercent
+            summary.filteredOutTradeCount += 1
+
+            if baselineReturn > 0 {
+                summary.missedUpsidePercentPoints += baselineReturn
+                summary.missedUpsideTradeCount += 1
+            } else if baselineReturn < 0 {
+                summary.defendedDownsidePercentPoints += baselineReturn
+                summary.defendedDownsideTradeCount += 1
+            }
+        }
+    }
+
+    private var rawNetFilteredOutTradeCount: Int {
+        max(withoutSignalConfirmation.totalTrades - withSignalConfirmation.totalTrades, 0)
+    }
+}
+
+private struct BacktestComparisonTradeImpactSummary {
+    var missedUpsidePercentPoints: Decimal = 0
+    var defendedDownsidePercentPoints: Decimal = 0
+    var missedUpsideTradeCount = 0
+    var defendedDownsideTradeCount = 0
+    var filteredOutTradeCount = 0
+}
+
+private struct BacktestComparisonTradeKey: Hashable {
+    let entryTime: TimeInterval
+    let side: String
+    let entryPrice: String
+    let stopLoss: String
+    let takeProfit: String
+
+    init(_ trade: BacktestTrade) {
+        entryTime = trade.entryTime.timeIntervalSince1970
+        side = trade.side.rawValue
+        entryPrice = trade.entryPrice.description
+        stopLoss = trade.stopLoss.description
+        takeProfit = trade.takeProfit.description
     }
 }
 
@@ -283,6 +509,7 @@ struct DashboardState: Equatable {
     var backtestConfiguration: BacktestConfiguration = .default
     var backtestStatus: BacktestStatus = .idle
     var backtestResult: BacktestResult?
+    var backtestComparisonResult: BacktestComparisonResult?
     var recentLogs: [TradeEventLog] = []
 
     var isConnected: Bool {

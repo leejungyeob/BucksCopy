@@ -85,6 +85,30 @@ final class SQLiteStoresTests: XCTestCase {
         )
     }
 
+    func testCandleRepositoryCanLoadAllCandlesWithoutDisplayLimit() throws {
+        let path = try temporaryDatabasePath()
+        let repository = try SQLiteCandleRepository(path: path)
+        let symbol = FuturesSymbol("BTCUSDT")
+        let candles = (0..<12).map { index in
+            makeCandle(
+                symbol: symbol,
+                timeframe: .fifteenMinutes,
+                openTime: Date(timeIntervalSince1970: TimeInterval(index * 900))
+            )
+        }
+
+        try repository.upsertCandles(candles)
+
+        XCTAssertEqual(
+            try repository.loadCandles(symbol: symbol, timeframe: .fifteenMinutes, limit: 5).count,
+            5
+        )
+        XCTAssertEqual(
+            try repository.loadAllCandles(symbol: symbol, timeframe: .fifteenMinutes).count,
+            12
+        )
+    }
+
     func testCandleRepositoryPersistsHistoricalSyncState() throws {
         let path = try temporaryDatabasePath()
         let repository = try SQLiteCandleRepository(path: path)

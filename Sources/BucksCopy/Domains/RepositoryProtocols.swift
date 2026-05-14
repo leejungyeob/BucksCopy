@@ -25,6 +25,11 @@ protocol CandleRepository {
         limit: Int
     ) throws -> [Candle]
 
+    func loadAllCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) throws -> [Candle]
+
     func loadOldestCandleOpenTime(
         symbol: FuturesSymbol,
         timeframe: CandleTimeframe

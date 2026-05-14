@@ -16,8 +16,27 @@ struct StrategyConfig: Codable, Equatable {
     var strategyID: String
     var leverage: Int
     var parameters: [String: Decimal]
+    var maximumRiskPerTradePercent: Decimal
+    var maximumPositionMarginPercent: Decimal
+    var signalConfirmation: SignalConfirmationConfig
 
-    static let `default` = BlockedCandleShortStrategy().definition.defaultConfig
+    static let `default` = MovingAverageAlignmentStrategy().definition.defaultConfig
+
+    init(
+        strategyID: String,
+        leverage: Int,
+        parameters: [String: Decimal],
+        maximumRiskPerTradePercent: Decimal = StrategyRiskPolicy.defaultMaximumRiskPerTradePercent,
+        maximumPositionMarginPercent: Decimal = StrategyRiskPolicy.defaultMaximumPositionMarginPercent,
+        signalConfirmation: SignalConfirmationConfig = .optimizedDefault
+    ) {
+        self.strategyID = strategyID
+        self.leverage = leverage
+        self.parameters = parameters
+        self.maximumRiskPerTradePercent = maximumRiskPerTradePercent
+        self.maximumPositionMarginPercent = maximumPositionMarginPercent
+        self.signalConfirmation = signalConfirmation
+    }
 }
 
 struct StrategyContext: Equatable {
@@ -95,6 +114,11 @@ struct StrategyRegistry {
         strategies.values.map(\.definition).sorted { $0.name < $1.name }
     }
 
+    func definitions(recommendedFor timeframe: CandleTimeframe) -> [StrategyDefinition] {
+        let strategyIDs = StrategyTimeframeRouting.recommendedStrategyIDs(for: timeframe)
+        return strategyIDs.compactMap { strategies[$0]?.definition }
+    }
+
     func strategy(id: String) -> (any TradingStrategy)? {
         strategies[id]
     }
@@ -110,6 +134,30 @@ struct StrategyRegistry {
             MovingAverageAlignmentStrategy(),
             VWMATouchTrendStrategy()
         ]
+    }
+}
+
+enum StrategyTimeframeRouting {
+    static func recommendedStrategyIDs(for timeframe: CandleTimeframe) -> [String] {
+        switch timeframe {
+        case .fifteenMinutes, .oneHour:
+            return [
+                MovingAverageAlignmentStrategy.identifier
+            ]
+        case .fourHours:
+            return [
+                BlockedCandleShortStrategy.identifier,
+                MovingAverageAlignmentStrategy.identifier
+            ]
+        case .twelveHours, .oneDay:
+            return [
+                VWMATouchTrendStrategy.identifier
+            ]
+        }
+    }
+
+    static func isRecommended(strategyID: String, for timeframe: CandleTimeframe) -> Bool {
+        recommendedStrategyIDs(for: timeframe).contains(strategyID)
     }
 }
 
@@ -135,6 +183,8 @@ struct RiskDecision: Codable, Equatable, Identifiable {
     let intentID: UUID
     let isAllowed: Bool
     let reason: String
+    let positionMarginRatio: Decimal
+    let accountRiskPercent: Decimal
     let decidedAt: Date
 }
 
