@@ -228,6 +228,130 @@ struct XFrequencyStrategy: TradingStrategy {
     }
 }
 
+struct BTCFifteenMinutePhaseVacuumReclaimStrategy: TradingStrategy {
+    static let identifier = "btc-15m-phase-vacuum-reclaim"
+    private static let supportedSymbol = FuturesSymbol("BTCUSDT")
+    private static let supportedTimeframes: Set<CandleTimeframe> = [.fifteenMinutes]
+
+    let definition = StrategyDefinition(
+        id: Self.identifier,
+        name: "BTC 15m Phase Vacuum Reclaim",
+        summary: "BTCUSDT 15분봉 전용 SMA96/SMA384 phase reclaim 공격형 필터",
+        defaultConfig: StrategyConfig(
+            strategyID: Self.identifier,
+            leverage: 10,
+            parameters: [
+                "fastMeanPeriod": 96,
+                "slowMeanPeriod": 384,
+                "atrPeriod": 14,
+                "volumeLookback": 144,
+                "reclaimLookback": 2,
+                "minimumTrendSpread": Decimal(string: "0.002")!,
+                "maximumTrendSpread": Decimal(string: "0.020")!,
+                "minimumATRPercent": Decimal(string: "0.001")!,
+                "maximumATRPercent": Decimal(string: "0.0075")!,
+                "minimumCloseLocation": Decimal(string: "0.76")!,
+                "volumeMultiplier": Decimal(string: "2.0")!,
+                "stopATRBuffer": Decimal(string: "0.45")!,
+                "rewardRiskRatio": Decimal(string: "3.5")!
+            ],
+            maximumRiskPerTradePercent: 15,
+            maximumPositionMarginPercent: 100,
+            signalConfirmation: .disabled
+        )
+    )
+
+    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        guard context.symbol == Self.supportedSymbol,
+              Self.supportedTimeframes.contains(context.timeframe) else {
+            return .noSignal
+        }
+
+        let candles = context.closedCandles
+        let parameters = XFrequencyParameters(overrides: config.parameters)
+        guard candles.count >= parameters.slowMeanPeriod,
+              candles.count >= parameters.reclaimLookback + 1,
+              let fastMean = candles.simpleMovingAverage(period: parameters.fastMeanPeriod),
+              let slowMean = candles.simpleMovingAverage(period: parameters.slowMeanPeriod),
+              let atr = candles.averageTrueRange(period: parameters.atrPeriod),
+              let averageVolume = candles.averageVolume(period: parameters.volumeLookback),
+              let previousHigh = candles.highestHigh(
+                lookback: parameters.reclaimLookback,
+                endingAt: candles.count - 2
+              ),
+              let previousLow = candles.lowestLow(
+                lookback: parameters.reclaimLookback,
+                endingAt: candles.count - 2
+              ) else {
+            return .noSignal
+        }
+
+        let latest = candles[candles.count - 1]
+        let entry = latest.close
+        let range = latest.high - latest.low
+        guard entry > 0,
+              range > 0,
+              atr > 0,
+              averageVolume > 0,
+              latest.volume >= averageVolume * parameters.volumeMultiplier else {
+            return .noSignal
+        }
+
+        let trendSpread = absoluteDecimal(fastMean - slowMean) / entry
+        let atrPercent = atr / entry
+        guard trendSpread >= parameters.minimumTrendSpread,
+              trendSpread <= parameters.maximumTrendSpread,
+              atrPercent >= parameters.minimumATRPercent,
+              atrPercent <= parameters.maximumATRPercent else {
+            return .noSignal
+        }
+
+        let closeLocation = (latest.close - latest.low) / range
+
+        if parameters.allowsLong,
+           fastMean > slowMean,
+           latest.low <= fastMean,
+           latest.close > fastMean,
+           latest.close > previousHigh,
+           latest.close > latest.open,
+           closeLocation >= parameters.minimumCloseLocation {
+            let stop = Swift.min(latest.low, fastMean - atr * parameters.stopATRBuffer)
+            let risk = entry - stop
+            guard risk > 0 else { return .noSignal }
+            return fixedTargetSignal(
+                context: context,
+                side: .buy,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry + risk * parameters.rewardRiskRatio,
+                reason: "BTC 15m Phase Vacuum Reclaim: SMA96/SMA384 phase에서 2봉 고가 reclaim"
+            )
+        }
+
+        if parameters.allowsShort,
+           fastMean < slowMean,
+           latest.high >= fastMean,
+           latest.close < fastMean,
+           latest.close < previousLow,
+           latest.close < latest.open,
+           closeLocation <= 1 - parameters.minimumCloseLocation {
+            let stop = Swift.max(latest.high, fastMean + atr * parameters.stopATRBuffer)
+            let risk = stop - entry
+            guard risk > 0 else { return .noSignal }
+            return fixedTargetSignal(
+                context: context,
+                side: .sell,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry - risk * parameters.rewardRiskRatio,
+                reason: "BTC 15m Phase Vacuum Reclaim: SMA96/SMA384 phase에서 2봉 저가 reclaim"
+            )
+        }
+
+        return .noSignal
+    }
+}
+
 struct XOneHourLongStrategy: TradingStrategy {
     static let identifier = "x-1h-long"
 

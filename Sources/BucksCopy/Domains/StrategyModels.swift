@@ -146,6 +146,7 @@ struct StrategyRegistry {
             ETHOneHourMomentumBurstStrategy(),
             XOneHourLongStrategy(),
             XOneHourShortStrategy(),
+            BTCFifteenMinutePhaseVacuumReclaimStrategy(),
             XFrequencyStrategy(),
             XStrategy()
         ]
@@ -162,7 +163,8 @@ enum StrategyTimeframeRouting {
         case .fifteenMinutes:
             baseIDs = [
                 XStrategy.identifier,
-                XFrequencyStrategy.identifier
+                XFrequencyStrategy.identifier,
+                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
             ]
         case .oneHour:
             baseIDs = [
@@ -186,10 +188,14 @@ enum StrategyTimeframeRouting {
         }
 
         guard let symbol else { return baseIDs }
-        return baseIDs.filter {
-            !blockedLiveRoutes.contains(
-                StrategyRouteKey(symbol: symbol, timeframe: timeframe, strategyID: $0)
-            )
+        return baseIDs.filter { strategyID in
+            let route = StrategyRouteKey(symbol: symbol, timeframe: timeframe, strategyID: strategyID)
+            if symbolScopedLiveRoutes.contains(where: {
+                $0.timeframe == timeframe && $0.strategyID == strategyID
+            }) {
+                return symbolScopedLiveRoutes.contains(route)
+            }
+            return !blockedLiveRoutes.contains(route)
         }
     }
 
@@ -241,6 +247,14 @@ enum StrategyTimeframeRouting {
             symbol: FuturesSymbol("ETHUSDT"),
             timeframe: .oneDay,
             strategyID: VWMATouchTrendStrategy.identifier
+        )
+    ]
+
+    private static let symbolScopedLiveRoutes: Set<StrategyRouteKey> = [
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
         )
     ]
 }
