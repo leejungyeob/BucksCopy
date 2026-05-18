@@ -7,8 +7,11 @@ final class StrategyTests: XCTestCase {
 
         XCTAssertEqual(ids, Set([
             DonchianChannelBreakoutStrategy.identifier,
+            ETHOneHourMomentumBurstStrategy.identifier,
             TimeSeriesMomentumStrategy.identifier,
             VWMATouchTrendStrategy.identifier,
+            XOneHourLongStrategy.identifier,
+            XOneHourShortStrategy.identifier,
             XFrequencyStrategy.identifier,
             XStrategy.identifier
         ]))
@@ -24,7 +27,7 @@ final class StrategyTests: XCTestCase {
         )
         XCTAssertEqual(
             StrategyTimeframeRouting.recommendedStrategyIDs(for: .oneHour),
-            []
+            [ETHOneHourMomentumBurstStrategy.identifier]
         )
         XCTAssertEqual(
             StrategyTimeframeRouting.recommendedStrategyIDs(for: .fourHours),
@@ -44,6 +47,78 @@ final class StrategyTests: XCTestCase {
                 VWMATouchTrendStrategy.identifier,
                 DonchianChannelBreakoutStrategy.identifier
             ]
+        )
+    }
+
+    func testTimeframeRoutingBlocksSymbolSpecificInvalidStrategyRoutes() {
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: DonchianChannelBreakoutStrategy.identifier,
+            for: .fourHours,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .fourHours,
+                symbol: FuturesSymbol("BTCUSDT")
+            ),
+            []
+        )
+        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
+            strategyID: ETHOneHourMomentumBurstStrategy.identifier,
+            for: .oneHour,
+            symbol: FuturesSymbol("ETHUSDT")
+        ))
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .oneHour,
+                symbol: FuturesSymbol("ETHUSDT")
+            ),
+            [ETHOneHourMomentumBurstStrategy.identifier]
+        )
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .oneHour,
+                symbol: FuturesSymbol("BTCUSDT")
+            ),
+            []
+        )
+        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
+            strategyID: VWMATouchTrendStrategy.identifier,
+            for: .oneDay,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .fifteenMinutes,
+                symbol: FuturesSymbol("ETHUSDT")
+            ),
+            []
+        )
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .fourHours,
+                symbol: FuturesSymbol("ETHUSDT")
+            ),
+            []
+        )
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .twelveHours,
+                symbol: FuturesSymbol("ETHUSDT")
+            ),
+            [TimeSeriesMomentumStrategy.identifier]
+        )
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: VWMATouchTrendStrategy.identifier,
+            for: .oneDay,
+            symbol: FuturesSymbol("ETHUSDT")
+        ))
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .oneDay,
+                symbol: FuturesSymbol("ETHUSDT")
+            ),
+            [DonchianChannelBreakoutStrategy.identifier]
         )
     }
 
@@ -188,6 +263,79 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(signal.entryPrice, Decimal(string: "99.15")!)
         XCTAssertGreaterThan(signal.stopLoss, signal.entryPrice)
         XCTAssertEqual(signal.plannedRewardRiskRatio, 2)
+    }
+
+    func testXOneHourLongStrategyCreatesLongAfterHourlyReclaim() throws {
+        let strategy = XOneHourLongStrategy()
+        let candles = xOneHourLongCandles()
+        let evaluation = try strategy.evaluate(
+            StrategyContext(
+                symbol: FuturesSymbol("BTCUSDT"),
+                timeframe: .oneHour,
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
+            ),
+            config: strategy.definition.defaultConfig
+        )
+
+        guard case .signal(let signal) = evaluation else {
+            return XCTFail("Expected X 1H long signal")
+        }
+
+        XCTAssertEqual(signal.strategyID, XOneHourLongStrategy.identifier)
+        XCTAssertEqual(signal.side, .buy)
+        XCTAssertEqual(signal.entryPrice, Decimal(string: "103.5")!)
+        XCTAssertLessThan(signal.stopLoss, signal.entryPrice)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, Decimal(string: "2.2")!)
+    }
+
+    func testXOneHourShortStrategyCreatesShortAfterHourlyReclaim() throws {
+        let strategy = XOneHourShortStrategy()
+        let candles = xOneHourShortCandles()
+        let evaluation = try strategy.evaluate(
+            StrategyContext(
+                symbol: FuturesSymbol("BTCUSDT"),
+                timeframe: .oneHour,
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
+            ),
+            config: strategy.definition.defaultConfig
+        )
+
+        guard case .signal(let signal) = evaluation else {
+            return XCTFail("Expected X 1H short signal")
+        }
+
+        XCTAssertEqual(signal.strategyID, XOneHourShortStrategy.identifier)
+        XCTAssertEqual(signal.side, .sell)
+        XCTAssertEqual(signal.entryPrice, Decimal(string: "96.5")!)
+        XCTAssertGreaterThan(signal.stopLoss, signal.entryPrice)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, Decimal(string: "2.2")!)
+    }
+
+    func testETHOneHourMomentumBurstCreatesSignalAfterDirectionalReturnBreakout() throws {
+        let strategy = ETHOneHourMomentumBurstStrategy()
+        let candles = ethOneHourMomentumBurstCandles()
+        let evaluation = try strategy.evaluate(
+            StrategyContext(
+                symbol: FuturesSymbol("ETHUSDT"),
+                timeframe: .oneHour,
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
+            ),
+            config: strategy.definition.defaultConfig
+        )
+
+        guard case .signal(let signal) = evaluation else {
+            return XCTFail("Expected ETH 1H momentum burst signal")
+        }
+
+        XCTAssertEqual(signal.strategyID, ETHOneHourMomentumBurstStrategy.identifier)
+        XCTAssertEqual(signal.symbol, FuturesSymbol("ETHUSDT"))
+        XCTAssertEqual(signal.side, .buy)
+        XCTAssertEqual(signal.entryPrice, 105)
+        XCTAssertLessThan(signal.stopLoss, signal.entryPrice)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, Decimal(string: "2.5")!)
     }
 
     func testSignalEvaluatorRejectsSymbolOutsideWatchlist() throws {
@@ -1191,6 +1339,108 @@ private func xShortCandles() -> [Candle] {
     return slowBase + fastBase + [reclaim]
 }
 
+private func xOneHourLongCandles() -> [Candle] {
+    let slowBase = (0..<72).map { index in
+        makeStrategyCandle(
+            offset: index,
+            open: 100,
+            high: Decimal(string: "100.2")!,
+            low: Decimal(string: "99.8")!,
+            close: 100,
+            timeframe: .oneHour
+        )
+    }
+    let fastBase = (72..<95).map { index in
+        makeStrategyCandle(
+            offset: index,
+            open: 103,
+            high: Decimal(string: "103.1")!,
+            low: Decimal(string: "102.9")!,
+            close: 103,
+            timeframe: .oneHour
+        )
+    }
+    let reclaim = makeStrategyCandle(
+        offset: 95,
+        open: 103,
+        high: Decimal(string: "103.6")!,
+        low: Decimal(string: "102.8")!,
+        close: Decimal(string: "103.5")!,
+        volume: 2_000,
+        timeframe: .oneHour
+    )
+    return slowBase + fastBase + [reclaim]
+}
+
+private func xOneHourShortCandles() -> [Candle] {
+    let slowBase = (0..<72).map { index in
+        makeStrategyCandle(
+            offset: index,
+            open: 100,
+            high: Decimal(string: "100.2")!,
+            low: Decimal(string: "99.8")!,
+            close: 100,
+            timeframe: .oneHour
+        )
+    }
+    let fastBase = (72..<95).map { index in
+        makeStrategyCandle(
+            offset: index,
+            open: 97,
+            high: Decimal(string: "97.1")!,
+            low: Decimal(string: "96.9")!,
+            close: 97,
+            timeframe: .oneHour
+        )
+    }
+    let reclaim = makeStrategyCandle(
+        offset: 95,
+        open: 97,
+        high: Decimal(string: "97.2")!,
+        low: Decimal(string: "96.4")!,
+        close: Decimal(string: "96.5")!,
+        volume: 2_000,
+        timeframe: .oneHour
+    )
+    return slowBase + fastBase + [reclaim]
+}
+
+private func ethOneHourMomentumBurstCandles() -> [Candle] {
+    let slowBase = (0..<109).map { index in
+        makeStrategyCandle(
+            offset: index,
+            open: 100,
+            high: Decimal(string: "100.6")!,
+            low: Decimal(string: "99.4")!,
+            close: 100,
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .oneHour
+        )
+    }
+    let preBreakout = (109..<120).map { index in
+        makeStrategyCandle(
+            offset: index,
+            open: Decimal(string: "103.4")!,
+            high: Decimal(string: "104.1")!,
+            low: Decimal(string: "102.9")!,
+            close: Decimal(string: "103.5")!,
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .oneHour
+        )
+    }
+    let breakout = makeStrategyCandle(
+        offset: 120,
+        open: 104,
+        high: Decimal(string: "105.6")!,
+        low: Decimal(string: "103.8")!,
+        close: 105,
+        volume: 2_000,
+        symbol: FuturesSymbol("ETHUSDT"),
+        timeframe: .oneHour
+    )
+    return slowBase + preBreakout + [breakout]
+}
+
 private func makeStrategyCandle(
     offset: Int,
     open: Decimal,
@@ -1198,11 +1448,12 @@ private func makeStrategyCandle(
     low: Decimal,
     close: Decimal,
     volume: Decimal = 1_000,
+    symbol: FuturesSymbol = FuturesSymbol("BTCUSDT"),
     timeframe: CandleTimeframe = .fifteenMinutes
 ) -> Candle {
     Candle(
         productType: .usdtFutures,
-        symbol: FuturesSymbol("BTCUSDT"),
+        symbol: symbol,
         timeframe: timeframe,
         openTime: Date(timeIntervalSince1970: TimeInterval(offset) * timeframe.duration),
         open: open,

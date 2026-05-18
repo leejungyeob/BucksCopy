@@ -40,6 +40,32 @@ final class BitgetMappingTests: XCTestCase {
         XCTAssertFalse(candle.isClosed)
     }
 
+    func testRESTCandlePayloadKeepsCurrentCandleOpenUntilTimeframeCompletes() throws {
+        let openTime = Date(timeIntervalSince1970: 1_695_685_500)
+        let row = BitgetCandleRow(values: [
+            String(Int(openTime.timeIntervalSince1970 * 1000)),
+            "27000",
+            "27000.5",
+            "26990",
+            "27000.25",
+            "0.057"
+        ])
+
+        let inProgress = try XCTUnwrap(row.domain(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            receivedAt: openTime.addingTimeInterval(899)
+        ))
+        let closed = try XCTUnwrap(row.domain(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            receivedAt: openTime.addingTimeInterval(900)
+        ))
+
+        XCTAssertFalse(inProgress.isClosed)
+        XCTAssertTrue(closed.isClosed)
+    }
+
     func testAccountDTOMappingKeepsBalanceFields() throws {
         let json = """
         {
@@ -296,6 +322,49 @@ final class BitgetMappingTests: XCTestCase {
         XCTAssertEqual(dto.productType, ProductType.usdtFutures.rawValue)
         XCTAssertEqual(dto.marginCoin, "USDT")
         XCTAssertEqual(dto.leverage, "10")
+    }
+
+    func testPendingPlanOrdersMapManualTPSLProtection() throws {
+        let json = """
+        {
+          "entrustedList": [
+            {
+              "planType": "profit_loss",
+              "symbol": "ethusdt",
+              "size": "0.05",
+              "orderId": "tp1",
+              "triggerPrice": "2050",
+              "executePrice": "2050",
+              "posSide": "long",
+              "orderSource": "profit_limit",
+              "uTime": "1710000001000"
+            },
+            {
+              "planType": "profit_loss",
+              "symbol": "ethusdt",
+              "size": "0.1",
+              "orderId": "sl1",
+              "triggerPrice": "1900",
+              "executePrice": "0",
+              "posSide": "long",
+              "orderSource": "loss_market",
+              "uTime": "1710000002000"
+            }
+          ],
+          "endId": "sl1"
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(BitgetPendingPlanOrdersResponseDTO.self, from: json)
+        let orders = response.entrustedList.compactMap(\.domain)
+
+        XCTAssertEqual(orders.count, 2)
+        XCTAssertEqual(orders[0].symbol, FuturesSymbol("ETHUSDT"))
+        XCTAssertEqual(orders[0].side, .long)
+        XCTAssertEqual(orders[0].kind, .takeProfit)
+        XCTAssertEqual(orders[0].triggerPrice, 2050)
+        XCTAssertEqual(orders[1].kind, .stopLoss)
+        XCTAssertEqual(orders[1].triggerPrice, 1900)
     }
 
     func testCandleRowMappingUsesBitgetArrayOrder() throws {

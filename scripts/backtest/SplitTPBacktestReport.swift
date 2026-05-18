@@ -11,6 +11,8 @@ struct BacktestReportOptions {
     var fifteenMinuteCandleLimit = 20_000
     var oneHourCandleLimit = 20_000
     var timeframeFilter: CandleTimeframe?
+    var strategyIDFilter: String?
+    var parameterOverrides: [String: Decimal] = [:]
     var leverage = 2
     var maximumRiskPerTradePercent: Decimal = 5
     var maximumPositionMarginPercent: Decimal = 100
@@ -68,6 +70,19 @@ struct BacktestReportOptions {
                     throw RunnerError.invalidValue(argument, arguments[index])
                 }
                 options.timeframeFilter = timeframe
+            case "--strategy":
+                index += 1
+                guard index < arguments.count else { throw RunnerError.missingValue(argument) }
+                options.strategyIDFilter = arguments[index]
+            case "--param":
+                index += 1
+                guard index < arguments.count else { throw RunnerError.missingValue(argument) }
+                let pair = arguments[index].split(separator: "=", maxSplits: 1).map(String.init)
+                guard pair.count == 2,
+                      let value = parseDecimal(pair[1]) else {
+                    throw RunnerError.invalidValue(argument, arguments[index])
+                }
+                options.parameterOverrides[pair[0]] = value
             case "--leverage":
                 index += 1
                 guard index < arguments.count else { throw RunnerError.missingValue(argument) }
@@ -129,7 +144,7 @@ enum RunnerError: Error, CustomStringConvertible {
 
     static let usage = """
     사용법:
-      scripts/backtest/run_split_tp_backtest_report.sh [--symbol BTCUSDT] [--db PATH] [--output PATH] [--cache PATH] [--timeframe 15m] [--leverage 2] [--risk 5] [--margin 100] [--15m-limit 20000] [--1h-limit 20000] [--all|--recommended-only] [--no-cache|--refresh-cache]
+      scripts/backtest/run_split_tp_backtest_report.sh [--symbol BTCUSDT] [--db PATH] [--output PATH] [--cache PATH] [--timeframe 15m] [--strategy ID] [--param key=value] [--leverage 2] [--risk 5] [--margin 100] [--15m-limit 20000] [--1h-limit 20000] [--all|--recommended-only] [--no-cache|--refresh-cache]
 
     기본값:
       symbol: BTCUSDT
@@ -203,7 +218,12 @@ struct SplitTPBacktestReport {
         let registry = StrategyRegistry()
         let engine = BacktestEngine(strategyRegistry: registry)
         let timeframes = options.timeframeFilter.map { [$0] } ?? CandleTimeframe.allCases
-        let strategies = registry.definitions
+        let strategies = registry.definitions.filter { definition in
+            options.strategyIDFilter.map { $0 == definition.id } ?? true
+        }
+        if let strategyIDFilter = options.strategyIDFilter, strategies.isEmpty {
+            throw RunnerError.invalidValue("--strategy", strategyIDFilter)
+        }
         let formatter = utcFormatter()
         var cache = loadCache(from: cacheURL)
         var didUpdateCache = false
@@ -213,11 +233,18 @@ struct SplitTPBacktestReport {
             var loadedCandles: [Candle]?
             for definition in strategies {
                 if options.includeAllStrategyTimeframes == false,
-                   StrategyTimeframeRouting.isRecommended(strategyID: definition.id, for: timeframe) == false {
+                   StrategyTimeframeRouting.isRecommended(
+                    strategyID: definition.id,
+                    for: timeframe,
+                    symbol: options.symbol
+                   ) == false {
                     continue
                 }
 
                 var config = definition.defaultConfig
+                for (key, value) in options.parameterOverrides {
+                    config.parameters[key] = value
+                }
                 config.leverage = options.leverage
                 config.maximumRiskPerTradePercent = options.maximumRiskPerTradePercent
                 config.maximumPositionMarginPercent = options.maximumPositionMarginPercent
@@ -277,7 +304,8 @@ struct SplitTPBacktestReport {
                     strategyName: definition.name,
                     isRecommended: StrategyTimeframeRouting.isRecommended(
                         strategyID: definition.id,
-                        for: timeframe
+                        for: timeframe,
+                        symbol: options.symbol
                     ),
                     candleCount: candles.count,
                     firstOpenTime: candles.first?.openTime,

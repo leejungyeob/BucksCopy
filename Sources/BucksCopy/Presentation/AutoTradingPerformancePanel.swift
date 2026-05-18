@@ -99,8 +99,13 @@ private struct LiveAutomationPerformanceSnapshot {
         )
         let entryCount = ledgerLogs.filter(Self.isEntryLog).count
         let closeCount = ledgerLogs.filter(Self.isCloseRequestLog).count
+        let signalChangeCloseCount = ledgerLogs.filter(Self.isSignalChangeCloseLog).count
+        let closeOutcomeSummary = Self.closeOutcomeSummary(logs: ledgerLogs)
         let riskCount = ledgerLogs.filter { $0.category == .risk || $0.severity == .error }.count
-        let openPositionCount = positions.filter { $0.total > 0 }.count
+        let openPositions = positions.filter { $0.total > 0 }
+        let openPositionCount = openPositions.count
+        let longPositionCount = openPositions.filter { $0.side == .long }.count
+        let shortPositionCount = openPositions.filter { $0.side == .short }.count
 
         if let firstStartedAt {
             let updatedAt = account?.updatedAt ?? session?.lastUpdatedAt
@@ -142,20 +147,28 @@ private struct LiveAutomationPerformanceSnapshot {
             ),
             PerformanceMetric(
                 title: "확정 승/패",
-                value: "연동 전",
-                footnote: "종료 PnL 필요",
-                tone: .neutral
+                value: closeOutcomeSummary.recordText,
+                footnote: closeOutcomeSummary.recordFootnote(
+                    signalChangeCloseCount: signalChangeCloseCount
+                ),
+                tone: closeOutcomeSummary.tone
+            ),
+            PerformanceMetric(
+                title: "승률",
+                value: closeOutcomeSummary.winRateText,
+                footnote: closeOutcomeSummary.total > 0 ? "청산 직전 PnL 기준" : "판정 로그 대기",
+                tone: closeOutcomeSummary.tone
             ),
             PerformanceMetric(
                 title: "진입/청산",
                 value: "\(entryCount) / \(closeCount)",
-                footnote: "주문 로그 기준",
+                footnote: "신호변경 \(signalChangeCloseCount)회",
                 tone: entryCount > 0 || closeCount > 0 ? .accent : .neutral
             ),
             PerformanceMetric(
                 title: "현재 포지션",
                 value: "\(openPositionCount)개",
-                footnote: "미실현 \(Self.signedUSDTText(openUnrealized))",
+                footnote: "롱 \(longPositionCount)개 · 숏 \(shortPositionCount)개 · 미실현 \(Self.signedUSDTText(openUnrealized))",
                 tone: PerformanceTone.profit(openUnrealized)
             ),
             PerformanceMetric(
@@ -171,6 +184,47 @@ private struct LiveAutomationPerformanceSnapshot {
                 tone: riskCount > 0 ? .danger : .neutral
             )
         ]
+    }
+
+    private struct CloseOutcomeSummary {
+        var wins = 0
+        var losses = 0
+        var breakevens = 0
+
+        var total: Int {
+            wins + losses + breakevens
+        }
+
+        var decisiveTotal: Int {
+            wins + losses
+        }
+
+        var recordText: String {
+            guard total > 0 else { return "-" }
+            return "\(wins)승 \(losses)패"
+        }
+
+        var winRateText: String {
+            guard decisiveTotal > 0 else { return "-" }
+            return "\(winRate.riskText)%"
+        }
+
+        var tone: PerformanceTone {
+            guard decisiveTotal > 0 else { return .neutral }
+            return wins >= losses ? .success : .danger
+        }
+
+        private var winRate: Decimal {
+            Decimal(wins) / Decimal(decisiveTotal) * 100
+        }
+
+        func recordFootnote(signalChangeCloseCount: Int) -> String {
+            guard total > 0 else { return "청산 PnL 기록 대기" }
+            if breakevens > 0 {
+                return "본전 \(breakevens)건 · 신호변경 \(signalChangeCloseCount)회"
+            }
+            return "신호변경 \(signalChangeCloseCount)회 포함"
+        }
     }
 
     private static func firstStartedAt(logs: [TradeEventLog], session: LiveAutomationSession?) -> Date? {
@@ -234,8 +288,44 @@ private struct LiveAutomationPerformanceSnapshot {
         guard log.category == .liveOrder else { return false }
         let text = "\(log.metadata?.title ?? "") \(log.message)"
         return text.contains("청산 요청") ||
+            text.contains("수동 청산 감지") ||
+            text.contains("External/manual close detected") ||
             text.contains("기존 포지션 정리") ||
             text.contains("close submitted")
+    }
+
+    private static func isSignalChangeCloseLog(_ log: TradeEventLog) -> Bool {
+        guard isCloseRequestLog(log) else { return false }
+        let text = "\(log.metadata?.title ?? "") \(log.metadata?.subtitle ?? "") \(log.message)"
+        return text.contains("기존 포지션 정리") ||
+            text.contains("새 신호 우선순위") ||
+            text.contains("Live replacement policy")
+    }
+
+    private static func closeOutcomeSummary(logs: [TradeEventLog]) -> CloseOutcomeSummary {
+        logs.reduce(into: CloseOutcomeSummary()) { summary, log in
+            guard let profitLoss = closeProfitLoss(in: log) else { return }
+            if profitLoss > 0 {
+                summary.wins += 1
+            } else if profitLoss < 0 {
+                summary.losses += 1
+            } else {
+                summary.breakevens += 1
+            }
+        }
+    }
+
+    private static func closeProfitLoss(in log: TradeEventLog) -> Decimal? {
+        guard isCloseRequestLog(log) else { return nil }
+        let labels = ["실현 PnL", "청산 PnL", "청산 직전 PnL", "미실현 PnL"]
+        for label in labels {
+            guard let value = log.metadata?.details.first(where: { $0.label == label })?.value,
+                  let profitLoss = DecimalText.optional(value) else {
+                continue
+            }
+            return profitLoss
+        }
+        return nil
     }
 
     private static func openUnrealized(_ positions: [PositionSnapshot]) -> Decimal? {

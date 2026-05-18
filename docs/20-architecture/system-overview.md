@@ -19,7 +19,7 @@
 4. Strategy는 주문 API를 직접 부르지 않고 live execution gateway contract만 사용합니다.
 5. Candle 생성은 deterministic하게 테스트 가능한 Domain/Data 경계로 둡니다.
 6. Watchlist에 없는 심볼은 WebSocket 구독, strategy 실행, live order 생성 대상이 아닙니다.
-7. Strategy는 로컬에 저장된 closed candle과 새로 수신한 closed candle만 소비합니다.
+7. Backtest/validation strategy는 closed candle만 소비하고, Live monitor는 명시적으로 모델링된 현재 forming candle도 후보 평가에 포함할 수 있습니다.
 
 ## 레이어별 책임
 
@@ -85,7 +85,7 @@ flowchart LR
 - The chart includes a right-side price axis, latest-price line, zoom controls, reset, horizontal drag pan, and vertical drag pan.
 - Chart zoom uses continuous candle spacing instead of a fixed visible-count jump. As spacing changes, candle width and visible candle count change together.
 - The default viewport should focus on recent candles instead of scaling every locally stored candle into one compressed view.
-- The bottom dashboard band is a cumulative Live automation ledger, not a per-start reset view. It shows first saved seed equity, current equity, estimated net profit excluding open unrealized PnL, cumulative active duration, entry/close log counts, open position count, and risk event count from stored automation records. Exact win/loss counts require a future closed-PnL/order-history integration.
+- The bottom dashboard band is a cumulative Live automation ledger, not a per-start reset view. It shows first saved seed equity, current equity, estimated net profit excluding open unrealized PnL, cumulative active duration, entry/close log counts, open position count, risk event count, and close-outcome win rate when close logs carry PnL metadata. Replacement close outcomes are based on the position snapshot's pre-close PnL until a full order-history realized-PnL integration exists.
 
 ## Watchlist Rules
 
@@ -106,7 +106,7 @@ flowchart LR
 - Selected symbol/timeframe changes reload the local chart view and switch only the matching live WebSocket candle subscription; they do not restart historical backfill for that tab.
 - Target gap-fill implementation: load the last local closed candle per Watchlist symbol, request only the missing gap from Bitget, upsert the result, then resume WebSocket streaming.
 - If no local history exists, seed from the maximum officially queryable REST range, then continue accumulating locally from that point forward.
-- Keep in-progress candles either in memory or stored with an explicit non-closed state; strategy execution must ignore non-closed candles.
+- Keep in-progress candles either in memory or stored with an explicit non-closed state. Backtest/validation ignores non-closed candles; Live monitor may include the current forming candle when `openTime <= now < closeTime`.
 - Public WebSocket candle pushes are stored with an explicit non-closed state until a later interval or REST refresh confirms closure.
 - Live execution keeps minimal local audit metadata for strategy review; raw private account/order payloads and raw order identifiers are not persisted in logs.
 
@@ -155,16 +155,17 @@ References:
 ## Trading Defaults
 
 - Supported planning timeframes: `15m`, `1H`, `4H`, `12H`, `1D`.
-- Strategy logic consumes closed candle data unless a future feature explicitly models in-progress candles.
+- Backtest strategy logic consumes closed candle data. Live monitoring explicitly models the current forming candle for earlier entry decisions.
 - Built-in strategies must emit `entryPrice`, `stopLoss`, and `takeProfit` together when they produce a signal.
-- Built-in strategy inputs are limited to local closed OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget.
+- Built-in strategy inputs are limited to local OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget. Backtest input remains closed-only; Live input may include the latest forming candle.
 - Built-in strategy set: X, VWMA100 touch trend, Donchian channel breakout, and Time-Series momentum.
 - Strategy signals use the main strategy output and risk policy as the default trading path. Auxiliary indicator Gate data has been removed from the active decision path after validation showed weak path stability.
 - Live monitoring is independent from the chart-selected timeframe. When Live is running, it evaluates every Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D`, using the recommended strategy list for each timeframe.
-- Live monitoring stores a `(symbol, timeframe, strategy, closed candle open time)` key to avoid generating duplicate live entries from the same closed candle.
-- When Live starts, the monitor first primes the current latest closed candle keys for every Watchlist route. Those already-closed candles cannot create immediate live entries; only newly closed candles after Start Live can submit orders.
+- The Dashboard Live monitor loop evaluates candidates every 3 seconds by default until the engine is moved to a fully WebSocket-event-driven trigger.
+- Live monitoring stores a `(symbol, timeframe, strategy, candle open time)` key to avoid generating duplicate live entries from the same candle after a signal is accepted.
+- When Live starts, the monitor first primes the current latest completed candle keys for every Watchlist route. Those already-completed candles cannot create immediate live entries; the current forming candle remains eligible if it later emits a signal.
 - Live monitoring collects all same-run strategy/timeframe candidates first, then selects a single portfolio candidate. Priority is deterministic: highest planned reward/risk first, then highest expected net profit amount, then lower account risk.
-- If a new candidate outranks the best open position, Live execution closes the existing position by market close-position API before entering the selected candidate.
+- Open positions reserve one `symbol + side` slot. A new signal for an already-open same symbol/side is held until that position is closed; an opposite-side signal remains eligible in hedge mode so long and short can coexist.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
 - Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, leverage above `10x`, and signals whose take-profit cannot cover estimated round-trip trading fees.
 - Risk policy sizes each position so `stop-loss percent × leverage × margin allocation <= configured max loss per trade`. The default max loss per trade is `5%`, and UI configuration is capped at `15%`.
@@ -177,6 +178,7 @@ References:
 - Backtest exits use two-stage take-profit by default: TP1 is the midpoint between entry and final target for 50% size, TP2 is the original final target for the remaining 50%, and after TP1 the remaining stop-loss moves to 25% of the entry-to-target distance.
 - Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
 - Live execution records signal, risk decision, redacted exchange order metadata, and protection status separately.
+- The chart and position panel draw/display entry, TP1, TP2, and SL levels. TP2/SL come from the current position snapshot when available; when Bitget omits them on the position response, the dashboard supplements display and live-position scoring from the most recent live entry log for the same symbol/side.
 - Live execution requires a connected Bitget credential, explicit UI consent checkbox, and `Start Live`; deleting credentials stops the live monitor.
 
 ## Exchange-Side Protection Orders
@@ -194,11 +196,11 @@ References:
 - The long-term goal is not one universal strategy. The goal is to select roughly 4-5 high-quality strategies through local backtesting and run them as a portfolio.
 - The selection unit is `strategy × timeframe`, not strategy alone. A strategy can be enabled for multiple timeframes, and a single timeframe can have multiple enabled strategies.
 - Candidate combinations must be evaluated by win rate, net return after fees, trade count, drawdown, and blocked-signal frequency.
-- When a closed candle arrives for a timeframe, every enabled strategy for that symbol and timeframe can be evaluated.
+- When a completed or current forming candle is available for a timeframe, every enabled strategy for that symbol and timeframe can be evaluated by the Live monitor.
 - The visible chart timeframe is only a viewing/editing context. It must not disable monitoring of other enabled timeframes while Live trading is running.
 - More active combinations should increase trade opportunities, but execution must still cap risk by Watchlist symbol, leverage, open position state, duplicate signal handling, and opposite-signal handling.
-- Portfolio arbitration is global for the Live monitor run: simultaneous candidates compete with open positions, and only the top-ranked candidate can create a live order.
-- Open positions with TP/SL data are scored by remaining reward/risk from mark price to TP/SL and expected remaining profit amount. Positions without enough TP/SL data receive the lowest comparable priority because their remaining reward/risk cannot be proven.
+- Portfolio arbitration is global for the Live monitor run: simultaneous candidates compete for currently empty symbol/side slots, and only the top-ranked eligible candidate can create a live order.
+- Open positions with TP/SL data are scored by remaining reward/risk from mark price to TP/SL and expected remaining profit amount. When Bitget omits TP/SL fields but a matching live entry log has TP2/SL, the dashboard enriches the position before portfolio arbitration so an active protected position is not falsely scored as `0:1`. Positions without enough TP/SL data still receive the lowest comparable priority because their remaining reward/risk cannot be proven.
 - Portfolio backtesting should eventually report both per-combination metrics and aggregate portfolio metrics so weak combinations can be removed without disabling the whole strategy family.
 
 ## Strategy Research Notes

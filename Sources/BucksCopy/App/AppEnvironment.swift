@@ -46,6 +46,7 @@ struct AppEnvironment {
                 credentialStore: credentialStore,
                 accountRepository: accountRepository,
                 positionRepository: positionRepository,
+                positionProtectionRepository: positionRepository,
                 positionStreamService: positionStreamService,
                 symbolCatalogRepository: symbolCatalogRepository,
                 candleRepository: candleRepository,

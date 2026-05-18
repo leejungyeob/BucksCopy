@@ -115,7 +115,18 @@ struct StrategyRegistry {
     }
 
     func definitions(recommendedFor timeframe: CandleTimeframe) -> [StrategyDefinition] {
-        let strategyIDs = StrategyTimeframeRouting.recommendedStrategyIDs(for: timeframe)
+        recommendedDefinitions(for: timeframe, symbol: nil)
+    }
+
+    func definitions(recommendedFor timeframe: CandleTimeframe, symbol: FuturesSymbol) -> [StrategyDefinition] {
+        recommendedDefinitions(for: timeframe, symbol: symbol)
+    }
+
+    private func recommendedDefinitions(
+        for timeframe: CandleTimeframe,
+        symbol: FuturesSymbol?
+    ) -> [StrategyDefinition] {
+        let strategyIDs = StrategyTimeframeRouting.recommendedStrategyIDs(for: timeframe, symbol: symbol)
         return strategyIDs.compactMap { strategies[$0]?.definition }
     }
 
@@ -132,6 +143,9 @@ struct StrategyRegistry {
             DonchianChannelBreakoutStrategy(),
             TimeSeriesMomentumStrategy(),
             VWMATouchTrendStrategy(),
+            ETHOneHourMomentumBurstStrategy(),
+            XOneHourLongStrategy(),
+            XOneHourShortStrategy(),
             XFrequencyStrategy(),
             XStrategy()
         ]
@@ -139,36 +153,102 @@ struct StrategyRegistry {
 }
 
 enum StrategyTimeframeRouting {
-    static func recommendedStrategyIDs(for timeframe: CandleTimeframe) -> [String] {
+    static func recommendedStrategyIDs(
+        for timeframe: CandleTimeframe,
+        symbol: FuturesSymbol? = nil
+    ) -> [String] {
+        let baseIDs: [String]
         switch timeframe {
         case .fifteenMinutes:
-            return [
+            baseIDs = [
                 XStrategy.identifier,
                 XFrequencyStrategy.identifier
             ]
         case .oneHour:
-            return []
+            baseIDs = [
+                ETHOneHourMomentumBurstStrategy.identifier
+            ]
         case .fourHours:
-            return [
+            baseIDs = [
                 DonchianChannelBreakoutStrategy.identifier
             ]
         case .twelveHours:
-            return [
+            baseIDs = [
                 VWMATouchTrendStrategy.identifier,
                 DonchianChannelBreakoutStrategy.identifier,
                 TimeSeriesMomentumStrategy.identifier
             ]
         case .oneDay:
-            return [
+            baseIDs = [
                 VWMATouchTrendStrategy.identifier,
                 DonchianChannelBreakoutStrategy.identifier
             ]
         }
+
+        guard let symbol else { return baseIDs }
+        return baseIDs.filter {
+            !blockedLiveRoutes.contains(
+                StrategyRouteKey(symbol: symbol, timeframe: timeframe, strategyID: $0)
+            )
+        }
     }
 
-    static func isRecommended(strategyID: String, for timeframe: CandleTimeframe) -> Bool {
-        recommendedStrategyIDs(for: timeframe).contains(strategyID)
+    static func isRecommended(
+        strategyID: String,
+        for timeframe: CandleTimeframe,
+        symbol: FuturesSymbol? = nil
+    ) -> Bool {
+        recommendedStrategyIDs(for: timeframe, symbol: symbol).contains(strategyID)
     }
+
+    private static let blockedLiveRoutes: Set<StrategyRouteKey> = [
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .oneHour,
+            strategyID: ETHOneHourMomentumBurstStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fourHours,
+            strategyID: DonchianChannelBreakoutStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: XStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: XFrequencyStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .fourHours,
+            strategyID: DonchianChannelBreakoutStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .twelveHours,
+            strategyID: VWMATouchTrendStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .twelveHours,
+            strategyID: DonchianChannelBreakoutStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .oneDay,
+            strategyID: VWMATouchTrendStrategy.identifier
+        )
+    ]
+}
+
+private struct StrategyRouteKey: Hashable {
+    let symbol: FuturesSymbol
+    let timeframe: CandleTimeframe
+    let strategyID: String
 }
 
 enum TradingDomainError: Error, Equatable, CustomStringConvertible {

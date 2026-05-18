@@ -26,6 +26,26 @@ final class TradingSignalEvaluator {
         candles: [Candle],
         config: StrategyConfig
     ) throws -> TradeCandidate? {
+        try makeCandidate(
+            symbol: symbol,
+            watchlist: watchlist,
+            timeframe: timeframe,
+            candleOpenTime: candleOpenTime,
+            candles: candles,
+            config: config,
+            includesLiveFormingCandle: false
+        )
+    }
+
+    func makeCandidate(
+        symbol: FuturesSymbol,
+        watchlist: [FuturesSymbol],
+        timeframe: CandleTimeframe,
+        candleOpenTime: Date,
+        candles: [Candle],
+        config: StrategyConfig,
+        includesLiveFormingCandle: Bool = false
+    ) throws -> TradeCandidate? {
         guard watchlist.contains(symbol) else {
             throw TradingDomainError.selectedSymbolNotInWatchlist(symbol)
         }
@@ -36,7 +56,7 @@ final class TradingSignalEvaluator {
         let context = StrategyContext(
             symbol: symbol,
             timeframe: timeframe,
-            closedCandles: candles.filter(\.isClosed),
+            closedCandles: includesLiveFormingCandle ? candles : candles.filter(\.isClosed),
             generatedAt: clock.now
         )
         let evaluation = try strategy.evaluate(context, config: config)

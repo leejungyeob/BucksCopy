@@ -58,7 +58,7 @@ private struct LogRow: View {
         VStack(alignment: .leading, spacing: 8) {
             LogChipFlow(spacing: 8, rowSpacing: 6) {
                 LogChip(
-                    text: log.timestamp.shortDashboardTime,
+                    text: log.timestamp.dashboardLogDateTime,
                     tone: .neutral,
                     monospaced: true
                 )
@@ -222,8 +222,9 @@ private struct LogDetailCell: View {
             Text(detail.value)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(valueColor)
-                .lineLimit(4)
+                .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)

@@ -383,11 +383,84 @@
   - Start Live 직후 이미 저장되어 있던 최신 closed candle 신호가 즉시 실주문으로 이어질 수 있는 흐름이 확인됐습니다.
   - 사용자는 실시간 자동매매 시작 후 새로 확정되는 신호만 진입 대상으로 삼는지 확인을 요구했습니다.
 - Decision:
-  - Live monitor 시작 시 Watchlist의 각 `symbol × timeframe × recommended strategy` 최신 closed candle key를 먼저 priming 처리합니다.
-  - Priming된 candle은 이미 평가된 것으로 간주하므로 첫 실행에서 주문 후보로 쓰지 않습니다.
-  - 실주문 후보는 Start Live 이후 새로 닫힌 candle에서 발생한 strategy signal만 허용합니다.
-  - Live log에는 priming 완료 route 수와 “다음 closed candle부터 신규 진입” 상태를 남깁니다.
+  - Live monitor 시작 시 Watchlist의 각 `symbol × timeframe × recommended strategy` 최신 completed candle key를 먼저 priming 처리합니다.
+  - Priming된 completed candle은 이미 평가된 것으로 간주하므로 첫 실행에서 주문 후보로 쓰지 않습니다.
+  - 실주문 후보는 Start Live 이후 현재 forming candle 또는 새 completed candle에서 발생한 strategy signal만 허용합니다.
+  - Live log에는 priming 완료 route 수와 현재 forming candle부터 신규 진입 가능 상태를 남깁니다.
 - Consequences:
   - 앱 시작/Live 시작 직후 과거 신호로 즉시 포지션을 잡는 오작동을 차단합니다.
-  - 사용자는 Start Live 후 다음 캔들 close까지 신규 진입이 없을 수 있으며, 이는 의도된 안전 대기 상태입니다.
-  - Live monitor 테스트는 startup priming과 다음 closed candle 진입을 분리해 검증해야 합니다.
+  - 0023 이후 Live monitor는 현재 forming candle을 후보로 평가할 수 있지만, 이 priming 정책은 이미 completed된 과거 candle 신호를 막는 용도로 유지합니다.
+  - Live monitor 테스트는 startup priming과 forming/completed candle 진입을 분리해 검증해야 합니다.
+
+## 0023. Live Forming Candle Signal Evaluation
+
+- Status: accepted
+- Date: 2026-05-15
+- Context:
+  - 사용자는 실시간 자동매매에서 현재 진행 중인 candle도 가격 조건이 충족되면 진입 후보로 봐야 한다고 판단했습니다.
+  - Closed-candle-only 정책은 재현성이 높지만, 15m/4H/12H 신호가 확정될 때까지 기다려 초기 진입이 늦어지는 문제가 있습니다.
+  - 진행 중 candle은 이후 가격 변동으로 신호가 사라질 수 있으므로 live path에서만 명시적으로 모델링해야 합니다.
+- Decision:
+  - Backtest engine은 계속 closed candle만 소비합니다.
+  - Live monitor는 `openTime <= now < openTime + timeframe.duration`인 forming candle을 최신 후보 candle로 포함합니다.
+  - Start Live priming은 최신 completed candle만 평가완료 처리하고, 현재 forming candle은 priming하지 않습니다.
+  - Forming candle에서 `no signal`이 나온 경우 해당 candle key를 평가완료로 잠그지 않습니다. 같은 candle이 업데이트되어 나중에 signal이 생기면 다시 평가합니다.
+  - Forming candle에서 risk/confirmation을 통과한 signal이 한 번 후보가 되면 같은 `symbol/timeframe/strategy/openTime` key는 중복 주문 방지를 위해 평가완료 처리합니다.
+- Consequences:
+  - Live entry는 더 빨라질 수 있지만, closed candle backtest와 live 진입 타점은 의도적으로 달라질 수 있습니다.
+  - 진행 중 candle의 high/low/close가 변하면서 생기는 false positive는 portfolio arbitration, risk policy, protection order로 제한합니다.
+  - Live monitor 테스트는 forming candle signal, forming no-signal re-evaluation, completed candle duplicate prevention을 함께 검증해야 합니다.
+
+## 0024. Three-Second Live Monitor Cadence And Chart Protection Levels
+
+- Status: accepted
+- Date: 2026-05-15
+- Context:
+  - 사용자는 진행 중 candle 조건이 짧게 나타났다 사라질 수 있으므로 30초 감시 주기가 너무 느릴 수 있다고 판단했습니다.
+  - 1초 단위 즉시 평가/주문은 계산, REST refresh, 포지션 조회, 보호주문 처리 시간이 겹칠 수 있어 우선 3초 주기가 더 안전한 절충안으로 선택됐습니다.
+  - Bitget position snapshot이 exchange-side TPSL 가격을 항상 `takeProfit`/`stopLoss` 필드로 반환하지 않아 차트에 진입선만 보이고 보호 가격선이 누락될 수 있습니다.
+- Decision:
+  - Dashboard Live monitor 기본 감시 주기는 3초로 둡니다.
+  - 30초 주기는 더 이상 기본 live signal cadence가 아니며, 향후 15m WebSocket event-driven 평가로 전환하기 전까지 3초 monitor loop가 live 후보 평가 기준입니다.
+  - 차트 포지션 라인은 position snapshot의 TP2/SL을 우선 사용하되, 값이 비어 있으면 최근 persistent live entry log의 `TP1`, `TP2`, `손절가` 값을 보강해 표시합니다.
+- Consequences:
+  - 진행 중 candle 신호 반응성이 개선되지만, Bitget REST refresh/포지션 조회 호출 빈도도 증가하므로 timeout/fallback 경로를 계속 유지해야 합니다.
+  - 차트 TP1/TP2/SL 보강은 표시 목적이며, 실제 보호주문 상태의 진실 공급원은 Bitget TPSL 주문/포지션 조회와 live execution 로그입니다.
+
+## 0025. Position Protection Display And Portfolio Scoring Enrichment
+
+- Status: accepted
+- Date: 2026-05-16
+- Context:
+  - Bitget position snapshot이 실제 TPSL 보호주문이 존재해도 `takeProfit`/`stopLoss` 필드를 비워 반환하는 사례가 확인됐습니다.
+  - 이 경우 포지션 패널은 TP/SL을 `-`로 표시하고, portfolio arbitration은 기존 포지션의 남은 손익비를 `0:1`로 평가해 새 신호에 과도하게 교체될 수 있습니다.
+  - Live log의 선정 로직 설명이 길면 중간에서 잘려 실제 교체 근거를 검토하기 어렵습니다.
+- Decision:
+  - Dashboard는 같은 symbol/side의 최근 persistent live entry log에서 `TP1`, `TP2`, `손절가`를 복구해 차트와 포지션 패널에 표시합니다.
+  - Live monitor에 전달하는 open position도 동일한 보강값으로 enrich하여, Bitget position snapshot의 TP/SL 누락만으로 기존 포지션이 최저 점수가 되지 않게 합니다.
+  - Forming candle에서 신호가 한번 accepted되면 기존 `(symbol,timeframe,strategy,openTime)` key로 중복 주문을 막고, no-signal 상태는 계속 재평가합니다.
+  - 자동매매 로그 detail cell은 긴 `선정 로직` 값을 줄이지 않고 전체 표시합니다.
+  - 신호 변경으로 기존 포지션을 정리하는 close log는 redacted order ID와 함께 `청산 직전 PnL`, `청산 판정`을 기록하고, 하단 누적 기록 패널은 해당 값을 승패/승률에 반영합니다.
+- Consequences:
+  - 보호주문이 있는데도 화면과 선정 로직에서 기존 포지션을 무보호/무가치로 보는 오판을 줄입니다.
+  - close log의 승패는 실제 체결 후 정산된 realized PnL이 아니라 시장가 정리 직전 position snapshot 기준입니다. 정확한 확정 손익은 향후 order-history/position-history 연동으로 대체해야 합니다.
+  - 주문 원문 응답과 raw order identifier는 계속 로그에 저장하지 않습니다.
+
+## 0026. Hedge-Side Position Slots And Manual Refresh Reconciliation
+
+- Status: accepted
+- Date: 2026-05-16
+- Context:
+  - 사용자는 Bitget hedge mode에서 같은 symbol의 long/short를 동시에 보유할 수 있으므로 short 포지션이 있다고 long 신호까지 막지 않기를 원했습니다.
+  - 반대로 이미 ETHUSDT short 포지션이 열려 있으면 새 ETHUSDT short 신호로 같은 방향을 재진입하거나 교체하지 않기를 원했습니다.
+  - 사용자가 Bitget UI에서 TP/SL을 수동 수정한 뒤 앱 Refresh를 누르면 앱의 포지션/보호가격 표시와 선정 로직이 현재 거래소 상태를 따라가야 합니다.
+- Decision:
+  - Portfolio arbitration은 open position을 `symbol + side` 슬롯으로 취급합니다.
+  - 같은 `symbol + side`가 이미 열려 있으면 해당 방향의 새 후보는 position close 전까지 hold 처리합니다.
+  - 반대 방향은 별도 슬롯으로 취급하므로 hedge mode에서는 long/short 동시 보유 후보를 허용합니다.
+  - Position Refresh는 Bitget `orders-plan-pending?planType=profit_loss&productType=USDT-FUTURES`를 함께 조회해 현재 pending TP/SL 주문을 우선 반영합니다.
+  - pending TP/SL 조회가 성공하면 오래된 live entry log 값보다 거래소의 현재 보호주문 snapshot을 우선합니다. 조회가 실패하면 마지막 성공 snapshot 또는 live entry log로 표시를 보강합니다.
+- Consequences:
+  - 같은 방향 중복 진입/교체 churn을 줄이면서 반대 방향 hedge 진입은 허용됩니다.
+  - 계정이 one-way mode이면 long/short 동시 보유는 거래소 정책상 의도대로 동작하지 않을 수 있으므로 live smoke에서 position mode 확인이 필요합니다.
+  - 사용자가 수동으로 보호주문을 변경/삭제한 경우 Refresh 후 차트와 포지션 패널의 TP1/TP2/SL도 현재 거래소 pending plan 상태를 따릅니다.

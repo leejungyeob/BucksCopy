@@ -115,6 +115,7 @@ struct PositionSnapshot: Codable, Equatable, Identifiable {
     let marginMode: String
     let positionMode: PositionMode
     let liquidationPrice: Decimal?
+    let partialTakeProfit: Decimal?
     let takeProfit: Decimal?
     let stopLoss: Decimal?
     let createdAt: Date?
@@ -134,6 +135,7 @@ struct PositionSnapshot: Codable, Equatable, Identifiable {
         marginMode: String,
         positionMode: PositionMode = .unknown,
         liquidationPrice: Decimal?,
+        partialTakeProfit: Decimal? = nil,
         takeProfit: Decimal?,
         stopLoss: Decimal?,
         createdAt: Date?,
@@ -150,6 +152,7 @@ struct PositionSnapshot: Codable, Equatable, Identifiable {
         self.marginMode = marginMode
         self.positionMode = positionMode
         self.liquidationPrice = liquidationPrice
+        self.partialTakeProfit = partialTakeProfit
         self.takeProfit = takeProfit
         self.stopLoss = stopLoss
         self.createdAt = createdAt

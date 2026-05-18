@@ -134,6 +134,61 @@ final class SafetyTests: XCTestCase {
         }
     }
 
+    func testReplacementCloseLogRecordsOutcomeSnapshot() async throws {
+        let client = TestLiveOrderClient()
+        let logStore = InMemoryTradeEventLogStore()
+        let executor = LiveTradeExecutor(
+            orderPlacer: client,
+            leverageSetter: client,
+            protectionInstaller: ExchangeProtectionInstaller(
+                orderPlacer: client,
+                retryPolicy: ExchangeProtectionRetryPolicy(retryDelayNanoseconds: 0)
+            ),
+            logStore: logStore,
+            clock: FixedClock(now: Date(timeIntervalSince1970: 1))
+        )
+        let evaluator = TradingSignalEvaluator(
+            strategyRegistry: StrategyRegistry(strategies: []),
+            logStore: logStore,
+            clock: FixedClock(now: Date(timeIntervalSince1970: 1))
+        )
+        let existing = PortfolioOpenPositionAssessment(
+            position: livePosition(
+                symbol: FuturesSymbol("BTCUSDT"),
+                side: .long,
+                unrealizedProfitLoss: Decimal(string: "12.5")!
+            ),
+            score: PortfolioSignalScore(
+                rewardRiskRatio: 1,
+                expectedProfitPercent: 1,
+                expectedProfitAmount: 12.5,
+                accountRiskPercent: 0
+            ),
+            isScored: true
+        )
+
+        let result = try await executor.execute(
+            decision: .replace(existing: existing, with: liveTradeCandidate(), reason: "fixture replacement"),
+            accountEquity: 1_000,
+            contractSpecs: [liveContractSpec(symbol: FuturesSymbol("BTCUSDT"))],
+            signalEvaluator: evaluator
+        )
+
+        XCTAssertTrue(result.didSubmitOrder)
+        XCTAssertEqual(client.closeRequests.count, 1)
+        let closeLog = try XCTUnwrap(try logStore.loadRecent(limit: 10).first {
+            $0.metadata?.title.contains("기존 포지션 정리") == true
+        })
+        XCTAssertEqual(
+            closeLog.metadata?.details.first { $0.label == "청산 직전 PnL" }?.value,
+            "12.5"
+        )
+        XCTAssertEqual(
+            closeLog.metadata?.details.first { $0.label == "청산 판정" }?.value,
+            "승"
+        )
+    }
+
     func testLiveTradeExecutorSkipsFailClosedCloseWhenPositionDisappears() async throws {
         let client = TestLiveOrderClient()
         let failingProtectionPlacer = FlakyProtectionOrderPlacer(failuresBeforeSuccess: 99)
@@ -340,6 +395,7 @@ private func livePosition(
     symbol: FuturesSymbol,
     side: PositionSide,
     total: Decimal = 5,
+    unrealizedProfitLoss: Decimal = 0,
     positionMode: PositionMode = .hedge
 ) -> PositionSnapshot {
     PositionSnapshot(
@@ -349,7 +405,7 @@ private func livePosition(
         available: total,
         openPriceAverage: 100,
         markPrice: 100,
-        unrealizedProfitLoss: 0,
+        unrealizedProfitLoss: unrealizedProfitLoss,
         leverage: 2,
         marginMode: "isolated",
         positionMode: positionMode,

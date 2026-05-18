@@ -1,6 +1,6 @@
 import Foundation
 
-final class BitgetPositionRepository: PositionRepository {
+final class BitgetPositionRepository: PositionRepository, PositionProtectionRepository {
     private let client: BitgetRESTClient
 
     init(client: BitgetRESTClient) {
@@ -16,6 +16,18 @@ final class BitgetPositionRepository: PositionRepository {
             ]
         )
         return dtos.map(\.domain)
+    }
+
+    func fetchPendingPositionProtectionOrders() async throws -> [PositionProtectionOrderSnapshot] {
+        let response: BitgetPendingPlanOrdersResponseDTO = try await client.sendSignedGET(
+            path: "/api/v2/mix/order/orders-plan-pending",
+            queryItems: [
+                URLQueryItem(name: "limit", value: "100"),
+                URLQueryItem(name: "planType", value: "profit_loss"),
+                URLQueryItem(name: "productType", value: ProductType.usdtFutures.rawValue)
+            ]
+        )
+        return response.entrustedList.compactMap(\.domain)
     }
 }
 
@@ -117,5 +129,115 @@ struct BitgetPositionDTO: Decodable, Equatable {
             return String(value)
         }
         return nil
+    }
+}
+
+struct BitgetPendingPlanOrdersResponseDTO: Decodable, Equatable {
+    let entrustedList: [BitgetPendingPlanOrderDTO]
+    let endId: String?
+}
+
+struct BitgetPendingPlanOrderDTO: Decodable, Equatable {
+    let planType: String?
+    let symbol: String?
+    let size: String?
+    let orderId: String?
+    let executePrice: String?
+    let triggerPrice: String?
+    let posSide: String?
+    let orderSource: String?
+    let cTime: String?
+    let uTime: String?
+    let stopSurplusExecutePrice: String?
+    let stopSurplusTriggerPrice: String?
+    let stopLossExecutePrice: String?
+    let stopLossTriggerPrice: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case planType
+        case symbol
+        case size
+        case orderId
+        case executePrice
+        case triggerPrice
+        case posSide
+        case orderSource
+        case cTime
+        case uTime
+        case stopSurplusExecutePrice
+        case stopSurplusTriggerPrice
+        case stopLossExecutePrice
+        case stopLossTriggerPrice
+    }
+
+    var domain: PositionProtectionOrderSnapshot? {
+        guard let symbol, !symbol.isEmpty,
+              let kind = protectionKind,
+              let triggerPrice = protectionTriggerPrice,
+              triggerPrice > 0 else {
+            return nil
+        }
+
+        return PositionProtectionOrderSnapshot(
+            symbol: FuturesSymbol(symbol.uppercased()),
+            side: PositionSide(rawValue: posSide ?? "") ?? .unknown,
+            kind: kind,
+            triggerPrice: triggerPrice,
+            executePrice: protectionExecutePrice,
+            size: DecimalText.parse(size),
+            orderID: orderId ?? "",
+            updatedAt: Self.date(millisecondsText: uTime) ?? Self.date(millisecondsText: cTime)
+        )
+    }
+
+    private var protectionKind: ExchangeProtectionOrderKind? {
+        let orderSourceText = (orderSource ?? "").lowercased()
+        if orderSourceText.contains("loss") || stopLossTriggerPrice?.isEmpty == false {
+            return .stopLoss
+        }
+        if orderSourceText.contains("profit") ||
+            orderSourceText.contains("surplus") ||
+            stopSurplusTriggerPrice?.isEmpty == false {
+            return .takeProfit
+        }
+
+        let planText = (planType ?? "").lowercased()
+        if planText.contains("loss"), planText.contains("profit") == false {
+            return .stopLoss
+        }
+        if planText.contains("profit"), planText.contains("loss") == false {
+            return .takeProfit
+        }
+        return nil
+    }
+
+    private var protectionTriggerPrice: Decimal? {
+        switch protectionKind {
+        case .takeProfit:
+            return DecimalText.optional(triggerPrice) ??
+                DecimalText.optional(stopSurplusTriggerPrice)
+        case .stopLoss:
+            return DecimalText.optional(triggerPrice) ??
+                DecimalText.optional(stopLossTriggerPrice)
+        case nil:
+            return nil
+        }
+    }
+
+    private var protectionExecutePrice: Decimal? {
+        switch protectionKind {
+        case .takeProfit:
+            return DecimalText.optional(executePrice) ??
+                DecimalText.optional(stopSurplusExecutePrice)
+        case .stopLoss:
+            return DecimalText.optional(executePrice) ??
+                DecimalText.optional(stopLossExecutePrice)
+        case nil:
+            return nil
+        }
+    }
+
+    private static func date(millisecondsText: String?) -> Date? {
+        millisecondsText.flatMap { Double($0) }.map { Date(timeIntervalSince1970: $0 / 1000) }
     }
 }

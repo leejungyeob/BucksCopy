@@ -270,13 +270,27 @@ final class LiveTradeExecutor {
                 tags: [
                     TradeLogTag(label: "LIVE", tone: .success),
                     TradeLogTag(label: "청산", tone: .warning),
-                    TradeLogTag(label: sideText.uppercased(), tone: .neutral)
+                    TradeLogTag(label: sideText.uppercased(), tone: .neutral),
+                    TradeLogTag(
+                        label: closeOutcomeText(for: position.unrealizedProfitLoss),
+                        tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
+                    )
                 ],
                 details: [
                     TradeLogDetail(label: "심볼", value: position.symbol.rawValue),
                     TradeLogDetail(label: "포지션 방향", value: sideText),
                     TradeLogDetail(label: "수량", value: DecimalText.string(position.total)),
                     TradeLogDetail(label: "마크가", value: DecimalText.string(position.markPrice)),
+                    TradeLogDetail(
+                        label: "청산 직전 PnL",
+                        value: DecimalText.string(position.unrealizedProfitLoss),
+                        tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
+                    ),
+                    TradeLogDetail(
+                        label: "청산 판정",
+                        value: closeOutcomeText(for: position.unrealizedProfitLoss),
+                        tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
+                    ),
                     TradeLogDetail(label: "주문 ID", value: orderText.isEmpty ? "-" : orderText)
                 ]
             )
@@ -460,6 +474,18 @@ final class LiveTradeExecutor {
             return domainError.description
         }
         return String(describing: type(of: error))
+    }
+
+    private func closeOutcomeText(for profitLoss: Decimal) -> String {
+        if profitLoss > 0 { return "승" }
+        if profitLoss < 0 { return "패" }
+        return "본전"
+    }
+
+    private func closeOutcomeTone(for profitLoss: Decimal) -> TradeLogTone {
+        if profitLoss > 0 { return .success }
+        if profitLoss < 0 { return .danger }
+        return .neutral
     }
 }
 

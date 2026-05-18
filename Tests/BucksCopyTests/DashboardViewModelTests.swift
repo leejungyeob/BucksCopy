@@ -43,7 +43,7 @@ final class DashboardViewModelTests: XCTestCase {
         viewModel.selectTimeframe(.fourHours)
 
         XCTAssertEqual(viewModel.state.selectedTimeframe, .fourHours)
-        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, DonchianChannelBreakoutStrategy.identifier)
+        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, VWMATouchTrendStrategy.identifier)
     }
 
     func testBacktestTimeframeChangeRoutesStrategyToRecommendedDefault() {
@@ -68,7 +68,7 @@ final class DashboardViewModelTests: XCTestCase {
     }
 
     func testLiveBotMonitorsRecommendedStrategiesAcrossAllTimeframes() async throws {
-        let symbol = FuturesSymbol("BTCUSDT")
+        let symbol = FuturesSymbol("SOLUSDT")
         var state = DashboardState()
         state.credentialStatus = .connected(
             redactedIdentifier: "test...test",
@@ -671,6 +671,175 @@ final class DashboardViewModelTests: XCTestCase {
         }
     }
 
+    func testPositionProtectionLevelsAreRecoveredFromLiveEntryLog() throws {
+        let symbol = FuturesSymbol("ETHUSDT")
+        let entryLog = TradeEventLog(
+            timestamp: Date(timeIntervalSince1970: 10),
+            category: .liveOrder,
+            symbol: symbol,
+            message: "Live sell order submitted by donchian-channel-breakout on 1D.",
+            metadata: TradeLogMetadata(
+                title: "ETHUSDT 1D 매도 진입",
+                details: [
+                    TradeLogDetail(label: "손절가", value: "2347.645714285714"),
+                    TradeLogDetail(label: "TP1", value: "2008.656428571429 / 50%"),
+                    TradeLogDetail(label: "TP2", value: "1805.262857142858 / 50%")
+                ]
+            )
+        )
+        let position = PositionSnapshot(
+            symbol: symbol,
+            side: .short,
+            total: 0.1,
+            available: 0.1,
+            openPriceAverage: 2212.01,
+            markPrice: 2211.23,
+            unrealizedProfitLoss: 0.078,
+            leverage: 10,
+            marginMode: "isolated",
+            liquidationPrice: nil,
+            takeProfit: nil,
+            stopLoss: nil,
+            createdAt: Date(timeIntervalSince1970: 11),
+            updatedAt: Date(timeIntervalSince1970: 11)
+        )
+
+        let enriched = position.withChartProtectionLevels(from: [entryLog])
+
+        XCTAssertEqual(enriched.takeProfit, Decimal(string: "1805.262857142858"))
+        XCTAssertEqual(enriched.stopLoss, Decimal(string: "2347.645714285714"))
+        XCTAssertEqual(
+            enriched.chartProtectionLevels(from: [entryLog])?.partialTakeProfit,
+            Decimal(string: "2008.656428571429")
+        )
+    }
+
+    func testRefreshPositionsUsesExchangeProtectionOrdersBeforeEntryLogFallback() async throws {
+        let symbol = FuturesSymbol("ETHUSDT")
+        let positionRepository = StaticPositionRepository(positions: [
+            PositionSnapshot(
+                symbol: symbol,
+                side: .short,
+                total: 0.1,
+                available: 0.1,
+                openPriceAverage: 2200,
+                markPrice: 2190,
+                unrealizedProfitLoss: 1,
+                leverage: 10,
+                marginMode: "isolated",
+                liquidationPrice: nil,
+                takeProfit: nil,
+                stopLoss: nil,
+                createdAt: Date(timeIntervalSince1970: 10),
+                updatedAt: Date(timeIntervalSince1970: 20)
+            )
+        ])
+        let protectionRepository = StaticPositionProtectionRepository(orders: [
+            PositionProtectionOrderSnapshot(
+                symbol: symbol,
+                side: .short,
+                kind: .takeProfit,
+                triggerPrice: 2100,
+                executePrice: 2100,
+                size: 0.05,
+                orderID: "tp1",
+                updatedAt: Date(timeIntervalSince1970: 21)
+            ),
+            PositionProtectionOrderSnapshot(
+                symbol: symbol,
+                side: .short,
+                kind: .takeProfit,
+                triggerPrice: 2000,
+                executePrice: 2000,
+                size: 0.05,
+                orderID: "tp2",
+                updatedAt: Date(timeIntervalSince1970: 22)
+            ),
+            PositionProtectionOrderSnapshot(
+                symbol: symbol,
+                side: .short,
+                kind: .stopLoss,
+                triggerPrice: 2300,
+                executePrice: nil,
+                size: 0.1,
+                orderID: "sl",
+                updatedAt: Date(timeIntervalSince1970: 23)
+            )
+        ])
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry()
+        let viewModel = DashboardViewModel(
+            credentialStore: InMemoryCredentialStore(),
+            accountRepository: nil,
+            positionRepository: positionRepository,
+            positionProtectionRepository: protectionRepository,
+            candleRepository: InMemoryCandleRepository(),
+            candleBackfillRepository: nil,
+            logStore: logStore,
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
+            strategyRegistry: registry
+        )
+
+        await viewModel.refreshPositions(logSuccess: false)
+
+        let position = try XCTUnwrap(viewModel.state.positions.first)
+        XCTAssertEqual(position.partialTakeProfit, 2100)
+        XCTAssertEqual(position.takeProfit, 2000)
+        XCTAssertEqual(position.stopLoss, 2300)
+    }
+
+    func testRefreshPositionsRecordsManualCloseOutcomeWhenPositionDisappears() async throws {
+        let symbol = FuturesSymbol("BTCUSDT")
+        let position = PositionSnapshot(
+            symbol: symbol,
+            side: .long,
+            total: 0.2,
+            available: 0.2,
+            openPriceAverage: 100,
+            markPrice: 104,
+            unrealizedProfitLoss: 8,
+            leverage: 10,
+            marginMode: "isolated",
+            positionMode: .hedge,
+            liquidationPrice: nil,
+            takeProfit: nil,
+            stopLoss: nil,
+            createdAt: Date(timeIntervalSince1970: 10),
+            updatedAt: Date(timeIntervalSince1970: 20)
+        )
+        let positionRepository = MutablePositionRepository(positions: [position])
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry()
+        let viewModel = DashboardViewModel(
+            credentialStore: InMemoryCredentialStore(),
+            accountRepository: nil,
+            positionRepository: positionRepository,
+            candleRepository: InMemoryCandleRepository(),
+            candleBackfillRepository: nil,
+            logStore: logStore,
+            signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
+            strategyRegistry: registry,
+            clock: FixedClock(now: Date(timeIntervalSince1970: 100))
+        )
+
+        await viewModel.refreshPositions(logSuccess: false)
+        positionRepository.positions = []
+        await viewModel.refreshPositions(logSuccess: false)
+
+        let logs = try logStore.loadRecent(limit: 10)
+        let closeLog = try XCTUnwrap(logs.first { $0.metadata?.title == "BTCUSDT 수동 청산 감지" })
+        XCTAssertEqual(closeLog.category, .liveOrder)
+        XCTAssertEqual(closeLog.symbol, symbol)
+        XCTAssertEqual(
+            closeLog.metadata?.details.first { $0.label == "청산 직전 PnL" }?.value,
+            "8"
+        )
+        XCTAssertEqual(
+            closeLog.metadata?.details.first { $0.label == "청산 판정" }?.value,
+            "승"
+        )
+    }
+
     private func makeViewModel(credentialStore: CredentialStore) -> DashboardViewModel {
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
@@ -1013,6 +1182,34 @@ private final class TestPositionStreamService: PositionStreamService {
 
     func emit(_ positions: [PositionSnapshot]) {
         continuation?.yield(positions)
+    }
+}
+
+private struct StaticPositionRepository: PositionRepository {
+    let positions: [PositionSnapshot]
+
+    func fetchPositions() async throws -> [PositionSnapshot] {
+        positions
+    }
+}
+
+private final class MutablePositionRepository: PositionRepository {
+    var positions: [PositionSnapshot]
+
+    init(positions: [PositionSnapshot]) {
+        self.positions = positions
+    }
+
+    func fetchPositions() async throws -> [PositionSnapshot] {
+        positions
+    }
+}
+
+private struct StaticPositionProtectionRepository: PositionProtectionRepository {
+    let orders: [PositionProtectionOrderSnapshot]
+
+    func fetchPendingPositionProtectionOrders() async throws -> [PositionProtectionOrderSnapshot] {
+        orders
     }
 }
 

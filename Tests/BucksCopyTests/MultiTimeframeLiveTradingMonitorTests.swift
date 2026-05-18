@@ -3,7 +3,7 @@ import XCTest
 
 final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
     func testEvaluatesRecommendedStrategiesAcrossAllTimeframesAndSkipsDuplicateCandle() async throws {
-        let symbol = FuturesSymbol("BTCUSDT")
+        let symbol = FuturesSymbol("SOLUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
         let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
@@ -47,7 +47,7 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
                 $0.timeframe == .fourHours &&
                 $0.strategyID == DonchianChannelBreakoutStrategy.identifier
         })
-        XCTAssertTrue(secondRun.evaluations.isEmpty)
+        XCTAssertEqual(secondRun.signalCount, 0)
 
         let logs = try logStore.loadRecent(limit: 10)
         XCTAssertEqual(logs.count, 1)
@@ -56,7 +56,7 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
     }
 
     func testBackfillsRemoteCandlesBeforeMonitoringTimeframe() async throws {
-        let symbol = FuturesSymbol("BTCUSDT")
+        let symbol = FuturesSymbol("SOLUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
         let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
@@ -85,7 +85,11 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
         )
 
         XCTAssertEqual(result.signalCount, 1)
-        XCTAssertEqual(backfillRepository.requestedTimeframes, Set(CandleTimeframe.allCases))
+        XCTAssertEqual(backfillRepository.requestedTimeframes, Set([
+            .fourHours,
+            .twelveHours,
+            .oneDay
+        ]))
         let storedCandles = try candleRepository.loadCandles(
             symbol: symbol,
             timeframe: .fourHours,
@@ -94,8 +98,239 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
         XCTAssertEqual(storedCandles.count, 10)
     }
 
+    func testUsesFreshLocalCandlesWhenRemoteRefreshTimesOut() async throws {
+        let symbol = FuturesSymbol("SOLUSDT")
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
+        let localCandles = donchianBreakoutCandles(
+            symbol: symbol,
+            timeframe: .fourHours,
+            startOffset: 200
+        )
+        try candleRepository.upsertCandles(localCandles)
+
+        let monitor = MultiTimeframeLiveTradingMonitor(
+            candleRepository: candleRepository,
+            candleBackfillRepository: FailingMonitorBackfillRepository(),
+            signalEvaluator: TradingSignalEvaluator(
+                strategyRegistry: registry,
+                logStore: logStore,
+                confirmationEngine: passingConfirmationEngine()
+            ),
+            liveExecutor: monitorLiveExecutor(logStore: logStore),
+            strategyRegistry: registry,
+            clock: FixedClock(now: try XCTUnwrap(localCandles.last?.openTime).addingTimeInterval(
+                CandleTimeframe.fourHours.duration + 60
+            )),
+            remoteRefreshAttempts: 1,
+            remoteRefreshRetryDelayNanoseconds: 0
+        )
+
+        let result = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        XCTAssertFalse(result.failures.contains { $0.timeframe == .fourHours })
+        XCTAssertEqual(result.signalCount, 1)
+    }
+
+    func testRetriesRemoteCandleTimeoutBeforeEvaluating() async throws {
+        let symbol = FuturesSymbol("SOLUSDT")
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
+        let backfillRepository = FlakyMonitorBackfillRepository(
+            candles: donchianBreakoutCandles(
+                symbol: symbol,
+                timeframe: .fourHours,
+                startOffset: 200
+            ),
+            failuresBeforeSuccess: 2
+        )
+        let monitor = MultiTimeframeLiveTradingMonitor(
+            candleRepository: candleRepository,
+            candleBackfillRepository: backfillRepository,
+            signalEvaluator: TradingSignalEvaluator(
+                strategyRegistry: registry,
+                logStore: logStore,
+                confirmationEngine: passingConfirmationEngine()
+            ),
+            liveExecutor: monitorLiveExecutor(logStore: logStore),
+            strategyRegistry: registry,
+            remoteRefreshAttempts: 3,
+            remoteRefreshRetryDelayNanoseconds: 0
+        )
+
+        let result = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        XCTAssertTrue(result.failures.isEmpty)
+        XCTAssertEqual(result.signalCount, 1)
+        XCTAssertEqual(backfillRepository.attempts[.fourHours], 3)
+    }
+
+    func testEvaluatesFormingCandleWhenItCanGenerateLiveSignal() async throws {
+        let symbol = FuturesSymbol("SOLUSDT")
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
+        let candles = donchianBreakoutCandles(
+            symbol: symbol,
+            timeframe: .fourHours,
+            startOffset: 200
+        )
+        let latestSignalCandle = try XCTUnwrap(candles.last)
+        try candleRepository.upsertCandles(candles)
+
+        let monitor = MultiTimeframeLiveTradingMonitor(
+            candleRepository: candleRepository,
+            candleBackfillRepository: nil,
+            signalEvaluator: TradingSignalEvaluator(
+                strategyRegistry: registry,
+                logStore: logStore,
+                confirmationEngine: passingConfirmationEngine()
+            ),
+            liveExecutor: monitorLiveExecutor(logStore: logStore),
+            strategyRegistry: registry,
+            clock: FixedClock(now: latestSignalCandle.openTime.addingTimeInterval(
+                CandleTimeframe.fourHours.duration - 60
+            ))
+        )
+
+        let result = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        XCTAssertTrue(result.failures.isEmpty)
+        XCTAssertEqual(result.signalCount, 1)
+    }
+
+    func testReevaluatesFormingCandleAfterNoSignalUpdate() async throws {
+        let symbol = FuturesSymbol("SOLUSDT")
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
+        let noSignalCandles = donchianNoSignalCandles(
+            symbol: symbol,
+            timeframe: .fourHours,
+            startOffset: 300,
+            isLatestClosed: false
+        )
+        let latestOpenTime = try XCTUnwrap(noSignalCandles.last?.openTime)
+        let monitor = MultiTimeframeLiveTradingMonitor(
+            candleRepository: candleRepository,
+            candleBackfillRepository: nil,
+            signalEvaluator: TradingSignalEvaluator(
+                strategyRegistry: registry,
+                logStore: logStore,
+                confirmationEngine: passingConfirmationEngine()
+            ),
+            liveExecutor: monitorLiveExecutor(logStore: logStore),
+            strategyRegistry: registry,
+            clock: FixedClock(now: latestOpenTime.addingTimeInterval(60))
+        )
+
+        try candleRepository.upsertCandles(noSignalCandles)
+        let noSignalRun = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        try candleRepository.upsertCandles(donchianBreakoutCandles(
+            symbol: symbol,
+            timeframe: .fourHours,
+            startOffset: 300,
+            isLatestClosed: false
+        ))
+        let updatedSignalRun = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        XCTAssertTrue(noSignalRun.failures.isEmpty)
+        XCTAssertEqual(noSignalRun.signalCount, 0)
+        XCTAssertEqual(noSignalRun.evaluations.count, 1)
+        XCTAssertEqual(updatedSignalRun.signalCount, 1)
+    }
+
+    func testSynthesizesHigherTimeframeFormingCandleFromFreshFifteenMinuteFallback() async throws {
+        let symbol = FuturesSymbol("SOLUSDT")
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
+        let startOffset = 400
+        let formingFourHourOffset = startOffset + 34
+        let formingFourHourOpenTime = Date(
+            timeIntervalSince1970: TimeInterval(formingFourHourOffset) * CandleTimeframe.fourHours.duration
+        )
+        let monitor = MultiTimeframeLiveTradingMonitor(
+            candleRepository: candleRepository,
+            candleBackfillRepository: FailingMonitorBackfillRepository(),
+            signalEvaluator: TradingSignalEvaluator(
+                strategyRegistry: registry,
+                logStore: logStore,
+                confirmationEngine: passingConfirmationEngine()
+            ),
+            liveExecutor: monitorLiveExecutor(logStore: logStore),
+            strategyRegistry: registry,
+            clock: FixedClock(now: formingFourHourOpenTime.addingTimeInterval(60)),
+            remoteRefreshAttempts: 1,
+            remoteRefreshRetryDelayNanoseconds: 0
+        )
+
+        try candleRepository.upsertCandles((0..<34).map { offset in
+            monitorCandle(
+                symbol: symbol,
+                timeframe: .fourHours,
+                offset: startOffset + offset,
+                open: 100,
+                high: 101,
+                low: 99,
+                close: 100
+            )
+        })
+        try candleRepository.upsertCandles([
+            monitorCandle(
+                symbol: symbol,
+                timeframe: .fifteenMinutes,
+                offset: formingFourHourOffset * 16,
+                open: 100,
+                high: 106,
+                low: 99,
+                close: 105,
+                isClosed: false
+            )
+        ])
+
+        let result = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 2],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        XCTAssertFalse(result.failures.contains { $0.timeframe == .fourHours })
+        XCTAssertEqual(result.signalCount, 1)
+        XCTAssertEqual(result.evaluations.first?.candleOpenTime, formingFourHourOpenTime)
+    }
+
     func testPrimingCurrentClosedCandlesPreventsStartupEntryUntilNextClosedCandle() async throws {
-        let symbol = FuturesSymbol("BTCUSDT")
+        let symbol = FuturesSymbol("SOLUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
         let registry = StrategyRegistry(strategies: [DonchianChannelBreakoutStrategy()])
@@ -219,10 +454,63 @@ private final class MonitorBackfillRepository: CandleBackfillRepository {
     }
 }
 
+private final class FailingMonitorBackfillRepository: CandleBackfillRepository {
+    func fetchCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        limit: Int
+    ) async throws -> [Candle] {
+        throw URLError(.timedOut)
+    }
+
+    func fetchHistoricalCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        endingBefore endTime: Date,
+        limit: Int
+    ) async throws -> [Candle] {
+        []
+    }
+}
+
+private final class FlakyMonitorBackfillRepository: CandleBackfillRepository {
+    let candles: [Candle]
+    let failuresBeforeSuccess: Int
+    private(set) var attempts: [CandleTimeframe: Int] = [:]
+
+    init(candles: [Candle], failuresBeforeSuccess: Int) {
+        self.candles = candles
+        self.failuresBeforeSuccess = failuresBeforeSuccess
+    }
+
+    func fetchCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        limit: Int
+    ) async throws -> [Candle] {
+        attempts[timeframe, default: 0] += 1
+        if attempts[timeframe, default: 0] <= failuresBeforeSuccess {
+            throw URLError(.timedOut)
+        }
+        guard timeframe == candles.first?.timeframe else { return [] }
+        return candles
+    }
+
+    func fetchHistoricalCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        endingBefore endTime: Date,
+        limit: Int
+    ) async throws -> [Candle] {
+        []
+    }
+}
+
 private func donchianBreakoutCandles(
     symbol: FuturesSymbol,
     timeframe: CandleTimeframe,
-    startOffset: Int
+    startOffset: Int,
+    isLatestClosed: Bool = true
 ) -> [Candle] {
     (0..<34).map { offset in
         monitorCandle(
@@ -242,7 +530,38 @@ private func donchianBreakoutCandles(
             open: 100,
             high: 106,
             low: 99,
-            close: 105
+            close: 105,
+            isClosed: isLatestClosed
+        )
+    ]
+}
+
+private func donchianNoSignalCandles(
+    symbol: FuturesSymbol,
+    timeframe: CandleTimeframe,
+    startOffset: Int,
+    isLatestClosed: Bool = true
+) -> [Candle] {
+    (0..<34).map { offset in
+        monitorCandle(
+            symbol: symbol,
+            timeframe: timeframe,
+            offset: startOffset + offset,
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100
+        )
+    } + [
+        monitorCandle(
+            symbol: symbol,
+            timeframe: timeframe,
+            offset: startOffset + 34,
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100,
+            isClosed: isLatestClosed
         )
     ]
 }
@@ -254,7 +573,8 @@ private func monitorCandle(
     open: Decimal,
     high: Decimal,
     low: Decimal,
-    close: Decimal
+    close: Decimal,
+    isClosed: Bool = true
 ) -> Candle {
     Candle(
         productType: .usdtFutures,
@@ -266,6 +586,6 @@ private func monitorCandle(
         low: low,
         close: close,
         volume: 1_000,
-        isClosed: true
+        isClosed: isClosed
     )
 }

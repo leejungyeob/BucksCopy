@@ -10,6 +10,41 @@ protocol PositionRepository {
     func fetchPositions() async throws -> [PositionSnapshot]
 }
 
+protocol PositionProtectionRepository {
+    func fetchPendingPositionProtectionOrders() async throws -> [PositionProtectionOrderSnapshot]
+}
+
+struct PositionProtectionOrderSnapshot: Equatable {
+    let symbol: FuturesSymbol
+    let side: PositionSide
+    let kind: ExchangeProtectionOrderKind
+    let triggerPrice: Decimal
+    let executePrice: Decimal?
+    let size: Decimal
+    let orderID: String
+    let updatedAt: Date?
+
+    init(
+        symbol: FuturesSymbol,
+        side: PositionSide,
+        kind: ExchangeProtectionOrderKind,
+        triggerPrice: Decimal,
+        executePrice: Decimal?,
+        size: Decimal,
+        orderID: String,
+        updatedAt: Date?
+    ) {
+        self.symbol = symbol
+        self.side = side
+        self.kind = kind
+        self.triggerPrice = triggerPrice
+        self.executePrice = executePrice
+        self.size = size
+        self.orderID = orderID
+        self.updatedAt = updatedAt
+    }
+}
+
 protocol PositionStreamService {
     func streamPositions() -> AsyncStream<[PositionSnapshot]>
 }
