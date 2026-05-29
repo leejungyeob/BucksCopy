@@ -85,19 +85,6 @@ struct DashboardView: View {
                     }
                 )
             }
-
-            ServerRunnerPanel(
-                endpoint: viewModel.state.serverRunnerEndpoint,
-                hasAuthToken: viewModel.state.serverRunnerHasAuthToken,
-                redactedAuthToken: viewModel.state.serverRunnerRedactedAuthToken,
-                connectionState: viewModel.state.serverRunnerConnectionState,
-                status: viewModel.state.serverRunnerStatus,
-                onSaveConnection: viewModel.saveServerRunnerConnection,
-                onDeleteConnection: viewModel.deleteServerRunnerConnection,
-                onRefresh: viewModel.refreshServerRunnerStatus,
-                onSetEnabled: viewModel.setServerPaperRunnerEnabled
-            )
-
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -683,7 +670,11 @@ private struct CompactAutomationStatusPanel: View {
     }
 
     private var latestClosedText: String {
-        status?.latestClosedCandleOpenTimeDate?.shortDashboardTime ?? "-"
+        latestClosedAt?.shortDashboardTime ?? "-"
+    }
+
+    private var latestClosedAt: Date? {
+        status?.latestClosedCandleOpenTimeDate?.addingTimeInterval(CandleTimeframe.fifteenMinutes.duration)
     }
 
     private var accountProfitTint: Color {

@@ -166,7 +166,8 @@ struct ServerRunnerPanel: View {
         guard let date = status?.latestClosedCandleOpenTimeDate else {
             return "최근 마감: -"
         }
-        return "최근 마감: \(Self.dateFormatter.string(from: date))"
+        let closedAt = date.addingTimeInterval(CandleTimeframe.fifteenMinutes.duration)
+        return "최근 마감: \(Self.dateFormatter.string(from: closedAt))"
     }
 
     private var endpointHostText: String {
