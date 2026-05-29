@@ -22,10 +22,12 @@
 - `.env`, local config, sample 값이 실제 credential처럼 보이지 않는가
 - 서명 payload, signature, raw header가 로그에 남지 않는가
 - server paper runner는 public candle fetch만 수행하고 Bitget credential 입력/저장/env 참조를 하지 않는가
+- macOS 앱의 server runner bearer token은 Keychain-facing Data adapter에만 저장되고 UI/log에는 redacted token만 표시되는가
 
 ### Keychain / Storage
 
 - credential 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
+- server runner endpoint/token 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
 - 로그아웃/credential 삭제 시 관련 local state가 정리되는가
 - Live execution record와 민감 주문/account data가 구분되는가
 - local market history DB에 API key, secret, passphrase, signature, raw private response가 저장되지 않는가

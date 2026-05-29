@@ -639,7 +639,8 @@
   - paper bot의 `control`, `status`, `evaluations`, `trade-event-logs`는 `users/{userID}/` 아래 사용자별 파일로 분리합니다.
   - API는 `/users/me/status`, `/users/me/logs`, `/users/me/candles`, `/users/me/control`을 우선 route로 사용하고, 기존 `/status`, `/logs`, `/candles`, `/control`은 default/authenticated user 호환 route로 유지합니다.
   - bearer token auth는 `auth-users.json` 파일이 있거나 `BUCKS_COPY_REQUIRE_AUTH=true`일 때 활성화합니다. token은 로그/문서/코드에 저장하지 않고 서버 로컬 secret 파일로만 둡니다.
-  - macOS 앱은 `BUCKS_COPY_SERVER_API_TOKEN`이 있으면 bearer token을 붙여 `/users/me/*` route를 호출합니다.
+  - macOS 앱은 `BUCKS_COPY_SERVER_API_TOKEN`이 있거나 Keychain에 저장된 server runner token이 있으면 bearer token을 붙여 `/users/me/*` route를 호출합니다.
+  - server runner endpoint/token은 `ServerRunnerConfigurationStore` 경계 뒤에 두고, macOS 구현체는 Keychain-facing Data adapter가 소유합니다.
   - 이번 결정은 paper-only 상태 분리까지이며, Bitget private credential 저장, private WebSocket, live order execution은 포함하지 않습니다.
 - Consequences:
   - public candle 수집 비용은 사용자 수와 거의 무관하게 유지됩니다.

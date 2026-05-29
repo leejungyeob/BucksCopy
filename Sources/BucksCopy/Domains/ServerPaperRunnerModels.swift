@@ -1,5 +1,28 @@
 import Foundation
 
+struct ServerRunnerConfiguration: Equatable, Codable {
+    let endpoint: String
+    let authToken: String?
+
+    init(endpoint: String, authToken: String?) {
+        self.endpoint = endpoint
+        let trimmedToken = authToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.authToken = trimmedToken?.isEmpty == false ? trimmedToken : nil
+    }
+
+    var hasAuthToken: Bool {
+        authToken != nil
+    }
+
+    var redactedAuthToken: String? {
+        guard let authToken else { return nil }
+        if authToken.count <= 8 {
+            return "****"
+        }
+        return "\(authToken.prefix(4))...\(authToken.suffix(4))"
+    }
+}
+
 struct ServerPaperRunnerControl: Equatable {
     let enabled: Bool
     let mode: String

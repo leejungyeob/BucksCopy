@@ -2,10 +2,17 @@ import SwiftUI
 
 struct ServerRunnerPanel: View {
     let endpoint: String
+    let hasAuthToken: Bool
+    let redactedAuthToken: String?
     let connectionState: ServerRunnerConnectionState
     let status: ServerPaperRunnerStatus?
+    let onSaveConnection: (String, String) -> Void
+    let onDeleteConnection: () -> Void
     let onRefresh: () -> Void
     let onSetEnabled: (Bool) -> Void
+
+    @State private var endpointDraft = ""
+    @State private var tokenDraft = ""
 
     var body: some View {
         DashboardPanel {
@@ -30,6 +37,40 @@ struct ServerRunnerPanel: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Server URL", text: $endpointDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+
+                    SecureField(tokenPlaceholder, text: $tokenDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+
+                    HStack(spacing: 8) {
+                        Button("Save") {
+                            onSaveConnection(endpointDraft, tokenDraft)
+                            tokenDraft = ""
+                        }
+                        .disabled(endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Clear") {
+                            endpointDraft = ""
+                            tokenDraft = ""
+                            onDeleteConnection()
+                        }
+                        .disabled(endpoint.isEmpty && !hasAuthToken)
+
+                        Spacer()
+
+                        if let redactedAuthToken {
+                            Label(redactedAuthToken, systemImage: "lock.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
 
                 Toggle("Paper 판단", isOn: enabledBinding)
                     .toggleStyle(.switch)
@@ -59,6 +100,12 @@ struct ServerRunnerPanel: View {
                 }
             }
         }
+        .onAppear {
+            syncDraftEndpointIfNeeded()
+        }
+        .onChange(of: endpoint) { _, _ in
+            syncDraftEndpointIfNeeded()
+        }
     }
 
     private var enabledBinding: Binding<Bool> {
@@ -71,6 +118,15 @@ struct ServerRunnerPanel: View {
     private var isRefreshing: Bool {
         if case .refreshing = connectionState { return true }
         return false
+    }
+
+    private var tokenPlaceholder: String {
+        hasAuthToken ? "Token saved" : "Bearer token"
+    }
+
+    private func syncDraftEndpointIfNeeded() {
+        guard endpointDraft.isEmpty || endpointDraft == endpoint else { return }
+        endpointDraft = endpoint
     }
 
     private var statusText: String {

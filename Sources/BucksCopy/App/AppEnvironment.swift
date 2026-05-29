@@ -6,6 +6,8 @@ struct AppEnvironment {
     @MainActor
     func makeDashboardViewModel() -> DashboardViewModel {
         let credentialStore = KeychainCredentialStore()
+        let serverRunnerConfigurationStore = KeychainServerRunnerConfigurationStore()
+        let defaultServerRunnerConfiguration = Self.defaultServerRunnerConfiguration()
         let strategyRegistry = StrategyRegistry()
 
         do {
@@ -34,7 +36,9 @@ struct AppEnvironment {
                 strategyRegistry: strategyRegistry,
                 logStore: logStore
             )
-            let serverRunnerClient = Self.isRunningTests ? nil : Self.makeServerRunnerClient()
+            let serverRunnerClient = Self.isRunningTests
+                ? nil
+                : defaultServerRunnerConfiguration.flatMap(Self.makeServerRunnerClient)
             let liveExecutor = LiveTradeExecutor(
                 orderPlacer: liveOrderClient,
                 leverageSetter: liveOrderClient,
@@ -58,6 +62,9 @@ struct AppEnvironment {
                 signalEvaluator: signalEvaluator,
                 liveExecutor: liveExecutor,
                 serverPaperRunnerService: serverRunnerClient,
+                serverPaperRunnerConfiguration: defaultServerRunnerConfiguration,
+                serverRunnerConfigurationStore: serverRunnerConfigurationStore,
+                serverPaperRunnerServiceFactory: Self.makeServerRunnerClient,
                 serverPaperRunnerEndpoint: serverRunnerClient?.endpointText ?? "",
                 strategyRegistry: strategyRegistry
             )
@@ -73,7 +80,9 @@ struct AppEnvironment {
                 strategyRegistry: strategyRegistry,
                 logStore: fallbackLogStore
             )
-            let serverRunnerClient = Self.isRunningTests ? nil : Self.makeServerRunnerClient()
+            let serverRunnerClient = Self.isRunningTests
+                ? nil
+                : defaultServerRunnerConfiguration.flatMap(Self.makeServerRunnerClient)
             let liveExecutor = LiveTradeExecutor(
                 orderPlacer: fallbackLiveOrderClient,
                 leverageSetter: fallbackLiveOrderClient,
@@ -90,18 +99,25 @@ struct AppEnvironment {
                 signalEvaluator: signalEvaluator,
                 liveExecutor: liveExecutor,
                 serverPaperRunnerService: serverRunnerClient,
+                serverPaperRunnerConfiguration: defaultServerRunnerConfiguration,
+                serverRunnerConfigurationStore: serverRunnerConfigurationStore,
+                serverPaperRunnerServiceFactory: Self.makeServerRunnerClient,
                 serverPaperRunnerEndpoint: serverRunnerClient?.endpointText ?? "",
                 strategyRegistry: strategyRegistry
             )
         }
     }
 
-    private static func makeServerRunnerClient() -> ServerPaperRunnerHTTPClient {
+    private static func defaultServerRunnerConfiguration() -> ServerRunnerConfiguration? {
         let endpoint = ProcessInfo.processInfo.environment["BUCKS_COPY_SERVER_API_BASE_URL"] ??
             "http://127.0.0.1:8787"
         let authToken = ProcessInfo.processInfo.environment["BUCKS_COPY_SERVER_API_TOKEN"]
-        let url = URL(string: endpoint) ?? URL(string: "http://127.0.0.1:8787")!
-        return ServerPaperRunnerHTTPClient(baseURL: url, authToken: authToken)
+        return ServerRunnerConfiguration(endpoint: endpoint, authToken: authToken)
+    }
+
+    private static func makeServerRunnerClient(configuration: ServerRunnerConfiguration) -> ServerPaperRunnerHTTPClient? {
+        guard let url = URL(string: configuration.endpoint) else { return nil }
+        return ServerPaperRunnerHTTPClient(baseURL: url, authToken: configuration.authToken)
     }
 
     private static func databasePath() throws -> String {

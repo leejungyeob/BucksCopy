@@ -207,6 +207,63 @@ final class DashboardViewModelTests: XCTestCase {
         try await waitUntil { viewModel.state.isConnected }
     }
 
+    func testSaveServerRunnerConnectionStoresTokenAndRefreshesStatus() async throws {
+        let configurationStore = InMemoryServerRunnerConfigurationStore()
+        let service = StubServerPaperRunnerService()
+        var capturedConfiguration: ServerRunnerConfiguration?
+        let viewModel = makeViewModel(
+            credentialStore: InMemoryCredentialStore(),
+            serverRunnerConfigurationStore: configurationStore,
+            serverPaperRunnerServiceFactory: { configuration in
+                capturedConfiguration = configuration
+                return service
+            }
+        )
+
+        viewModel.saveServerRunnerConnection(
+            endpoint: " http://127.0.0.1:8787 ",
+            authToken: " abcdefgh12345678 "
+        )
+
+        let savedConfiguration = try XCTUnwrap(configurationStore.load())
+        XCTAssertEqual(savedConfiguration.endpoint, "http://127.0.0.1:8787")
+        XCTAssertEqual(savedConfiguration.authToken, "abcdefgh12345678")
+        XCTAssertEqual(capturedConfiguration, savedConfiguration)
+        XCTAssertEqual(viewModel.state.serverRunnerEndpoint, "http://127.0.0.1:8787")
+        XCTAssertTrue(viewModel.state.serverRunnerHasAuthToken)
+        XCTAssertEqual(viewModel.state.serverRunnerRedactedAuthToken, "abcd...5678")
+
+        try await waitUntil {
+            if case .connected = viewModel.state.serverRunnerConnectionState {
+                return true
+            }
+            return false
+        }
+        XCTAssertEqual(viewModel.state.serverRunnerStatus?.symbols, ["BTCUSDT"])
+    }
+
+    func testDeleteServerRunnerConnectionClearsState() throws {
+        let configurationStore = InMemoryServerRunnerConfigurationStore()
+        try configurationStore.save(ServerRunnerConfiguration(
+            endpoint: "http://127.0.0.1:8787",
+            authToken: "abcdefgh12345678"
+        ))
+        let viewModel = makeViewModel(
+            credentialStore: InMemoryCredentialStore(),
+            serverRunnerConfigurationStore: configurationStore,
+            serverPaperRunnerServiceFactory: { _ in StubServerPaperRunnerService() }
+        )
+
+        viewModel.saveServerRunnerConnection(endpoint: "http://127.0.0.1:8787", authToken: "")
+        viewModel.deleteServerRunnerConnection()
+
+        XCTAssertNil(try configurationStore.load())
+        XCTAssertEqual(viewModel.state.serverRunnerEndpoint, "")
+        XCTAssertFalse(viewModel.state.serverRunnerHasAuthToken)
+        XCTAssertNil(viewModel.state.serverRunnerStatus)
+        XCTAssertEqual(viewModel.state.serverRunnerConnectionState, .idle)
+    }
+
     func testBootstrapSeedsDefaultWatchlistForFifteenMinuteTimeframe() async throws {
         let symbols = [FuturesSymbol("BTCUSDT"), FuturesSymbol("ETHUSDT")]
         var state = DashboardState()
@@ -842,7 +899,11 @@ final class DashboardViewModelTests: XCTestCase {
         )
     }
 
-    private func makeViewModel(credentialStore: CredentialStore) -> DashboardViewModel {
+    private func makeViewModel(
+        credentialStore: CredentialStore,
+        serverRunnerConfigurationStore: ServerRunnerConfigurationStore = InMemoryServerRunnerConfigurationStore(),
+        serverPaperRunnerServiceFactory: @escaping (ServerRunnerConfiguration) -> ServerPaperRunnerService? = { _ in nil }
+    ) -> DashboardViewModel {
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
         let registry = StrategyRegistry()
@@ -854,6 +915,8 @@ final class DashboardViewModelTests: XCTestCase {
             candleBackfillRepository: nil,
             logStore: logStore,
             signalEvaluator: TradingSignalEvaluator(strategyRegistry: registry, logStore: logStore),
+            serverRunnerConfigurationStore: serverRunnerConfigurationStore,
+            serverPaperRunnerServiceFactory: serverPaperRunnerServiceFactory,
             strategyRegistry: registry
         )
     }
@@ -1166,6 +1229,46 @@ private final class TestCandleStreamService: CandleStreamService {
 
     func emit(_ candle: Candle) {
         continuation?.yield(candle)
+    }
+}
+
+private final class StubServerPaperRunnerService: ServerPaperRunnerService {
+    var updatedEnabledValues: [Bool] = []
+
+    func fetchStatus() async throws -> ServerPaperRunnerStatus {
+        ServerPaperRunnerStatus(
+            updatedAt: Date(timeIntervalSince1970: 1),
+            mode: "paper",
+            symbols: ["BTCUSDT"],
+            latestClosedCandleOpenTime: 1_780_038_900,
+            latestClosedCandleOpenTimeDate: Date(timeIntervalSince1970: 1_780_038_900),
+            savedCandles: 500,
+            evaluations: 1,
+            skippedEvaluations: 0,
+            signals: 0,
+            failures: [],
+            storagePath: "/var/lib/bucks-copy/users/local-admin",
+            control: ServerPaperRunnerControl(
+                enabled: true,
+                mode: "paper",
+                updatedAt: Date(timeIntervalSince1970: 1),
+                updatedBy: "test"
+            )
+        )
+    }
+
+    func fetchLogs(limit: Int) async throws -> [TradeEventLog] {
+        []
+    }
+
+    func updateControl(enabled: Bool) async throws -> ServerPaperRunnerControl {
+        updatedEnabledValues.append(enabled)
+        return ServerPaperRunnerControl(
+            enabled: enabled,
+            mode: "paper",
+            updatedAt: Date(timeIntervalSince1970: 2),
+            updatedBy: "test"
+        )
     }
 }
 

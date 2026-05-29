@@ -58,6 +58,8 @@ struct DashboardView: View {
             onMaximumRiskPerTradeChange: viewModel.updateMaximumRiskPerTrade,
             onMaximumPositionMarginChange: viewModel.updateMaximumPositionMargin,
             onSignalConfirmationModeChange: viewModel.updateSignalConfirmationMode,
+            onSaveServerRunnerConnection: viewModel.saveServerRunnerConnection,
+            onDeleteServerRunnerConnection: viewModel.deleteServerRunnerConnection,
             onRefreshServerRunner: viewModel.refreshServerRunnerStatus,
             onSetServerRunnerEnabled: viewModel.setServerPaperRunnerEnabled,
             onStartLive: viewModel.startLiveBot,
@@ -78,6 +80,8 @@ struct DashboardView: View {
             selectedLeverageRange: viewModel.selectedLeverageRange,
             runState: viewModel.state.runState,
             serverRunnerEndpoint: viewModel.state.serverRunnerEndpoint,
+            serverRunnerHasAuthToken: viewModel.state.serverRunnerHasAuthToken,
+            serverRunnerRedactedAuthToken: viewModel.state.serverRunnerRedactedAuthToken,
             serverRunnerConnectionState: viewModel.state.serverRunnerConnectionState,
             serverRunnerStatus: viewModel.state.serverRunnerStatus
         )
@@ -479,6 +483,8 @@ private struct DashboardLeftSnapshot: Equatable {
     let selectedLeverageRange: ClosedRange<Int>
     let runState: StrategyRunState
     let serverRunnerEndpoint: String
+    let serverRunnerHasAuthToken: Bool
+    let serverRunnerRedactedAuthToken: String?
     let serverRunnerConnectionState: ServerRunnerConnectionState
     let serverRunnerStatus: ServerPaperRunnerStatus?
 
@@ -500,6 +506,8 @@ private struct DashboardLeftColumn: View, Equatable {
     let onMaximumRiskPerTradeChange: (Decimal) -> Void
     let onMaximumPositionMarginChange: (Decimal) -> Void
     let onSignalConfirmationModeChange: (SignalConfirmationMode) -> Void
+    let onSaveServerRunnerConnection: (String, String) -> Void
+    let onDeleteServerRunnerConnection: () -> Void
     let onRefreshServerRunner: () -> Void
     let onSetServerRunnerEnabled: (Bool) -> Void
     let onStartLive: () -> Void
@@ -540,8 +548,12 @@ private struct DashboardLeftColumn: View, Equatable {
                 )
                 ServerRunnerPanel(
                     endpoint: snapshot.serverRunnerEndpoint,
+                    hasAuthToken: snapshot.serverRunnerHasAuthToken,
+                    redactedAuthToken: snapshot.serverRunnerRedactedAuthToken,
                     connectionState: snapshot.serverRunnerConnectionState,
                     status: snapshot.serverRunnerStatus,
+                    onSaveConnection: onSaveServerRunnerConnection,
+                    onDeleteConnection: onDeleteServerRunnerConnection,
                     onRefresh: onRefreshServerRunner,
                     onSetEnabled: onSetServerRunnerEnabled
                 )

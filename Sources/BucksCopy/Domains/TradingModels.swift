@@ -590,6 +590,8 @@ struct DashboardState: Equatable {
     var automationLogs: [TradeEventLog] = []
     var recentLogs: [TradeEventLog] = []
     var serverRunnerEndpoint: String = ""
+    var serverRunnerHasAuthToken: Bool = false
+    var serverRunnerRedactedAuthToken: String?
     var serverRunnerConnectionState: ServerRunnerConnectionState = .idle
     var serverRunnerStatus: ServerPaperRunnerStatus?
     var serverRunnerLogs: [TradeEventLog] = []

@@ -19,7 +19,10 @@ final class DashboardViewModel: ObservableObject {
     private let candleStreamService: CandleStreamService?
     private let logStore: TradeEventLogStore
     private let signalEvaluator: TradingSignalEvaluator
-    private let serverPaperRunnerService: ServerPaperRunnerService?
+    private let serverRunnerConfigurationStore: ServerRunnerConfigurationStore
+    private let serverPaperRunnerServiceFactory: (ServerRunnerConfiguration) -> ServerPaperRunnerService?
+    private var serverPaperRunnerService: ServerPaperRunnerService?
+    private var serverRunnerConfiguration: ServerRunnerConfiguration?
     private let liveMonitor: MultiTimeframeLiveTradingMonitor
     private let liveMonitorIntervalNanoseconds: UInt64
     private let backtestEngine: BacktestEngine
@@ -59,6 +62,12 @@ final class DashboardViewModel: ObservableObject {
         signalEvaluator: TradingSignalEvaluator,
         liveExecutor: LiveTradeExecutor? = nil,
         serverPaperRunnerService: ServerPaperRunnerService? = nil,
+        serverPaperRunnerConfiguration: ServerRunnerConfiguration? = nil,
+        serverRunnerConfigurationStore: ServerRunnerConfigurationStore = InMemoryServerRunnerConfigurationStore(),
+        serverPaperRunnerServiceFactory: @escaping (ServerRunnerConfiguration) -> ServerPaperRunnerService? = { configuration in
+            guard let url = URL(string: configuration.endpoint) else { return nil }
+            return ServerPaperRunnerHTTPClient(baseURL: url, authToken: configuration.authToken)
+        },
         serverPaperRunnerEndpoint: String = "",
         backtestEngine: BacktestEngine? = nil,
         strategyRegistry: StrategyRegistry,
@@ -97,6 +106,9 @@ final class DashboardViewModel: ObservableObject {
         }
         self.signalEvaluator = signalEvaluator
         self.serverPaperRunnerService = serverPaperRunnerService
+        self.serverRunnerConfiguration = serverPaperRunnerConfiguration
+        self.serverRunnerConfigurationStore = serverRunnerConfigurationStore
+        self.serverPaperRunnerServiceFactory = serverPaperRunnerServiceFactory
         self.liveMonitor = MultiTimeframeLiveTradingMonitor(
             candleRepository: candleRepository,
             candleBackfillRepository: candleBackfillRepository,
@@ -109,7 +121,10 @@ final class DashboardViewModel: ObservableObject {
         self.strategyRegistry = strategyRegistry
         self.clock = clock
         self.historyBackfillPolicy = historyBackfillPolicy
-        self.state.serverRunnerEndpoint = serverPaperRunnerEndpoint
+        self.applyServerRunnerConfigurationToState(
+            serverPaperRunnerConfiguration,
+            fallbackEndpoint: serverPaperRunnerEndpoint
+        )
         self.state.strategyConfig = routedStrategyConfig(
             self.state.strategyConfig,
             for: self.state.selectedTimeframe,
@@ -162,11 +177,64 @@ final class DashboardViewModel: ObservableObject {
             refreshSymbolCatalog()
             loadCandles()
             loadRecentLogs()
+            loadSavedServerRunnerConnection()
             startSelectedLiveCandleStream()
             startInitialMarketDataSync()
             startServerRunnerPolling()
         } catch {
             state.credentialStatus = .failed(message: sanitizedError(error))
+        }
+    }
+
+    func saveServerRunnerConnection(endpoint: String, authToken: String) {
+        let trimmedEndpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedToken = authToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedEndpoint),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host?.isEmpty == false else {
+            state.serverRunnerConnectionState = .failed(message: "Invalid server endpoint.")
+            return
+        }
+
+        let storedConfiguration = try? serverRunnerConfigurationStore.load()
+        let existingToken = serverRunnerConfiguration?.authToken ?? storedConfiguration?.authToken
+        let configuration = ServerRunnerConfiguration(
+            endpoint: trimmedEndpoint,
+            authToken: trimmedToken.isEmpty ? existingToken : trimmedToken
+        )
+        guard let service = serverPaperRunnerServiceFactory(configuration) else {
+            state.serverRunnerConnectionState = .failed(message: "Invalid server endpoint.")
+            return
+        }
+
+        do {
+            try serverRunnerConfigurationStore.save(configuration)
+            serverRunnerConfiguration = configuration
+            serverPaperRunnerService = service
+            applyServerRunnerConfigurationToState(configuration)
+            startServerRunnerPolling()
+            refreshServerRunnerStatus()
+        } catch {
+            state.serverRunnerConnectionState = .failed(message: sanitizedError(error))
+        }
+    }
+
+    func deleteServerRunnerConnection() {
+        do {
+            try serverRunnerConfigurationStore.delete()
+            serverRunnerPollingTask?.cancel()
+            serverRunnerConfiguration = nil
+            serverPaperRunnerService = nil
+            state.serverRunnerEndpoint = ""
+            state.serverRunnerHasAuthToken = false
+            state.serverRunnerRedactedAuthToken = nil
+            state.serverRunnerConnectionState = .idle
+            state.serverRunnerStatus = nil
+            state.serverRunnerLogs = []
+            refreshVisibleLogs()
+        } catch {
+            state.serverRunnerConnectionState = .failed(message: sanitizedError(error))
         }
     }
 
@@ -1460,6 +1528,30 @@ final class DashboardViewModel: ObservableObject {
 
     func loadRecentLogs() {
         refreshVisibleLogs()
+    }
+
+    private func loadSavedServerRunnerConnection() {
+        do {
+            guard let configuration = try serverRunnerConfigurationStore.load() else { return }
+            guard let service = serverPaperRunnerServiceFactory(configuration) else {
+                state.serverRunnerConnectionState = .failed(message: "Invalid server endpoint.")
+                return
+            }
+            serverRunnerConfiguration = configuration
+            serverPaperRunnerService = service
+            applyServerRunnerConfigurationToState(configuration)
+        } catch {
+            state.serverRunnerConnectionState = .failed(message: sanitizedError(error))
+        }
+    }
+
+    private func applyServerRunnerConfigurationToState(
+        _ configuration: ServerRunnerConfiguration?,
+        fallbackEndpoint: String = ""
+    ) {
+        state.serverRunnerEndpoint = configuration?.endpoint ?? fallbackEndpoint
+        state.serverRunnerHasAuthToken = configuration?.hasAuthToken ?? false
+        state.serverRunnerRedactedAuthToken = configuration?.redactedAuthToken
     }
 
     private func startServerRunnerPolling() {

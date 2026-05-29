@@ -6,6 +6,12 @@ protocol CredentialStore {
     func delete() throws
 }
 
+protocol ServerRunnerConfigurationStore {
+    func save(_ configuration: ServerRunnerConfiguration) throws
+    func load() throws -> ServerRunnerConfiguration?
+    func delete() throws
+}
+
 protocol PositionRepository {
     func fetchPositions() async throws -> [PositionSnapshot]
 }
