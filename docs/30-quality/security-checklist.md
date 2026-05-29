@@ -23,6 +23,8 @@
 - 서명 payload, signature, raw header가 로그에 남지 않는가
 - server paper runner는 public candle fetch만 수행하고 Bitget credential 입력/저장/env 참조를 하지 않는가
 - macOS 앱의 server runner bearer token은 Keychain-facing Data adapter에만 저장되고 UI/log에는 redacted token만 표시되는가
+- public server runner API는 HTTPS reverse proxy 뒤에서만 공개되고, raw `8787` HTTP port가 internet-open 상태가 아닌가
+- public server runner API는 `BUCKS_COPY_REQUIRE_AUTH=true`를 강제하며 token 없는 `/users/me/*` 요청이 401로 실패하는가
 
 ### Keychain / Storage
 
@@ -47,6 +49,7 @@
 
 - live order path가 credential 연결 + UI 실거래 동의 + Start Live 전에는 비활성화되어 있는가
 - server paper runner는 private REST, private WebSocket, live order, protection order client를 포함하지 않는가
+- public server runner edge가 `/health`, `/users/me/*` 외 legacy local routes를 proxy하지 않는가
 - strategy가 order API를 직접 호출하지 않는가
 - Watchlist에 없는 심볼로 order intent가 만들어지지 않는가
 - 다중 전략/시간봉이 동시에 signal을 만들 때 포트폴리오 중재 정책이 live order를 1개로 제한해 중복 주문과 과다 노출을 차단하는가

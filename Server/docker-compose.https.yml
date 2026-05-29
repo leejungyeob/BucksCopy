@@ -1,0 +1,25 @@
+services:
+  paper-runner:
+    environment:
+      BUCKS_COPY_REQUIRE_AUTH: "true"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: bucks-copy-api-proxy
+    restart: unless-stopped
+    depends_on:
+      - paper-runner
+    environment:
+      BUCKS_COPY_SERVER_DOMAIN: ${BUCKS_COPY_SERVER_DOMAIN:?Set BUCKS_COPY_SERVER_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${BUCKS_COPY_HOST_CADDY_DATA_DIR:-../server-caddy-data}:/data
+      - ${BUCKS_COPY_HOST_CADDY_CONFIG_DIR:-../server-caddy-config}:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

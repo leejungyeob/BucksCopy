@@ -17,6 +17,7 @@
 | symbol catalog / Watchlist 변경 | `symbolStatus=normal`, `supportMarginCoins` contains `USDT`, Watchlist-only subscription |
 | local market history 변경 | upsert idempotency, startup gap fill, closed-candle-only read, no secret persistence |
 | server paper runner 변경 | Python runner syntax check, local-only or bearer-auth status/control API, 15m public candle fetch, shared market candle persistence, user-scoped status/log/control/evaluation persistence, duplicate paper evaluation guard, no private Bitget/order path |
+| server HTTPS edge 변경 | Docker Compose config validation, Caddy route allowlist, `BUCKS_COPY_REQUIRE_AUTH=true` fail-closed check, 80/443-only public exposure docs, no raw `8787` public exposure |
 | credential storage 변경 | Security checklist + Keychain delete/read/write failure cases |
 | candle builder 변경 | 15m/1H/4H/12H/1D bucket, boundary timestamp, missing/out-of-order input |
 | strategy 변경 | built-in registry coverage, signal generation, no duplicate order intent, backtest/live closed-candle 기준 |
@@ -62,6 +63,7 @@
 - Server paper runner multi-user -> `candles-{symbol}-15m.json`은 공용으로 1번 저장 -> 각 사용자의 `users/{userID}/paper-runner-control.json` ON/OFF와 logs/evaluations/status는 서로 분리됨
 - Server paper runner auth enabled -> bearer token 없는 `/users/me/status`는 401 -> 올바른 token은 자신의 user-scoped status만 조회 -> token 원문은 로그에 남지 않음
 - macOS server runner 설정 입력 -> endpoint와 bearer token 저장 -> token은 Keychain adapter에 저장되고 UI에는 redacted token만 표시 -> 다음 앱 실행 때 저장된 설정으로 `/users/me/*` API를 호출
+- Server HTTPS edge 시작 -> DNS domain으로 Caddy가 `80/443`을 listen -> `/health`, `/users/me/*`만 runner로 proxy -> token 없는 `/users/me/status`는 401 -> legacy `/status`는 public edge에서 404
 - Live 진입 로그에 TP1/TP2/손절가가 기록되고 Bitget position snapshot의 TP/SL이 비어 있음 -> 차트와 포지션 패널은 같은 symbol/side의 최근 live entry log 값으로 ENTRY/TP1/TP2/SL을 함께 표시
 - Live 진입 로그에 TP1/TP2/손절가가 있고 position snapshot의 TP/SL이 비어 있음 -> Live monitor portfolio arbitration은 log 보강값으로 기존 포지션의 남은 손익비를 계산
 - Live monitor 시작 -> 현재 USDT account equity를 자동매매 시작 기록으로 영구 저장 -> 하단 자동매매 기록 패널이 새 시작마다 리셋되지 않고 누적 시드, 현재 equity, 추정 순수익, 누적 기간, 진입/청산 로그 수, 확정 승패/승률, 리스크 이벤트를 표시

@@ -1,0 +1,16 @@
+{$BUCKS_COPY_SERVER_DOMAIN} {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+    }
+
+    @allowed path /health /users/me/*
+    handle @allowed {
+        reverse_proxy paper-runner:8787
+    }
+
+    respond "not found" 404
+}

@@ -3,6 +3,8 @@
 .server-data/
 server-data/
 server-logs/
+server-caddy-data/
+server-caddy-config/
 Derived/
 DerivedData/
 *.xcodeproj/

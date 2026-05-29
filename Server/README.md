@@ -30,8 +30,8 @@ Server compose run from the repository root:
 
 ```bash
 cp Server/env.paper.example .env
-docker compose -f Server/docker-compose.paper.yml up -d --build
-docker compose -f Server/docker-compose.paper.yml logs -f
+docker compose --env-file .env -f Server/docker-compose.paper.yml up -d --build
+docker compose --env-file .env -f Server/docker-compose.paper.yml logs -f
 ```
 
 The compose API port is bound to `127.0.0.1` on the server by default. It is
@@ -88,7 +88,7 @@ Then set `BUCKS_COPY_REQUIRE_AUTH=true` in `.env` and restart:
 
 ```bash
 chmod 600 /home/ubuntu/bucks-copy-server/data/auth-users.json
-docker compose -f Server/docker-compose.paper.yml up -d --build
+docker compose --env-file .env -f Server/docker-compose.paper.yml up -d --build
 curl -H 'Authorization: Bearer <token>' http://127.0.0.1:8787/users/me/status
 ```
 
@@ -98,6 +98,62 @@ The macOS app reads:
 BUCKS_COPY_SERVER_API_BASE_URL=http://127.0.0.1:8787
 BUCKS_COPY_SERVER_API_TOKEN=<token>
 ```
+
+## Public HTTPS API
+
+The public API mode is for using the app without an SSH tunnel. It requires a
+real DNS name pointing to the Lightsail static IP. Do not expose the raw
+`8787` port to the internet.
+
+1. Create a DNS `A` record such as `api.example.com -> <Lightsail static IP>`.
+2. In the Lightsail firewall, allow inbound `TCP 80` and `TCP 443`.
+3. Keep `SSH 22` restricted to your IP when possible. Keep database or Redis
+   ports closed.
+4. Keep `/home/ubuntu/bucks-copy-server/data/auth-users.json` present and
+   `BUCKS_COPY_REQUIRE_AUTH=true`.
+
+Set these in `.env`:
+
+```bash
+BUCKS_COPY_REQUIRE_AUTH=true
+BUCKS_COPY_SERVER_DOMAIN=api.example.com
+BUCKS_COPY_HOST_CADDY_DATA_DIR=/home/ubuntu/bucks-copy-server/caddy-data
+BUCKS_COPY_HOST_CADDY_CONFIG_DIR=/home/ubuntu/bucks-copy-server/caddy-config
+```
+
+Start the runner with the HTTPS proxy:
+
+```bash
+docker compose --env-file .env \
+  -f Server/docker-compose.paper.yml \
+  -f Server/docker-compose.https.yml \
+  up -d --build
+```
+
+Smoke check:
+
+```bash
+curl https://api.example.com/health
+curl -i https://api.example.com/users/me/status
+curl -i https://api.example.com/users/me/status \
+  -H 'Authorization: Bearer <token>'
+```
+
+Expected result:
+
+- `/health`: `200 OK`
+- `/users/me/status` without token: `401`
+- `/users/me/status` with token: `200 OK`
+
+The macOS app server URL becomes:
+
+```text
+https://api.example.com
+```
+
+Only `/health` and `/users/me/*` are proxied by Caddy. Legacy local routes such
+as `/status`, `/control`, `/logs`, and `/candles` remain available only through
+the server-local `127.0.0.1:8787` bind.
 
 If the mounted data/log folders were created by an earlier container attempt
 with restrictive permissions, reset ownership once:

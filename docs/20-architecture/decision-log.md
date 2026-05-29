@@ -646,3 +646,22 @@
   - public candle 수집 비용은 사용자 수와 거의 무관하게 유지됩니다.
   - 사용자별 paper 평가와 로그는 독립적으로 쌓이며, 한 사용자의 ON/OFF가 다른 사용자에게 영향을 주지 않습니다.
   - 서버를 공용 서비스로 확장할 때 user-specific strategy config, credential storage, account/position polling, live protection order state를 별도 migration으로 추가해야 합니다.
+
+## 0037. Add HTTPS Edge For Server Paper API
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - SSH tunnel은 개인 검증에는 안전하지만, 사용자가 앱만 열어 서버 상태를 확인하고 ON/OFF를 제어하려는 흐름에는 부담이 큽니다.
+  - 서버 API를 인터넷에 직접 열려면 HTTPS와 bearer token 인증이 필수이며, raw `8787` HTTP 포트를 외부에 공개하면 안 됩니다.
+  - Caddy는 Docker Compose에서 자동 TLS 인증서 발급/갱신을 처리할 수 있어 Lightsail 단일 서버 운영에 적합합니다.
+- Decision:
+  - `paper-runner` 컨테이너는 기존처럼 내부 HTTP API를 유지하고, host `127.0.0.1:8787` 바인딩은 server-local 확인용으로만 둡니다.
+  - public mode는 별도 compose override `Server/docker-compose.https.yml`로 Caddy reverse proxy를 추가합니다.
+  - Caddy는 `80/443`만 외부에 열고 `/health`, `/users/me/*`만 `paper-runner:8787`로 proxy합니다. legacy `/status`, `/control`, `/logs`, `/candles`는 public edge에서 노출하지 않습니다.
+  - HTTPS public mode에서는 compose override가 `BUCKS_COPY_REQUIRE_AUTH=true`를 강제합니다. `auth-users.json`이 없으면 runner가 fail-fast합니다.
+  - TLS 인증서는 `BUCKS_COPY_SERVER_DOMAIN`으로 받은 실제 DNS 이름을 기준으로 Caddy가 관리합니다.
+- Consequences:
+  - macOS 앱은 SSH tunnel 없이 `https://<domain>` endpoint와 Keychain에 저장된 bearer token으로 paper runner 상태를 조회/제어할 수 있습니다.
+  - 도메인 DNS, Lightsail firewall `80/443`, Caddy data/config volume이 추가 운영 전제입니다.
+  - 이 단계도 paper-only API edge이며 Bitget private credential, private WebSocket, live order execution은 포함하지 않습니다.
