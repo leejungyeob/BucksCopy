@@ -23,6 +23,21 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
         self.session = session
     }
 
+    func loginWithBitgetCredential(_ credential: APIKeyCredential) async throws -> ServerRunnerLoginSession {
+        let body = try JSONEncoder().encode(LoginRequestDTO(
+            apiKey: credential.apiKey,
+            secretKey: credential.secretKey,
+            passphrase: credential.passphrase
+        ))
+        let data = try await request(
+            path: "auth/bitget/login",
+            method: "POST",
+            body: body,
+            headers: ["Content-Type": "application/json"]
+        )
+        return try decoder.decode(LoginResponseDTO.self, from: data).domain
+    }
+
     func fetchStatus() async throws -> ServerPaperRunnerStatus {
         let data = try await request(path: "users/me/status")
         return try decoder.decode(StatusDTO.self, from: data).domain
@@ -85,6 +100,48 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
             throw ServerPaperRunnerClientError.emptyResponse
         }
         return data
+    }
+}
+
+private struct LoginRequestDTO: Encodable {
+    let apiKey: String
+    let secretKey: String
+    let passphrase: String
+}
+
+private struct LoginResponseDTO: Decodable {
+    let authToken: String
+    let userID: String
+    let redactedIdentifier: String
+    let accounts: [AccountDTO]?
+    let updatedAt: String?
+
+    var domain: ServerRunnerLoginSession {
+        ServerRunnerLoginSession(
+            userID: userID,
+            authToken: authToken,
+            redactedIdentifier: redactedIdentifier,
+            accounts: (accounts ?? []).map(\.domain),
+            updatedAt: ServerRunnerDateParser.date(from: updatedAt)
+        )
+    }
+}
+
+private struct AccountDTO: Decodable {
+    let marginCoin: String?
+    let available: String?
+    let accountEquity: String?
+    let unrealizedPL: String?
+    let updatedAt: String?
+
+    var domain: AccountSnapshot {
+        AccountSnapshot(
+            marginCoin: marginCoin ?? "USDT",
+            available: DecimalText.parse(available),
+            accountEquity: DecimalText.parse(accountEquity),
+            unrealizedProfitLoss: DecimalText.parse(unrealizedPL),
+            updatedAt: ServerRunnerDateParser.date(from: updatedAt) ?? Date()
+        )
     }
 }
 

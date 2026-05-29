@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
 import hmac
 import os
 import re
+import secrets
 import ssl
 import threading
 import time
@@ -73,6 +76,27 @@ def validate_user_id(value: str) -> str:
     if not USER_ID_PATTERN.fullmatch(user_id):
         raise ValueError("userID must contain only letters, numbers, dot, underscore, or hyphen.")
     return user_id
+
+
+def redacted_identifier(value: str) -> str:
+    text = value.strip()
+    if len(text) <= 8:
+        return "****"
+    return f"{text[:4]}...{text[-4:]}"
+
+
+def bitget_signature(
+    timestamp: str,
+    method: str,
+    request_path: str,
+    query_string: str,
+    body: str,
+    secret_key: str,
+) -> str:
+    normalized_query = f"?{query_string}" if query_string else ""
+    message = f"{timestamp}{method.upper()}{request_path}{normalized_query}{body}"
+    digest = hmac.new(secret_key.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("ascii")
 
 
 def ssl_context() -> ssl.SSLContext:
@@ -514,6 +538,10 @@ def evaluate_strategy(candles: list[Candle], params: dict[str, Any], generated_a
     return None
 
 
+class BitgetLoginError(Exception):
+    pass
+
+
 class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     runner: "PaperRunner"
 
@@ -527,7 +555,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "mode": "paper",
                 "authRequired": self.runner.auth_required,
-                "configuredUsers": len(self.runner.user_ids),
+                "configuredUsers": len(self.runner.auth_tokens_by_user_id),
                 "updatedAt": iso(now_utc()),
             }
             if not self.runner.auth_required:
@@ -570,6 +598,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/auth/bitget/login":
+            self.handle_bitget_login()
+            return
+
         if self.route_action(parsed.path) != "control":
             self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
@@ -593,6 +625,41 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return
         control = self.runner.save_control(user_id, payload["enabled"], updated_by="api")
         self.write_json(control)
+
+    def handle_bitget_login(self) -> None:
+        try:
+            payload = self.read_json_body()
+        except ValueError as error:
+            self.write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        api_key = str(payload.get("apiKey", "")).strip()
+        secret_key = str(payload.get("secretKey", "")).strip()
+        passphrase = str(payload.get("passphrase", "")).strip()
+        if not api_key or not secret_key or not passphrase:
+            self.write_json({"error": "apiKey, secretKey, and passphrase are required"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            self.write_json(self.runner.login_with_bitget(api_key, secret_key, passphrase))
+        except BitgetLoginError as error:
+            self.write_json({"error": str(error)}, HTTPStatus.UNAUTHORIZED)
+        except Exception:
+            self.write_json({"error": "Bitget login failed"}, HTTPStatus.BAD_GATEWAY)
+
+    def read_json_body(self) -> dict[str, Any]:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        body = self.rfile.read(length) if length > 0 else b"{}"
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError as error:
+            raise ValueError("invalid json body") from error
+        if not isinstance(payload, dict):
+            raise ValueError("json object body is required")
+        return payload
 
     def route_action(self, path: str) -> str | None:
         legacy_routes = {
@@ -656,8 +723,6 @@ class PaperRunner:
         self.lock = threading.RLock()
         self.auth_tokens_by_user_id = self.load_auth_users()
         self.auth_required = self.require_auth or bool(self.auth_tokens_by_user_id)
-        if self.require_auth and not self.auth_tokens_by_user_id:
-            raise ValueError("BUCKS_COPY_REQUIRE_AUTH=true requires at least one auth user.")
         self.user_ids = sorted(self.auth_tokens_by_user_id.keys()) if self.auth_tokens_by_user_id else [self.default_user_id]
         self.migrate_legacy_default_user_files()
         for user_id in self.user_ids:
@@ -697,6 +762,101 @@ class PaperRunner:
                 raise ValueError(f"duplicate auth userID: {user_id}")
             tokens_by_user[user_id] = token.strip()
         return tokens_by_user
+
+    def save_auth_users(self) -> None:
+        users = [
+            {
+                "userID": user_id,
+                "token": token,
+                "updatedAt": iso(now_utc()),
+            }
+            for user_id, token in sorted(self.auth_tokens_by_user_id.items())
+        ]
+        self.auth_users_path.parent.mkdir(parents=True, exist_ok=True)
+        self.atomic_write_json(self.auth_users_path, {"users": users}, pretty=True)
+        try:
+            self.auth_users_path.chmod(0o600)
+        except OSError:
+            pass
+
+    def user_id_for_api_key(self, api_key: str) -> str:
+        digest = hashlib.sha256(api_key.strip().encode("utf-8")).hexdigest()[:24]
+        return validate_user_id(f"bitget-{digest}")
+
+    def login_with_bitget(self, api_key: str, secret_key: str, passphrase: str) -> dict[str, Any]:
+        accounts = self.validate_bitget_credentials(api_key, secret_key, passphrase)
+        user_id = self.user_id_for_api_key(api_key)
+        with self.lock:
+            token = self.auth_tokens_by_user_id.get(user_id) or secrets.token_urlsafe(48)
+            self.auth_tokens_by_user_id[user_id] = token
+            self.auth_required = self.require_auth or bool(self.auth_tokens_by_user_id)
+            if user_id not in self.user_ids:
+                self.user_ids = sorted(set(self.user_ids + [user_id]))
+            self.ensure_user_storage(user_id)
+            self.evaluated_keys_by_user.setdefault(user_id, self.load_evaluated_keys(user_id))
+            self.save_auth_users()
+        return {
+            "authToken": token,
+            "mode": "paper",
+            "redactedIdentifier": redacted_identifier(api_key),
+            "userID": user_id,
+            "accounts": accounts,
+            "updatedAt": iso(now_utc()),
+        }
+
+    def validate_bitget_credentials(
+        self,
+        api_key: str,
+        secret_key: str,
+        passphrase: str,
+    ) -> list[dict[str, Any]]:
+        path = "/api/v2/mix/account/accounts"
+        query_string = urlencode(sorted({"productType": PRODUCT_TYPE}.items()))
+        url = f"{self.base_url}{path}?{query_string}"
+        timestamp = str(int(time.time() * 1000))
+        request = Request(
+            url,
+            headers={
+                "ACCESS-KEY": api_key,
+                "ACCESS-SIGN": bitget_signature(timestamp, "GET", path, query_string, "", secret_key),
+                "ACCESS-PASSPHRASE": passphrase,
+                "ACCESS-TIMESTAMP": timestamp,
+                "Content-Type": "application/json",
+                "locale": "en-US",
+                "User-Agent": "BucksCopyPaperRunner/1.0",
+            },
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=20, context=ssl_context()) as response:
+                body = response.read()
+        except Exception as error:
+            raise BitgetLoginError("Bitget credential validation request failed") from error
+
+        try:
+            decoded = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError as error:
+            raise BitgetLoginError("Bitget credential validation returned invalid JSON") from error
+
+        if decoded.get("code") != "00000":
+            code = str(decoded.get("code") or "unknown")
+            message = str(decoded.get("msg") or "credential rejected")[:160]
+            raise BitgetLoginError(f"Bitget API {code}: {message}")
+
+        data = decoded.get("data", [])
+        if not isinstance(data, list):
+            raise BitgetLoginError("Bitget credential validation returned invalid account data")
+        return [self.normalized_account(record) for record in data if isinstance(record, dict)]
+
+    @staticmethod
+    def normalized_account(record: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "marginCoin": str(record.get("marginCoin") or "USDT"),
+            "available": str(record.get("available") or "0"),
+            "accountEquity": str(record.get("accountEquity") or "0"),
+            "unrealizedPL": str(record.get("unrealizedPL") or "0"),
+            "updatedAt": iso(now_utc()),
+        }
 
     def user_id_for_token(self, token: str) -> str | None:
         for user_id, expected in self.auth_tokens_by_user_id.items():

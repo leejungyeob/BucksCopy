@@ -4,7 +4,7 @@
 
 - 현재 서버 단계는 실거래가 아니라 `paper-runner`입니다.
 - runner는 Bitget public REST로 `15m` candle만 받아 공용 JSON 파일에 저장하고, 사용자별 paper 상태/control/log를 분리합니다.
-- Bitget API key, secret, passphrase는 아직 이 서버 배포에 넣지 않습니다.
+- Bitget API key, secret, passphrase는 `/auth/bitget/login` 검증 요청에서만 사용하고 저장하지 않습니다.
 
 ## Paper Runner
 
@@ -109,8 +109,9 @@ real DNS name pointing to the Lightsail static IP. Do not expose the raw
 2. In the Lightsail firewall, allow inbound `TCP 80` and `TCP 443`.
 3. Keep `SSH 22` restricted to your IP when possible. Keep database or Redis
    ports closed.
-4. Keep `/home/ubuntu/bucks-copy-server/data/auth-users.json` present and
-   `BUCKS_COPY_REQUIRE_AUTH=true`.
+4. Keep `BUCKS_COPY_REQUIRE_AUTH=true`. Existing users may come from
+   `/home/ubuntu/bucks-copy-server/data/auth-users.json`; new users can be
+   added by `/auth/bitget/login`.
 
 Set these in `.env`:
 
@@ -151,9 +152,22 @@ The macOS app server URL becomes:
 https://api.example.com
 ```
 
-Only `/health` and `/users/me/*` are proxied by Caddy. Legacy local routes such
-as `/status`, `/control`, `/logs`, and `/candles` remain available only through
-the server-local `127.0.0.1:8787` bind.
+Only `/health`, `/auth/bitget/login`, and `/users/me/*` are proxied by Caddy.
+Legacy local routes such as `/status`, `/control`, `/logs`, and `/candles`
+remain available only through the server-local `127.0.0.1:8787` bind.
+
+The app login flow posts Bitget API key, secret, and passphrase to:
+
+```bash
+curl -X POST https://api.example.com/auth/bitget/login \
+  -H 'Content-Type: application/json' \
+  -d '{"apiKey":"...","secretKey":"...","passphrase":"..."}'
+```
+
+The runner validates the credential with Bitget USDT-M Futures account read,
+creates or reuses a user-scoped bearer token in `auth-users.json`, and returns
+that app session token. The Bitget secret and passphrase are not written to
+disk by this paper runner.
 
 If the mounted data/log folders were created by an earlier container attempt
 with restrictive permissions, reset ownership once:
@@ -174,8 +188,8 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 
 ## Safety Boundary
 
-- No private Bitget REST calls.
+- Private Bitget REST is limited to login-time account validation.
 - No WebSocket private login.
 - No order placement.
-- No credential storage.
+- No Bitget API key/secret/passphrase storage.
 - No live execution until a separate explicit server-side consent and protection-order flow is implemented.

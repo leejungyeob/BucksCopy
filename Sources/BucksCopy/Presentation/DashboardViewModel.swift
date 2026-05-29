@@ -189,19 +189,21 @@ final class DashboardViewModel: ObservableObject {
     func saveServerRunnerConnection(endpoint: String, authToken: String) {
         let trimmedEndpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedToken = authToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmedEndpoint),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              url.host?.isEmpty == false else {
+        guard let url = validatedServerEndpoint(trimmedEndpoint) else {
             state.serverRunnerConnectionState = .failed(message: "Invalid server endpoint.")
             return
         }
 
         let storedConfiguration = try? serverRunnerConfigurationStore.load()
         let existingToken = serverRunnerConfiguration?.authToken ?? storedConfiguration?.authToken
+        let existingUserID = serverRunnerConfiguration?.authenticatedUserID ?? storedConfiguration?.authenticatedUserID
+        let existingIdentifier = serverRunnerConfiguration?.redactedCredentialIdentifier ??
+            storedConfiguration?.redactedCredentialIdentifier
         let configuration = ServerRunnerConfiguration(
-            endpoint: trimmedEndpoint,
-            authToken: trimmedToken.isEmpty ? existingToken : trimmedToken
+            endpoint: url.absoluteString,
+            authToken: trimmedToken.isEmpty ? existingToken : trimmedToken,
+            authenticatedUserID: existingUserID,
+            redactedCredentialIdentifier: existingIdentifier
         )
         guard let service = serverPaperRunnerServiceFactory(configuration) else {
             state.serverRunnerConnectionState = .failed(message: "Invalid server endpoint.")
@@ -287,6 +289,62 @@ final class DashboardViewModel: ObservableObject {
             return
         }
 
+        let endpoint = state.serverRunnerEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        if endpoint.isEmpty {
+            connectLocalCredential(credential)
+            return
+        }
+        guard let url = validatedServerEndpoint(endpoint) else {
+            state.credentialStatus = .failed(message: "Server runner URL is invalid.")
+            return
+        }
+        let loginConfiguration = ServerRunnerConfiguration(endpoint: url.absoluteString, authToken: nil)
+        guard let loginService = serverPaperRunnerServiceFactory(loginConfiguration) else {
+            state.credentialStatus = .failed(message: "Server runner URL is invalid.")
+            return
+        }
+
+        state.credentialStatus = .validating(redactedIdentifier: credential.redactedIdentifier)
+        state.serverRunnerConnectionState = .refreshing
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let session = try await loginService.loginWithBitgetCredential(credential)
+                let configuration = ServerRunnerConfiguration(
+                    endpoint: url.absoluteString,
+                    authToken: session.authToken,
+                    authenticatedUserID: session.userID,
+                    redactedCredentialIdentifier: session.redactedIdentifier
+                )
+                guard let authenticatedService = self.serverPaperRunnerServiceFactory(configuration) else {
+                    self.state.credentialStatus = .failed(message: "Server runner URL is invalid.")
+                    return
+                }
+                try self.serverRunnerConfigurationStore.save(configuration)
+                try? self.credentialStore.delete()
+                self.serverRunnerConfiguration = configuration
+                self.serverPaperRunnerService = authenticatedService
+                self.state.accounts = session.accounts
+                self.state.credentialStatus = .connected(
+                    redactedIdentifier: session.redactedIdentifier,
+                    checkedAt: self.clock.now
+                )
+                self.applyServerRunnerConfigurationToState(configuration)
+                self.appendSessionLogOnce(key: "server-login.connected", .init(
+                    timestamp: self.clock.now,
+                    category: .credential,
+                    message: "Bitget credential validated by server and app session token stored in Keychain."
+                ))
+                self.startServerRunnerPolling()
+                await self.loadServerRunnerSnapshot()
+            } catch {
+                self.state.credentialStatus = .failed(message: self.sanitizedError(error))
+                self.state.serverRunnerConnectionState = .failed(message: self.sanitizedError(error))
+            }
+        }
+    }
+
+    private func connectLocalCredential(_ credential: APIKeyCredential) {
         do {
             try credentialStore.save(credential)
             state.credentialStatus = .validating(redactedIdentifier: credential.redactedIdentifier)
@@ -301,11 +359,19 @@ final class DashboardViewModel: ObservableObject {
     func deleteCredential() {
         do {
             try credentialStore.delete()
+            try? serverRunnerConfigurationStore.delete()
             stopLiveBot()
             state.accounts = []
             state.positions = []
             state.liveAutomationSession = nil
             state.credentialStatus = .disconnected
+            serverRunnerPollingTask?.cancel()
+            serverRunnerConfiguration = nil
+            serverPaperRunnerService = nil
+            state.serverRunnerHasAuthToken = false
+            state.serverRunnerRedactedAuthToken = nil
+            state.serverRunnerStatus = nil
+            state.serverRunnerLogs = []
             stopPositionUpdates()
             appendSessionLog(.init(
                 timestamp: clock.now,
@@ -320,6 +386,21 @@ final class DashboardViewModel: ObservableObject {
     func connectSavedCredential() {
         Task {
             do {
+                if let configuration = serverRunnerConfiguration ?? (try? serverRunnerConfigurationStore.load()),
+                   configuration.hasAuthToken {
+                    guard let service = serverPaperRunnerServiceFactory(configuration) else {
+                        state.credentialStatus = .failed(message: "Server runner URL is invalid.")
+                        return
+                    }
+                    serverRunnerConfiguration = configuration
+                    serverPaperRunnerService = service
+                    applyServerRunnerConfigurationToState(configuration)
+                    if let redactedIdentifier = configuration.redactedCredentialIdentifier {
+                        state.credentialStatus = .validating(redactedIdentifier: redactedIdentifier)
+                    }
+                    await loadServerRunnerSnapshot()
+                    return
+                }
                 guard let credential = try credentialStore.load() else {
                     state.credentialStatus = .failed(message: "No saved credential.")
                     return
@@ -674,6 +755,16 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func startLiveBot() {
+        let hasLocalCredential = ((try? credentialStore.load())?.isComplete ?? false)
+        guard hasLocalCredential || serverRunnerConfiguration?.redactedCredentialIdentifier == nil else {
+            appendSessionLogOnce(key: "live.start.server-session-only", .init(
+                timestamp: clock.now,
+                category: .bot,
+                severity: .warning,
+                message: "Live trading requires a local live credential; server login currently enables paper runner access only."
+            ))
+            return
+        }
         liveMonitorTask?.cancel()
 
         let startedAt = clock.now
@@ -1554,6 +1645,17 @@ final class DashboardViewModel: ObservableObject {
         state.serverRunnerRedactedAuthToken = configuration?.redactedAuthToken
     }
 
+    private func validatedServerEndpoint(_ endpoint: String) -> URL? {
+        let trimmedEndpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmedEndpoint),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host?.isEmpty == false else {
+            return nil
+        }
+        return url
+    }
+
     private func startServerRunnerPolling() {
         guard serverPaperRunnerService != nil else { return }
         serverRunnerPollingTask?.cancel()
@@ -1581,9 +1683,33 @@ final class DashboardViewModel: ObservableObject {
             state.serverRunnerStatus = snapshot
             state.serverRunnerLogs = serverLogs
             state.serverRunnerConnectionState = .connected(checkedAt: clock.now)
+            if let redactedIdentifier = serverRunnerConfiguration?.redactedCredentialIdentifier {
+                state.credentialStatus = .connected(
+                    redactedIdentifier: redactedIdentifier,
+                    checkedAt: clock.now
+                )
+            }
             refreshVisibleLogs()
         } catch {
+            if let serverError = error as? ServerPaperRunnerClientError,
+               case .httpStatus(401) = serverError {
+                clearServerAuthenticatedSession()
+            }
             state.serverRunnerConnectionState = .failed(message: sanitizedError(error))
+        }
+    }
+
+    private func clearServerAuthenticatedSession() {
+        try? serverRunnerConfigurationStore.delete()
+        serverRunnerPollingTask?.cancel()
+        serverRunnerConfiguration = nil
+        serverPaperRunnerService = nil
+        state.serverRunnerHasAuthToken = false
+        state.serverRunnerRedactedAuthToken = nil
+        state.serverRunnerStatus = nil
+        state.serverRunnerLogs = []
+        if state.credentialStatus != .disconnected {
+            state.credentialStatus = .disconnected
         }
     }
 

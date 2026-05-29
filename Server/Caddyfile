@@ -7,7 +7,7 @@
         Referrer-Policy "no-referrer"
     }
 
-    @allowed path /health /users/me/*
+    @allowed path /health /auth/bitget/login /users/me/*
     handle @allowed {
         reverse_proxy paper-runner:8787
     }

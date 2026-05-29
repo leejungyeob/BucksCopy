@@ -110,7 +110,7 @@ struct AppEnvironment {
 
     private static func defaultServerRunnerConfiguration() -> ServerRunnerConfiguration? {
         let endpoint = ProcessInfo.processInfo.environment["BUCKS_COPY_SERVER_API_BASE_URL"] ??
-            "http://127.0.0.1:8787"
+            "https://api.buckscopy.com"
         let authToken = ProcessInfo.processInfo.environment["BUCKS_COPY_SERVER_API_TOKEN"]
         return ServerRunnerConfiguration(endpoint: endpoint, authToken: authToken)
     }

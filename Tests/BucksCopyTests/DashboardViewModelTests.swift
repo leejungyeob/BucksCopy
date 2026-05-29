@@ -175,9 +175,17 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state.automationLogs.filter { $0.category == .automation }.count, 2)
     }
 
-    func testConnectCredentialStoresKeyAndConnects() async throws {
+    func testConnectCredentialLogsInThroughServerAndStoresSessionToken() async throws {
         let credentialStore = InMemoryCredentialStore()
-        let viewModel = makeViewModel(credentialStore: credentialStore)
+        let configurationStore = InMemoryServerRunnerConfigurationStore()
+        let service = StubServerPaperRunnerService()
+        let viewModel = makeViewModel(
+            credentialStore: credentialStore,
+            serverRunnerConfigurationStore: configurationStore,
+            serverPaperRunnerServiceFactory: { _ in service }
+        )
+
+        viewModel.saveServerRunnerConnection(endpoint: "https://api.example.com", authToken: "")
 
         viewModel.connectCredential(
             apiKey: "  abcdefgh12345678  ",
@@ -185,12 +193,16 @@ final class DashboardViewModelTests: XCTestCase {
             passphrase: " passphrase "
         )
 
-        let savedCredential = try XCTUnwrap(credentialStore.load())
-        XCTAssertEqual(savedCredential.apiKey, "abcdefgh12345678")
-        XCTAssertEqual(savedCredential.secretKey, "secret")
-        XCTAssertEqual(savedCredential.passphrase, "passphrase")
-
         try await waitUntil { viewModel.state.isConnected }
+
+        XCTAssertNil(try credentialStore.load())
+        let savedConfiguration = try XCTUnwrap(configurationStore.load())
+        XCTAssertEqual(savedConfiguration.endpoint, "https://api.example.com")
+        XCTAssertEqual(savedConfiguration.authToken, "server-token-1234567890")
+        XCTAssertEqual(savedConfiguration.authenticatedUserID, "bitget-test")
+        XCTAssertEqual(savedConfiguration.redactedCredentialIdentifier, "abcd...5678")
+        XCTAssertEqual(viewModel.state.accounts.first?.marginCoin, "USDT")
+        XCTAssertTrue(viewModel.state.serverRunnerHasAuthToken)
     }
 
     func testBootstrapAutoConnectsSavedCredential() async throws {
@@ -1234,6 +1246,27 @@ private final class TestCandleStreamService: CandleStreamService {
 
 private final class StubServerPaperRunnerService: ServerPaperRunnerService {
     var updatedEnabledValues: [Bool] = []
+    var loginSessions: [ServerRunnerLoginSession] = [
+        ServerRunnerLoginSession(
+            userID: "bitget-test",
+            authToken: "server-token-1234567890",
+            redactedIdentifier: "abcd...5678",
+            accounts: [
+                AccountSnapshot(
+                    marginCoin: "USDT",
+                    available: 1_000,
+                    accountEquity: 1_000,
+                    unrealizedProfitLoss: 0,
+                    updatedAt: Date(timeIntervalSince1970: 1)
+                )
+            ],
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+    ]
+
+    func loginWithBitgetCredential(_ credential: APIKeyCredential) async throws -> ServerRunnerLoginSession {
+        loginSessions.removeFirst()
+    }
 
     func fetchStatus() async throws -> ServerPaperRunnerStatus {
         ServerPaperRunnerStatus(

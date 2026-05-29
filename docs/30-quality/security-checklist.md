@@ -21,7 +21,7 @@
 - API key, secret, passphrase가 코드/문서/fixture/log에 하드코딩되지 않았는가
 - `.env`, local config, sample 값이 실제 credential처럼 보이지 않는가
 - 서명 payload, signature, raw header가 로그에 남지 않는가
-- server paper runner는 public candle fetch만 수행하고 Bitget credential 입력/저장/env 참조를 하지 않는가
+- server paper runner는 `/auth/bitget/login`에서만 Bitget credential을 검증하고, API key/secret/passphrase를 저장/env/log에 남기지 않는가
 - macOS 앱의 server runner bearer token은 Keychain-facing Data adapter에만 저장되고 UI/log에는 redacted token만 표시되는가
 - public server runner API는 HTTPS reverse proxy 뒤에서만 공개되고, raw `8787` HTTP port가 internet-open 상태가 아닌가
 - public server runner API는 `BUCKS_COPY_REQUIRE_AUTH=true`를 강제하며 token 없는 `/users/me/*` 요청이 401로 실패하는가
@@ -30,6 +30,7 @@
 
 - credential 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
 - server runner endpoint/token 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
+- macOS 앱의 서버 로그인 flow가 Bitget secret/passphrase를 Keychain에 저장하지 않고 server session token만 저장하는가
 - 로그아웃/credential 삭제 시 관련 local state가 정리되는가
 - Live execution record와 민감 주문/account data가 구분되는가
 - local market history DB에 API key, secret, passphrase, signature, raw private response가 저장되지 않는가
@@ -37,7 +38,7 @@
 
 ### Bitget REST / WebSocket
 
-- private REST 요청이 공식 signature 규칙을 따르는가
+- private REST 요청이 공식 signature 규칙을 따르며 login-time validation과 live execution 경계가 섞이지 않았는가
 - WebSocket login signature와 REST signature 차이가 섞이지 않았는가
 - ping/pong, reconnect, rate-limit backoff가 정의되어 있는가
 - public channel과 private channel 사용 조건이 분리되어 있는가
@@ -48,8 +49,8 @@
 ### Trading Safety
 
 - live order path가 credential 연결 + UI 실거래 동의 + Start Live 전에는 비활성화되어 있는가
-- server paper runner는 private REST, private WebSocket, live order, protection order client를 포함하지 않는가
-- public server runner edge가 `/health`, `/users/me/*` 외 legacy local routes를 proxy하지 않는가
+- server paper runner는 login-time account validation 외 private REST, private WebSocket, live order, protection order client를 포함하지 않는가
+- public server runner edge가 `/health`, `/auth/bitget/login`, `/users/me/*` 외 legacy local routes를 proxy하지 않는가
 - strategy가 order API를 직접 호출하지 않는가
 - Watchlist에 없는 심볼로 order intent가 만들어지지 않는가
 - 다중 전략/시간봉이 동시에 signal을 만들 때 포트폴리오 중재 정책이 live order를 1개로 제한해 중복 주문과 과다 노출을 차단하는가

@@ -12,7 +12,6 @@ struct ServerRunnerPanel: View {
     let onSetEnabled: (Bool) -> Void
 
     @State private var endpointDraft = ""
-    @State private var tokenDraft = ""
 
     var body: some View {
         DashboardPanel {
@@ -43,20 +42,14 @@ struct ServerRunnerPanel: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.caption)
 
-                    SecureField(tokenPlaceholder, text: $tokenDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-
                     HStack(spacing: 8) {
                         Button("Save") {
-                            onSaveConnection(endpointDraft, tokenDraft)
-                            tokenDraft = ""
+                            onSaveConnection(endpointDraft, "")
                         }
                         .disabled(endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                         Button("Clear") {
                             endpointDraft = ""
-                            tokenDraft = ""
                             onDeleteConnection()
                         }
                         .disabled(endpoint.isEmpty && !hasAuthToken)
@@ -118,10 +111,6 @@ struct ServerRunnerPanel: View {
     private var isRefreshing: Bool {
         if case .refreshing = connectionState { return true }
         return false
-    }
-
-    private var tokenPlaceholder: String {
-        hasAuthToken ? "Token saved" : "Bearer token"
     }
 
     private func syncDraftEndpointIfNeeded() {

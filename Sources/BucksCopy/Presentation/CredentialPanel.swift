@@ -12,7 +12,7 @@ struct CredentialPanel: View {
         DashboardPanel {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("API Credential")
+                    Text("Bitget Login")
                         .font(.headline)
                     Spacer()
                     statusBadge
@@ -25,7 +25,7 @@ struct CredentialPanel: View {
                 SecureField("Passphrase", text: $passphrase)
                     .textFieldStyle(.roundedBorder)
 
-                Text("Connect stores keys in Keychain and validates Bitget access.")
+                Text("Connect validates Bitget access through the server.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

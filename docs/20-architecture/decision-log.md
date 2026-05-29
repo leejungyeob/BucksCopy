@@ -659,9 +659,29 @@
   - `paper-runner` 컨테이너는 기존처럼 내부 HTTP API를 유지하고, host `127.0.0.1:8787` 바인딩은 server-local 확인용으로만 둡니다.
   - public mode는 별도 compose override `Server/docker-compose.https.yml`로 Caddy reverse proxy를 추가합니다.
   - Caddy는 `80/443`만 외부에 열고 `/health`, `/users/me/*`만 `paper-runner:8787`로 proxy합니다. legacy `/status`, `/control`, `/logs`, `/candles`는 public edge에서 노출하지 않습니다.
-  - HTTPS public mode에서는 compose override가 `BUCKS_COPY_REQUIRE_AUTH=true`를 강제합니다. `auth-users.json`이 없으면 runner가 fail-fast합니다.
+  - HTTPS public mode에서는 compose override가 `BUCKS_COPY_REQUIRE_AUTH=true`를 강제합니다. `auth-users.json`이 없어도 runner는 시작할 수 있으며, token이 필요한 `/users/me/*`는 로그인 또는 auth file 생성 전 401로 실패합니다.
   - TLS 인증서는 `BUCKS_COPY_SERVER_DOMAIN`으로 받은 실제 DNS 이름을 기준으로 Caddy가 관리합니다.
 - Consequences:
   - macOS 앱은 SSH tunnel 없이 `https://<domain>` endpoint와 Keychain에 저장된 bearer token으로 paper runner 상태를 조회/제어할 수 있습니다.
   - 도메인 DNS, Lightsail firewall `80/443`, Caddy data/config volume이 추가 운영 전제입니다.
   - 이 단계도 paper-only API edge이며 Bitget private credential, private WebSocket, live order execution은 포함하지 않습니다.
+
+## 0038. Replace Manual Server Token Entry With Bitget Server Login
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 수동 bearer token 입력은 단일 운영자 검증에는 충분하지만, 여러 사용자가 앱에서 자신의 Bitget API key/secret/passphrase로 접속하는 흐름에는 맞지 않습니다.
+  - 사용자는 기존 API credential 입력 자체를 로그인으로 사용하고, Bitget 조회가 성공하면 앱 session token을 내려받는 구조를 원했습니다.
+  - 다만 server-side live trading은 아직 구현 전이므로 Bitget secret/passphrase를 서버에 영구 저장하면 보안 범위가 과도하게 커집니다.
+- Decision:
+  - public Caddy edge는 `/auth/bitget/login`을 추가 proxy합니다.
+  - server paper runner는 login 요청의 Bitget credential로 `USDT-FUTURES` account read를 1회 수행해 유효성을 검증합니다.
+  - 검증 성공 시 API key hash 기반 userID와 bearer token을 `auth-users.json`에 저장하고, 앱에는 server session token과 redacted identifier만 반환합니다.
+  - Bitget API key, secret, passphrase는 이번 paper runner 단계에서 저장하지 않습니다.
+  - macOS 앱은 API credential 입력 후 server login을 수행하고, Bitget secret/passphrase 대신 server endpoint/token만 Keychain에 저장합니다.
+  - 기존 local credential path는 테스트와 아직 로컬 live executor가 필요한 개발 경로를 위해 fallback으로 남기되, 기본 앱 endpoint는 `https://api.buckscopy.com`입니다.
+- Consequences:
+  - 사용자는 수동 token 복사 없이 Bitget API credential로 앱 session을 만들 수 있습니다.
+  - 사용자별 paper state/control/log는 발급된 userID로 분리됩니다.
+  - 서버가 Mac 클라이언트 없이 실거래 주문을 실행하려면 encrypted credential storage, session revocation, account/position polling, exchange-side protection order flow를 별도 decision으로 추가해야 합니다.
