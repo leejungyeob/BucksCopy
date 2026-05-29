@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
+import re
 import ssl
 import threading
 import time
@@ -25,6 +27,8 @@ PRODUCT_TYPE = "USDT-FUTURES"
 DEFAULT_BASE_URL = "https://api.bitget.com"
 DEFAULT_API_HOST = "0.0.0.0"
 DEFAULT_API_PORT = 8787
+DEFAULT_USER_ID = "local-admin"
+USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 
 
 def dec(value: str | int | float | Decimal) -> Decimal:
@@ -62,6 +66,13 @@ def clamp_int(value: str | None, default: int, minimum: int, maximum: int) -> in
     except ValueError:
         parsed = default
     return min(max(parsed, minimum), maximum)
+
+
+def validate_user_id(value: str) -> str:
+    user_id = value.strip()
+    if not USER_ID_PATTERN.fullmatch(user_id):
+        raise ValueError("userID must contain only letters, numbers, dot, underscore, or hyphen.")
+    return user_id
 
 
 def ssl_context() -> ssl.SSLContext:
@@ -512,29 +523,40 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            self.write_json(
-                {
-                    "ok": True,
-                    "mode": "paper",
-                    "control": self.runner.load_control(),
-                    "updatedAt": iso(now_utc()),
-                }
-            )
+            payload: dict[str, Any] = {
+                "ok": True,
+                "mode": "paper",
+                "authRequired": self.runner.auth_required,
+                "configuredUsers": len(self.runner.user_ids),
+                "updatedAt": iso(now_utc()),
+            }
+            if not self.runner.auth_required:
+                payload["control"] = self.runner.load_control(self.runner.default_user_id)
+            self.write_json(payload)
             return
-        if parsed.path == "/status":
-            status = self.runner.load_status()
-            status["control"] = self.runner.load_control()
+
+        action = self.route_action(parsed.path)
+        if action is None:
+            self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+        user_id = self.authorize_user()
+        if user_id is None:
+            return
+
+        if action == "status":
+            status = self.runner.load_status(user_id)
+            status["control"] = self.runner.load_control(user_id)
             self.write_json(status)
             return
-        if parsed.path == "/control":
-            self.write_json(self.runner.load_control())
+        if action == "control":
+            self.write_json(self.runner.load_control(user_id))
             return
-        if parsed.path == "/logs":
+        if action == "logs":
             query = parse_qs(parsed.query)
             limit = clamp_int(query.get("limit", [None])[0], default=50, minimum=1, maximum=500)
-            self.write_json({"items": self.runner.load_recent_logs(limit), "limit": limit})
+            self.write_json({"items": self.runner.load_recent_logs(user_id, limit), "limit": limit})
             return
-        if parsed.path == "/candles":
+        if action == "candles":
             query = parse_qs(parsed.query)
             symbol = query.get("symbol", [""])[0].upper()
             limit = clamp_int(query.get("limit", [None])[0], default=100, minimum=1, maximum=1000)
@@ -548,8 +570,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path != "/control":
+        if self.route_action(parsed.path) != "control":
             self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+        user_id = self.authorize_user()
+        if user_id is None:
             return
 
         try:
@@ -566,8 +591,41 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if "enabled" not in payload or not isinstance(payload["enabled"], bool):
             self.write_json({"error": "enabled boolean is required"}, HTTPStatus.BAD_REQUEST)
             return
-        control = self.runner.save_control(payload["enabled"], updated_by="api")
+        control = self.runner.save_control(user_id, payload["enabled"], updated_by="api")
         self.write_json(control)
+
+    def route_action(self, path: str) -> str | None:
+        legacy_routes = {
+            "/status": "status",
+            "/control": "control",
+            "/logs": "logs",
+            "/candles": "candles",
+        }
+        if path in legacy_routes:
+            return legacy_routes[path]
+
+        prefix = "/users/me/"
+        if not path.startswith(prefix):
+            return None
+        action = path[len(prefix) :]
+        if action in {"status", "control", "logs", "candles"}:
+            return action
+        return None
+
+    def authorize_user(self) -> str | None:
+        header = self.headers.get("Authorization", "").strip()
+        if header:
+            scheme, _, token = header.partition(" ")
+            if scheme.lower() == "bearer" and token:
+                user_id = self.runner.user_id_for_token(token.strip())
+                if user_id is not None:
+                    return user_id
+            self.write_json({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)
+            return None
+        if self.runner.auth_required:
+            self.write_json({"error": "authorization bearer token is required"}, HTTPStatus.UNAUTHORIZED)
+            return None
+        return self.runner.default_user_id
 
     def write_json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -581,6 +639,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 class PaperRunner:
     def __init__(self) -> None:
         self.data_dir = Path(os.environ.get("BUCKS_COPY_DATA_DIR", "/var/lib/bucks-copy"))
+        self.data_dir.mkdir(parents=True, exist_ok=True)
         self.symbols = self.parse_symbols(os.environ.get("BUCKS_COPY_SYMBOLS", "BTCUSDT,ETHUSDT"))
         self.candle_limit = min(max(int(os.environ.get("BUCKS_COPY_CANDLE_LIMIT", "500")), 1), 1000)
         self.poll_seconds = max(int(os.environ.get("BUCKS_COPY_POLL_SECONDS", "30")), 5)
@@ -589,11 +648,21 @@ class PaperRunner:
         self.api_host = os.environ.get("BUCKS_COPY_API_HOST", DEFAULT_API_HOST)
         self.api_port = clamp_int(os.environ.get("BUCKS_COPY_API_PORT"), DEFAULT_API_PORT, 1, 65535)
         self.api_enabled = parse_bool(os.environ.get("BUCKS_COPY_API_ENABLED"), default=not self.run_once)
+        self.default_user_id = validate_user_id(os.environ.get("BUCKS_COPY_DEFAULT_USER_ID", DEFAULT_USER_ID))
+        self.auth_users_path = Path(
+            os.environ.get("BUCKS_COPY_AUTH_USERS_PATH", str(self.data_dir / "auth-users.json"))
+        )
+        self.require_auth = parse_bool(os.environ.get("BUCKS_COPY_REQUIRE_AUTH"), default=False)
         self.lock = threading.RLock()
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.evaluated_keys = self.load_evaluated_keys()
-        if not (self.data_dir / "paper-runner-control.json").exists():
-            self.save_control(True, updated_by="runner")
+        self.auth_tokens_by_user_id = self.load_auth_users()
+        self.auth_required = self.require_auth or bool(self.auth_tokens_by_user_id)
+        if self.require_auth and not self.auth_tokens_by_user_id:
+            raise ValueError("BUCKS_COPY_REQUIRE_AUTH=true requires at least one auth user.")
+        self.user_ids = sorted(self.auth_tokens_by_user_id.keys()) if self.auth_tokens_by_user_id else [self.default_user_id]
+        self.migrate_legacy_default_user_files()
+        for user_id in self.user_ids:
+            self.ensure_user_storage(user_id)
+        self.evaluated_keys_by_user = {user_id: self.load_evaluated_keys(user_id) for user_id in self.user_ids}
 
     @staticmethod
     def parse_symbols(value: str) -> list[str]:
@@ -601,6 +670,64 @@ class PaperRunner:
         if not symbols:
             raise ValueError("BUCKS_COPY_SYMBOLS must include at least one symbol.")
         return symbols
+
+    def load_auth_users(self) -> dict[str, str]:
+        if not self.auth_users_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.auth_users_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ValueError("auth users file must be valid JSON.") from error
+        users = payload.get("users", []) if isinstance(payload, dict) else []
+        if not isinstance(users, list):
+            raise ValueError("auth users file must contain a users array.")
+
+        tokens_by_user: dict[str, str] = {}
+        for user in users:
+            if not isinstance(user, dict):
+                raise ValueError("auth user entries must be objects.")
+            user_id_value = user.get("userID") or user.get("userId")
+            token = user.get("token")
+            if not isinstance(user_id_value, str) or not isinstance(token, str):
+                raise ValueError("auth user entries require userID and token strings.")
+            user_id = validate_user_id(user_id_value)
+            if len(token.strip()) < 32:
+                raise ValueError("auth tokens must be at least 32 characters.")
+            if user_id in tokens_by_user:
+                raise ValueError(f"duplicate auth userID: {user_id}")
+            tokens_by_user[user_id] = token.strip()
+        return tokens_by_user
+
+    def user_id_for_token(self, token: str) -> str | None:
+        for user_id, expected in self.auth_tokens_by_user_id.items():
+            if hmac.compare_digest(token, expected):
+                return user_id
+        return None
+
+    def user_dir(self, user_id: str) -> Path:
+        return self.data_dir / "users" / validate_user_id(user_id)
+
+    def ensure_user_storage(self, user_id: str) -> None:
+        directory = self.user_dir(user_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        if not (directory / "paper-runner-control.json").exists():
+            self.save_control(user_id, True, updated_by="runner")
+
+    def migrate_legacy_default_user_files(self) -> None:
+        destination_dir = self.user_dir(self.default_user_id)
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        legacy_names = [
+            "paper-runner-control.json",
+            "paper-runner-status.json",
+            "paper-runner-evaluations.jsonl",
+            "paper-runner-heartbeat.json",
+            "trade-event-logs.jsonl",
+        ]
+        for name in legacy_names:
+            source = self.data_dir / name
+            destination = destination_dir / name
+            if source.exists() and not destination.exists():
+                destination.write_bytes(source.read_bytes())
 
     def fetch_candles(self, symbol: str) -> list[Candle]:
         params = {
@@ -666,8 +793,8 @@ class PaperRunner:
         self.save_candles(symbol, candles)
         return candles[-self.candle_limit :]
 
-    def load_evaluated_keys(self) -> set[str]:
-        path = self.data_dir / "paper-runner-evaluations.jsonl"
+    def load_evaluated_keys(self, user_id: str) -> set[str]:
+        path = self.user_dir(user_id) / "paper-runner-evaluations.jsonl"
         if not path.exists():
             return set()
         keys: set[str] = set()
@@ -683,11 +810,12 @@ class PaperRunner:
                 continue
         return keys
 
-    def has_evaluated(self, key: str) -> bool:
-        return key in self.evaluated_keys
+    def has_evaluated(self, user_id: str, key: str) -> bool:
+        return key in self.evaluated_keys_by_user.setdefault(user_id, set())
 
     def mark_evaluated(
         self,
+        user_id: str,
         key: str,
         symbol: str,
         strategy_id: str,
@@ -696,11 +824,12 @@ class PaperRunner:
         evaluated_at: datetime,
         skipped_reason: str | None = None,
     ) -> None:
-        if key in self.evaluated_keys:
+        evaluated_keys = self.evaluated_keys_by_user.setdefault(user_id, set())
+        if key in evaluated_keys:
             return
-        self.evaluated_keys.add(key)
+        evaluated_keys.add(key)
         self.append_jsonl(
-            self.data_dir / "paper-runner-evaluations.jsonl",
+            self.user_dir(user_id) / "paper-runner-evaluations.jsonl",
             {
                 "evaluationKey": key,
                 "symbol": symbol,
@@ -714,12 +843,14 @@ class PaperRunner:
             },
         )
 
-    def load_status(self) -> dict[str, Any]:
+    def load_status(self, user_id: str) -> dict[str, Any]:
+        user_directory = self.user_dir(user_id)
         return read_json_file(
-            self.data_dir / "paper-runner-status.json",
+            user_directory / "paper-runner-status.json",
             {
                 "updatedAt": None,
                 "mode": "paper",
+                "userID": user_id,
                 "symbols": self.symbols,
                 "latestClosedCandleOpenTime": None,
                 "latestClosedCandleOpenTimeISO": None,
@@ -727,12 +858,13 @@ class PaperRunner:
                 "evaluations": 0,
                 "signals": 0,
                 "failures": [],
-                "storagePath": str(self.data_dir),
+                "storagePath": str(user_directory),
+                "marketStoragePath": str(self.data_dir),
             },
         )
 
-    def load_control(self) -> dict[str, Any]:
-        control = read_json_file(self.data_dir / "paper-runner-control.json", {})
+    def load_control(self, user_id: str) -> dict[str, Any]:
+        control = read_json_file(self.user_dir(user_id) / "paper-runner-control.json", {})
         enabled = bool(control.get("enabled", True))
         return {
             "enabled": enabled,
@@ -741,7 +873,7 @@ class PaperRunner:
             "updatedBy": control.get("updatedBy"),
         }
 
-    def save_control(self, enabled: bool, updated_by: str) -> dict[str, Any]:
+    def save_control(self, user_id: str, enabled: bool, updated_by: str) -> dict[str, Any]:
         with self.lock:
             control = {
                 "enabled": enabled,
@@ -749,11 +881,12 @@ class PaperRunner:
                 "updatedAt": iso(now_utc()),
                 "updatedBy": updated_by,
             }
-            self.atomic_write_json(self.data_dir / "paper-runner-control.json", control, pretty=True)
+            self.user_dir(user_id).mkdir(parents=True, exist_ok=True)
+            self.atomic_write_json(self.user_dir(user_id) / "paper-runner-control.json", control, pretty=True)
             return control
 
-    def load_recent_logs(self, limit: int) -> list[dict[str, Any]]:
-        path = self.data_dir / "trade-event-logs.jsonl"
+    def load_recent_logs(self, user_id: str, limit: int) -> list[dict[str, Any]]:
+        path = self.user_dir(user_id) / "trade-event-logs.jsonl"
         if not path.exists():
             return []
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -782,10 +915,10 @@ class PaperRunner:
         tmp_path.write_text(text + "\n", encoding="utf-8")
         tmp_path.replace(path)
 
-    def record_signal(self, signal: Signal, candle_open_time: int, generated_at: datetime) -> None:
+    def record_signal(self, user_id: str, signal: Signal, candle_open_time: int, generated_at: datetime) -> None:
         ratio = signal.reward_risk_ratio
         self.append_jsonl(
-            self.data_dir / "trade-event-logs.jsonl",
+            self.user_dir(user_id) / "trade-event-logs.jsonl",
             {
                 "id": str(uuid.uuid4()),
                 "timestamp": iso(generated_at),
@@ -823,8 +956,9 @@ class PaperRunner:
             },
         )
 
-    def maybe_record_heartbeat(self, status: dict[str, Any], started_at: datetime, updated_at: datetime) -> None:
-        path = self.data_dir / "paper-runner-heartbeat.json"
+    def maybe_record_heartbeat(self, user_id: str, status: dict[str, Any], started_at: datetime, updated_at: datetime) -> None:
+        user_directory = self.user_dir(user_id)
+        path = user_directory / "paper-runner-heartbeat.json"
         if path.exists():
             try:
                 previous = json.loads(path.read_text(encoding="utf-8"))
@@ -836,7 +970,7 @@ class PaperRunner:
 
         elapsed = max((updated_at - started_at).total_seconds(), 0)
         self.append_jsonl(
-            self.data_dir / "trade-event-logs.jsonl",
+            user_directory / "trade-event-logs.jsonl",
             {
                 "id": str(uuid.uuid4()),
                 "timestamp": iso(updated_at),
@@ -861,7 +995,8 @@ class PaperRunner:
                         "enabled": str(status.get("control", {}).get("enabled", True)).lower(),
                         "signals": str(status["signals"]),
                         "failures": str(len(status["failures"])),
-                        "storagePath": str(self.data_dir),
+                        "storagePath": str(user_directory),
+                        "marketStoragePath": str(self.data_dir),
                     },
                 },
             },
@@ -870,13 +1005,9 @@ class PaperRunner:
 
     def run_once_cycle(self) -> None:
         started_at = now_utc()
-        control = self.load_control()
-        strategy_enabled = bool(control["enabled"])
         saved_candles = 0
-        evaluations = 0
-        skipped_evaluations = 0
-        signals = 0
-        failures: list[str] = []
+        market_failures: list[str] = []
+        closed_candles_by_symbol: dict[str, list[Candle]] = {}
         latest_closed_open_time: int | None = None
 
         for symbol in self.symbols:
@@ -886,19 +1017,39 @@ class PaperRunner:
                 saved_candles += len(remote_candles)
                 closed_candles = [candle for candle in stored_candles if candle.is_closed]
                 if not closed_candles:
-                    failures.append(f"{symbol}: no closed 15m candle available")
+                    market_failures.append(f"{symbol}: no closed 15m candle available")
                     continue
                 latest_closed = closed_candles[-1]
                 latest_closed_open_time = max(latest_closed_open_time or latest_closed.open_time, latest_closed.open_time)
+                closed_candles_by_symbol[symbol] = closed_candles
+            except Exception as error:
+                market_failures.append(f"{symbol}: {error}")
 
+        updated_at = now_utc()
+        total_evaluations = 0
+        total_skipped_evaluations = 0
+        total_signals = 0
+        total_failures = len(market_failures)
+
+        for user_id in self.user_ids:
+            control = self.load_control(user_id)
+            strategy_enabled = bool(control["enabled"])
+            evaluations = 0
+            skipped_evaluations = 0
+            signals = 0
+            failures = list(market_failures)
+
+            for symbol, closed_candles in closed_candles_by_symbol.items():
+                latest_closed = closed_candles[-1]
                 for params in ACTIVE_STRATEGIES_BY_SYMBOL.get(symbol, []):
                     strategy_id = params["strategy_id"]
                     key = f"{symbol}:{TIMEFRAME}:{strategy_id}:{latest_closed.open_time}"
-                    if self.has_evaluated(key):
+                    if self.has_evaluated(user_id, key):
                         continue
                     if not strategy_enabled:
                         skipped_evaluations += 1
                         self.mark_evaluated(
+                            user_id,
                             key,
                             symbol,
                             strategy_id,
@@ -914,38 +1065,43 @@ class PaperRunner:
                         signal = evaluate_strategy(closed_candles, params, evaluated_at)
                         if signal:
                             signals += 1
-                            self.record_signal(signal, latest_closed.open_time, evaluated_at)
-                        self.mark_evaluated(key, symbol, strategy_id, latest_closed.open_time, signal is not None, evaluated_at)
+                            self.record_signal(user_id, signal, latest_closed.open_time, evaluated_at)
+                        self.mark_evaluated(user_id, key, symbol, strategy_id, latest_closed.open_time, signal is not None, evaluated_at)
                     except Exception as error:
                         failures.append(f"{symbol} {strategy_id}: {error}")
-            except Exception as error:
-                failures.append(f"{symbol}: {error}")
 
-        updated_at = now_utc()
-        status = {
-            "updatedAt": iso(updated_at),
-            "mode": "paper",
-            "symbols": self.symbols,
-            "latestClosedCandleOpenTime": latest_closed_open_time,
-            "latestClosedCandleOpenTimeISO": open_time_iso(latest_closed_open_time) if latest_closed_open_time else None,
-            "savedCandles": saved_candles,
-            "evaluations": evaluations,
-            "skippedEvaluations": skipped_evaluations,
-            "signals": signals,
-            "failures": failures,
-            "storagePath": str(self.data_dir),
-            "control": control,
-        }
-        self.atomic_write_json(self.data_dir / "paper-runner-status.json", status, pretty=True)
-        self.maybe_record_heartbeat(status, started_at, updated_at)
+            total_evaluations += evaluations
+            total_skipped_evaluations += skipped_evaluations
+            total_signals += signals
+            total_failures += len(failures) - len(market_failures)
+            user_directory = self.user_dir(user_id)
+            status = {
+                "updatedAt": iso(updated_at),
+                "mode": "paper",
+                "userID": user_id,
+                "symbols": self.symbols,
+                "latestClosedCandleOpenTime": latest_closed_open_time,
+                "latestClosedCandleOpenTimeISO": open_time_iso(latest_closed_open_time) if latest_closed_open_time else None,
+                "savedCandles": saved_candles,
+                "evaluations": evaluations,
+                "skippedEvaluations": skipped_evaluations,
+                "signals": signals,
+                "failures": failures,
+                "storagePath": str(user_directory),
+                "marketStoragePath": str(self.data_dir),
+                "control": control,
+            }
+            self.atomic_write_json(user_directory / "paper-runner-status.json", status, pretty=True)
+            self.maybe_record_heartbeat(user_id, status, started_at, updated_at)
+
         latest_text = str(latest_closed_open_time) if latest_closed_open_time else "-"
-        status_text = "ok" if not failures else "check"
+        status_text = "ok" if total_failures == 0 else "check"
         print(
             f"[{iso(updated_at)}] paper-runner={status_text} "
             f"symbols={','.join(self.symbols)} latestClosed={latest_text} "
-            f"saved={saved_candles} enabled={str(strategy_enabled).lower()} "
-            f"evaluations={evaluations} skipped={skipped_evaluations} "
-            f"signals={signals} failures={len(failures)}",
+            f"saved={saved_candles} users={len(self.user_ids)} "
+            f"evaluations={total_evaluations} skipped={total_skipped_evaluations} "
+            f"signals={total_signals} failures={total_failures}",
             flush=True,
         )
 

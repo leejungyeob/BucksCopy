@@ -1,6 +1,8 @@
 .DS_Store
 .build/
 .server-data/
+server-data/
+server-logs/
 Derived/
 DerivedData/
 *.xcodeproj/

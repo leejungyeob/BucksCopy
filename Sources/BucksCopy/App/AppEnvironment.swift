@@ -99,8 +99,9 @@ struct AppEnvironment {
     private static func makeServerRunnerClient() -> ServerPaperRunnerHTTPClient {
         let endpoint = ProcessInfo.processInfo.environment["BUCKS_COPY_SERVER_API_BASE_URL"] ??
             "http://127.0.0.1:8787"
+        let authToken = ProcessInfo.processInfo.environment["BUCKS_COPY_SERVER_API_TOKEN"]
         let url = URL(string: endpoint) ?? URL(string: "http://127.0.0.1:8787")!
-        return ServerPaperRunnerHTTPClient(baseURL: url)
+        return ServerPaperRunnerHTTPClient(baseURL: url, authToken: authToken)
     }
 
     private static func databasePath() throws -> String {

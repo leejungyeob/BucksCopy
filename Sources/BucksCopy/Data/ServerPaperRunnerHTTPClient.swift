@@ -8,6 +8,7 @@ enum ServerPaperRunnerClientError: Error, Equatable {
 
 final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
     private let baseURL: URL
+    private let authToken: String?
     private let session: URLSession
     private let decoder = JSONDecoder()
 
@@ -15,18 +16,20 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
         baseURL.absoluteString
     }
 
-    init(baseURL: URL, session: URLSession = .shared) {
+    init(baseURL: URL, authToken: String? = nil, session: URLSession = .shared) {
         self.baseURL = baseURL
+        let normalizedToken = authToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.authToken = normalizedToken?.isEmpty == false ? normalizedToken : nil
         self.session = session
     }
 
     func fetchStatus() async throws -> ServerPaperRunnerStatus {
-        let data = try await request(path: "status")
+        let data = try await request(path: "users/me/status")
         return try decoder.decode(StatusDTO.self, from: data).domain
     }
 
     func fetchLogs(limit: Int) async throws -> [TradeEventLog] {
-        let data = try await request(path: "logs", queryItems: [
+        let data = try await request(path: "users/me/logs", queryItems: [
             URLQueryItem(name: "limit", value: String(max(1, min(limit, 500))))
         ])
         return try decoder.decode(LogsDTO.self, from: data).items.map(\.domain)
@@ -35,7 +38,7 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
     func updateControl(enabled: Bool) async throws -> ServerPaperRunnerControl {
         let body = try JSONEncoder().encode(ControlUpdateDTO(enabled: enabled))
         let data = try await request(
-            path: "control",
+            path: "users/me/control",
             method: "POST",
             body: body,
             headers: ["Content-Type": "application/json"]
@@ -66,6 +69,9 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
+        if let authToken {
+            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        }
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
 
         let (data, response) = try await session.data(for: request)

@@ -625,3 +625,23 @@
   - Lightsail 서버에서 Docker Compose로 paper runner를 먼저 장시간 검증할 수 있습니다.
   - macOS 앱을 서버 클라이언트로 바꾸기 전에 서버 status/log contract를 확인할 수 있습니다.
   - 실거래 서버 전환은 별도 decision으로 분리하고, credential secret storage, API auth, duplicate runner lock, position reconciliation, exchange-side protection 검증을 요구합니다.
+
+## 0036. Split Shared Market Data From User Paper Bot State
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 사용자는 여러 사용자가 같은 서버를 쓰더라도 Bitget public candle 데이터는 하나로 받고, 사용자별 자동매매 ON/OFF와 거래 기록은 분리되어야 한다고 정리했습니다.
+  - Bitget public OHLCV 조회는 API key가 필요 없지만, 각 사용자의 잔고/포지션/주문은 나중에 사용자별 private credential 경계가 필요합니다.
+  - 서버 API를 외부에 열기 전 최소 인증 경계가 필요하지만, 현재 운영은 SSH tunnel 또는 server-local API를 우선합니다.
+- Decision:
+  - 서버 market data store는 `candles-{symbol}-15m.json` 공용 파일을 계속 사용합니다.
+  - paper bot의 `control`, `status`, `evaluations`, `trade-event-logs`는 `users/{userID}/` 아래 사용자별 파일로 분리합니다.
+  - API는 `/users/me/status`, `/users/me/logs`, `/users/me/candles`, `/users/me/control`을 우선 route로 사용하고, 기존 `/status`, `/logs`, `/candles`, `/control`은 default/authenticated user 호환 route로 유지합니다.
+  - bearer token auth는 `auth-users.json` 파일이 있거나 `BUCKS_COPY_REQUIRE_AUTH=true`일 때 활성화합니다. token은 로그/문서/코드에 저장하지 않고 서버 로컬 secret 파일로만 둡니다.
+  - macOS 앱은 `BUCKS_COPY_SERVER_API_TOKEN`이 있으면 bearer token을 붙여 `/users/me/*` route를 호출합니다.
+  - 이번 결정은 paper-only 상태 분리까지이며, Bitget private credential 저장, private WebSocket, live order execution은 포함하지 않습니다.
+- Consequences:
+  - public candle 수집 비용은 사용자 수와 거의 무관하게 유지됩니다.
+  - 사용자별 paper 평가와 로그는 독립적으로 쌓이며, 한 사용자의 ON/OFF가 다른 사용자에게 영향을 주지 않습니다.
+  - 서버를 공용 서비스로 확장할 때 user-specific strategy config, credential storage, account/position polling, live protection order state를 별도 migration으로 추가해야 합니다.
