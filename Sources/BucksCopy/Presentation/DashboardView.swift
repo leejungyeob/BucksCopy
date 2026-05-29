@@ -3,41 +3,115 @@ import SwiftUI
 struct DashboardView: View {
     @ObservedObject var viewModel: DashboardViewModel
     @State private var didBootstrap = false
+    @State private var isChartVisible = false
+    @State private var isSetupVisible = false
 
     var body: some View {
-        VStack(spacing: 12) {
-            HSplitView {
-                leftColumn
-                    .frame(minWidth: 248, idealWidth: 292, maxWidth: 350)
-                    .padding(.trailing, 6)
-
-                centerColumn
-                    .frame(minWidth: 500, idealWidth: 760)
-                    .padding(.horizontal, 6)
-
-                rightColumn
-                    .frame(minWidth: 340, idealWidth: 460, maxWidth: 640)
-                    .padding(.leading, 6)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            AutoTradingPerformancePanel(
-                session: viewModel.state.liveAutomationSession,
+        VStack(spacing: 10) {
+            CompactAutomationStatusPanel(
+                endpoint: viewModel.state.serverRunnerEndpoint,
+                connectionState: viewModel.state.serverRunnerConnectionState,
+                status: viewModel.state.serverRunnerStatus,
                 account: dashboardAccount,
                 positions: displayPositions,
-                logs: viewModel.state.automationLogs,
-                runState: viewModel.state.runState
+                showsChart: isChartVisible,
+                showsSettings: isSetupVisible,
+                onRefreshServer: viewModel.refreshServerRunnerStatus,
+                onRefreshPositions: {
+                    Task { await viewModel.refreshPositions() }
+                },
+                onSetServerEnabled: viewModel.setServerPaperRunnerEnabled,
+                onToggleChart: { isChartVisible.toggle() },
+                onToggleSettings: { isSetupVisible.toggle() }
             )
-            .frame(minHeight: 150, idealHeight: 170, maxHeight: 210)
+
+            if isSetupVisible {
+                setupRow
+            }
+
+            if isChartVisible {
+                chartSection
+            }
+
+            HSplitView {
+                PositionPanel(
+                    positions: displayPositions,
+                    partialTakeProfitByPositionID: positionPartialTakeProfitByPositionID,
+                    strategyContextByPositionID: positionStrategyContextByPositionID,
+                    onRefresh: {
+                        Task { await viewModel.refreshPositions() }
+                    }
+                )
+                .frame(minWidth: 360, idealWidth: 460, maxWidth: 620, maxHeight: .infinity, alignment: .topLeading)
+
+                TradeLogPanel(
+                    logs: viewModel.state.recentLogs,
+                    language: viewModel.state.logLanguage,
+                    onLanguageChange: viewModel.updateLogLanguage
+                )
+                .frame(minWidth: 460, idealWidth: 720, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(14)
-        .padding(.top, 20)
-        .frame(minWidth: 1100, minHeight: 760)
+        .padding(12)
+        .padding(.top, 10)
+        .frame(minWidth: 920, minHeight: 620)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             guard !didBootstrap else { return }
             didBootstrap = true
             viewModel.bootstrap()
+        }
+    }
+
+    private var setupRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            if leftSnapshot.isConnected {
+                AccountSummaryPanel(
+                    account: leftSnapshot.account,
+                    positionCount: displayPositions.count,
+                    onRefresh: viewModel.connectSavedCredential,
+                    onDisconnect: viewModel.deleteCredential
+                )
+            } else {
+                CredentialPanel(
+                    credentialStatus: viewModel.state.credentialStatus,
+                    onConnect: { apiKey, secretKey, passphrase in
+                        viewModel.connectCredential(
+                            apiKey: apiKey,
+                            secretKey: secretKey,
+                            passphrase: passphrase
+                        )
+                    }
+                )
+            }
+
+            ServerRunnerPanel(
+                endpoint: viewModel.state.serverRunnerEndpoint,
+                hasAuthToken: viewModel.state.serverRunnerHasAuthToken,
+                redactedAuthToken: viewModel.state.serverRunnerRedactedAuthToken,
+                connectionState: viewModel.state.serverRunnerConnectionState,
+                status: viewModel.state.serverRunnerStatus,
+                onSaveConnection: viewModel.saveServerRunnerConnection,
+                onDeleteConnection: viewModel.deleteServerRunnerConnection,
+                onRefresh: viewModel.refreshServerRunnerStatus,
+                onSetEnabled: viewModel.setServerPaperRunnerEnabled
+            )
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var chartSection: some View {
+        DashboardPanel {
+            CandleChartView(
+                candles: viewModel.state.candles,
+                positions: chartPositions,
+                partialTakeProfitByPositionID: chartPartialTakeProfitByPositionID,
+                onNeedsOlderCandles: viewModel.loadMoreLocalCandles
+            )
+            .frame(minHeight: 260, idealHeight: 320, maxHeight: 420)
         }
     }
 
@@ -160,6 +234,7 @@ struct DashboardView: View {
 
     private var displayPositions: [PositionSnapshot] {
         viewModel.state.positions
+            .filter { $0.total > 0 && $0.side != .unknown }
             .map { $0.withChartProtectionLevels(from: viewModel.state.automationLogs) }
     }
 
@@ -469,6 +544,245 @@ private struct MarketDataBootstrapStatusView: View {
         case .failed:
             return "시장 데이터 동기화 실패"
         }
+    }
+}
+
+private struct CompactAutomationStatusPanel: View {
+    let endpoint: String
+    let connectionState: ServerRunnerConnectionState
+    let status: ServerPaperRunnerStatus?
+    let account: AccountSnapshot?
+    let positions: [PositionSnapshot]
+    let showsChart: Bool
+    let showsSettings: Bool
+    let onRefreshServer: () -> Void
+    let onRefreshPositions: () -> Void
+    let onSetServerEnabled: (Bool) -> Void
+    let onToggleChart: () -> Void
+    let onToggleSettings: () -> Void
+
+    var body: some View {
+        DashboardPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text("서버 자동매매")
+                                .font(.headline)
+                            Badge(text: serverBadgeText, color: serverBadgeColor)
+                            Badge(text: status?.mode.uppercased() ?? "PAPER", color: .blue)
+                            Badge(text: liveBadgeText, color: liveBadgeColor)
+                        }
+
+                        Text(subtitleText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Toggle("Paper", isOn: serverEnabledBinding)
+                        .toggleStyle(.switch)
+                        .disabled(status == nil || isRefreshing)
+                        .labelsHidden()
+                        .help("서버 paper 평가 ON/OFF")
+
+                    compactIconButton("arrow.clockwise", help: "새로고침", action: onRefreshServer)
+                        .disabled(isRefreshing)
+                    compactLabeledButton(
+                        showsChart ? "닫기" : "차트",
+                        systemName: "chart.xyaxis.line",
+                        help: "차트 보기/숨기기",
+                        action: onToggleChart
+                    )
+                    compactLabeledButton(
+                        "설정",
+                        systemName: "slider.horizontal.3",
+                        help: "연결/설정",
+                        action: onToggleSettings
+                    )
+                    .foregroundStyle(showsSettings ? Color.accentColor : Color.primary)
+                }
+
+                LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 8) {
+                    compactMetric("포지션", "\(positions.count)")
+                    compactMetric("Equity", account?.accountEquity.dashboardText ?? "-")
+                    compactMetric("가용", account?.available.dashboardText ?? "-")
+                    compactMetric("미실현", account?.unrealizedProfitLoss.dashboardText ?? "-", tint: accountProfitTint)
+                    compactMetric("저장 캔들", status.map { "\($0.savedCandles)" } ?? "-")
+                    compactMetric("신호", status.map { "\($0.signals)" } ?? "-")
+                    compactMetric("최근 마감", latestClosedText)
+                    compactMetric("주문금액", liveMarginText)
+                }
+
+                if let alertText {
+                    Text(alertText)
+                        .font(.caption)
+                        .foregroundStyle(alertColor)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private var serverEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { status?.control?.enabled ?? false },
+            set: onSetServerEnabled
+        )
+    }
+
+    private var metricColumns: [GridItem] {
+        [
+            GridItem(.adaptive(minimum: 104, maximum: 170), spacing: 8, alignment: .leading)
+        ]
+    }
+
+    private var isRefreshing: Bool {
+        if case .refreshing = connectionState { return true }
+        return false
+    }
+
+    private var serverBadgeText: String {
+        switch connectionState {
+        case .idle:
+            return "대기"
+        case .refreshing:
+            return "동기화"
+        case .connected:
+            return status?.control?.enabled == true ? "자동화 ON" : "자동화 OFF"
+        case .failed:
+            return "확인 필요"
+        }
+    }
+
+    private var serverBadgeColor: Color {
+        switch connectionState {
+        case .connected:
+            return status?.control?.enabled == true ? .green : .secondary
+        case .refreshing:
+            return .blue
+        case .failed:
+            return .orange
+        case .idle:
+            return .secondary
+        }
+    }
+
+    private var liveBadgeText: String {
+        status?.live?.orderExecutionEnabled == true ? "실주문 ON" : "실주문 OFF"
+    }
+
+    private var liveBadgeColor: Color {
+        status?.live?.orderExecutionEnabled == true ? .orange : .secondary
+    }
+
+    private var subtitleText: String {
+        let host = URL(string: endpoint)?.host ?? "서버 미설정"
+        let checkedAt = status?.updatedAt?.shortDashboardTime ?? "-"
+        return "\(host) · \(checkedAt) 갱신"
+    }
+
+    private var latestClosedText: String {
+        status?.latestClosedCandleOpenTimeDate?.shortDashboardTime ?? "-"
+    }
+
+    private var accountProfitTint: Color {
+        guard let value = account?.unrealizedProfitLoss else { return .primary }
+        return value >= 0 ? .green : .red
+    }
+
+    private var alertText: String? {
+        if case .failed(let message) = connectionState {
+            return message
+        }
+        if let failure = status?.failures.first {
+            return failure
+        }
+        if status?.live?.orderExecutionEnabled == false,
+           let blocker = status?.live?.orderBlockers.first ?? status?.live?.blockers.first {
+            return "실주문 대기: \(localizedLiveBlocker(blocker))"
+        }
+        return nil
+    }
+
+    private var liveMarginText: String {
+        guard let margin = status?.live?.executionConfig?.marginUSDT else {
+            return "0 USDT"
+        }
+        return "\(margin) USDT"
+    }
+
+    private var alertColor: Color {
+        if case .failed = connectionState {
+            return .orange
+        }
+        return status?.failures.isEmpty == false ? .orange : .secondary
+    }
+
+    private func compactMetric(_ title: String, _ value: String, tint: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(value)
+                .font(.callout.monospacedDigit().weight(.semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.58))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    private func compactIconButton(
+        _ systemName: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .frame(width: 18, height: 18)
+        }
+        .buttonStyle(.borderless)
+        .help(help)
+    }
+
+    private func localizedLiveBlocker(_ text: String) -> String {
+        switch text {
+        case "live order execution env switch is disabled":
+            return "서버 실주문 스위치 꺼짐"
+        case "live order margin USDT is not configured":
+            return "주문금액 0 USDT"
+        case "live consent is disabled":
+            return "실거래 동의 꺼짐"
+        case "Bitget credential is not loaded":
+            return "Bitget credential 미로드"
+        case "fresh account/position snapshot is required":
+            return "계정/포지션 최신 snapshot 대기"
+        default:
+            return text
+        }
+    }
+
+    private func compactLabeledButton(
+        _ title: String,
+        systemName: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemName)
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.borderless)
+        .help(help)
     }
 }
 

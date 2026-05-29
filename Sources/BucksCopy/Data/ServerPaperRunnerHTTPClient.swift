@@ -258,6 +258,7 @@ private struct StatusDTO: Decodable {
     let failures: [String]
     let storagePath: String?
     let control: ControlDTO?
+    let live: LiveStatusDTO?
 
     var domain: ServerPaperRunnerStatus {
         ServerPaperRunnerStatus(
@@ -272,7 +273,40 @@ private struct StatusDTO: Decodable {
             signals: signals,
             failures: failures,
             storagePath: storagePath,
-            control: control?.domain
+            control: control?.domain,
+            live: live?.domain
+        )
+    }
+}
+
+private struct LiveStatusDTO: Decodable {
+    let ready: Bool?
+    let orderExecutionEnabled: Bool?
+    let blockers: [String]?
+    let orderBlockers: [String]?
+    let executionConfig: LiveExecutionConfigDTO?
+
+    var domain: ServerLiveStatus {
+        ServerLiveStatus(
+            ready: ready ?? false,
+            orderExecutionEnabled: orderExecutionEnabled ?? false,
+            blockers: blockers ?? [],
+            orderBlockers: orderBlockers ?? [],
+            executionConfig: executionConfig?.domain
+        )
+    }
+}
+
+private struct LiveExecutionConfigDTO: Decodable {
+    let marginUSDT: String?
+    let marginMode: String?
+    let positionMode: String?
+
+    var domain: ServerLiveExecutionConfig {
+        ServerLiveExecutionConfig(
+            marginUSDT: marginUSDT ?? "0",
+            marginMode: marginMode ?? "-",
+            positionMode: positionMode ?? "-"
         )
     }
 }

@@ -271,7 +271,8 @@ final class DashboardViewModel: ObservableObject {
                         signals: status.signals,
                         failures: status.failures,
                         storagePath: status.storagePath,
-                        control: control
+                        control: control,
+                        live: status.live
                     )
                 }
                 await self.loadServerRunnerSnapshot()

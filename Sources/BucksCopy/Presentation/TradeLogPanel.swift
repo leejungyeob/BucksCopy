@@ -9,7 +9,7 @@ struct TradeLogPanel: View {
         DashboardPanel {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(language == .korean ? "자동매매 로그" : "Trade Log")
+                    Text(language == .korean ? "거래 정보" : "Trade Info")
                         .font(.headline)
                     Spacer()
                     Picker("", selection: Binding(
@@ -25,7 +25,7 @@ struct TradeLogPanel: View {
                 }
 
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         if logs.isEmpty {
                             Text(language == .korean ? "아직 기록된 이벤트가 없습니다." : "No events yet.")
                                 .foregroundStyle(.secondary)
@@ -49,68 +49,76 @@ struct TradeLogPanel: View {
 private struct LogRow: View {
     let log: TradeEventLog
     let language: TradeLogLanguage
+    @State private var isExpanded = false
 
     private var display: TradeLogDisplay {
         TradeLogDisplay(log: log, language: language)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LogChipFlow(spacing: 8, rowSpacing: 6) {
-                LogChip(
-                    text: log.timestamp.dashboardLogDateTime,
-                    tone: .neutral,
-                    monospaced: true
-                )
-                LogChip(text: display.category, tone: categoryTone)
-
-                if let symbol = log.symbol {
-                    LogChip(text: symbol.rawValue, tone: .accent, monospaced: true)
-                }
-
-                if let severity = display.severity {
-                    LogChip(text: severity, tone: severityTone)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(display.title)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(log.severity == .error ? .red : .primary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
                 if !display.detail.isEmpty {
                     Text(display.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(3)
+                        .lineLimit(isExpanded ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
 
-            if !display.tags.isEmpty {
-                LogChipFlow(spacing: 8, rowSpacing: 6) {
-                    ForEach(display.tags) { tag in
-                        LogChip(text: tag.label, tone: tag.tone)
+                if !display.tags.isEmpty {
+                    LogChipFlow(spacing: 6, rowSpacing: 5) {
+                        ForEach(display.tags) { tag in
+                            LogChip(text: tag.label, tone: tag.tone)
+                        }
+                    }
+                }
+
+                if !display.details.isEmpty {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 138), spacing: 6, alignment: .topLeading)],
+                        alignment: .leading,
+                        spacing: 6
+                    ) {
+                        ForEach(display.details) { detail in
+                            LogDetailCell(detail: detail)
+                        }
                     }
                 }
             }
+            .padding(.top, 6)
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    LogChipFlow(spacing: 6, rowSpacing: 5) {
+                        LogChip(
+                            text: log.timestamp.dashboardLogDateTime,
+                            tone: .neutral,
+                            monospaced: true
+                        )
+                        LogChip(text: display.category, tone: categoryTone)
 
-            if !display.details.isEmpty {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 176), spacing: 8, alignment: .topLeading)],
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    ForEach(display.details) { detail in
-                        LogDetailCell(detail: detail)
+                        if let symbol = log.symbol {
+                            LogChip(text: symbol.rawValue, tone: .accent, monospaced: true)
+                        }
+
+                        if let severity = display.severity {
+                            LogChip(text: severity, tone: severityTone)
+                        }
                     }
+
+                    Text(display.title)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(log.severity == .error ? .red : .primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .contentShape(Rectangle())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
+        .padding(8)
         .background(rowBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {

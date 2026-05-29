@@ -8,16 +8,21 @@ struct PositionPanel: View {
 
     var body: some View {
         DashboardPanel {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Positions")
+                    Text("내 포지션")
                         .font(.headline)
                     Spacer()
-                    Button("Refresh", action: onRefresh)
+                    Button(action: onRefresh) {
+                        Image(systemName: "arrow.clockwise")
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("포지션 새로고침")
                 }
 
                 ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
                         if positions.isEmpty {
                             EmptyPositionCard()
                         } else {
@@ -62,9 +67,9 @@ private struct PositionCard: View {
             price: position.stopLoss
         )
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
                         Text(position.symbol.rawValue)
                             .font(.headline.monospacedDigit())
@@ -78,14 +83,14 @@ private struct PositionCard: View {
                             .clipShape(Capsule())
                     }
 
-                    Text("\(position.marginMode.uppercased()) / \(position.leverage)x / Size \(position.total.dashboardText)")
+                    Text("\(position.marginMode.uppercased()) · \(position.leverage)x · \(position.total.dashboardText)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 20)
 
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 3) {
                     Text(position.unrealizedProfitLoss.dashboardText)
                         .font(.title3.monospacedDigit().weight(.semibold))
                         .foregroundStyle(position.profitTint)
@@ -98,8 +103,8 @@ private struct PositionCard: View {
             LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 8) {
                 PositionMetric(title: "Entry", value: position.openPriceAverage.dashboardText)
                 PositionMetric(title: "Mark", value: position.markPrice.dashboardText)
-                PositionMetric(title: "Available", value: position.available.dashboardText)
-                PositionMetric(title: "Liquidation", value: position.liquidationPrice?.dashboardText ?? "-")
+                PositionMetric(title: "Size", value: position.total.dashboardText)
+                PositionMetric(title: "Liq", value: position.liquidationPrice?.dashboardText ?? "-")
                 PositionMetric(
                     title: "TP1",
                     value: partialTakeProfit?.dashboardText ?? "-",
@@ -121,13 +126,12 @@ private struct PositionCard: View {
                     tint: .red,
                     subtitleTint: stopProjection?.tint
                 )
-                PositionMetric(title: "Strategy", value: strategyContext?.strategyID ?? "-")
-                PositionMetric(title: "Timeframe", value: strategyContext?.timeframe?.rawValue ?? "-")
-                PositionMetric(title: "Entry Time", value: position.createdAt?.dashboardDateTime ?? "-")
-                PositionMetric(title: "Updated", value: position.updatedAt?.dashboardDateTime ?? "-")
+                if let strategyID = strategyContext?.strategyID {
+                    PositionMetric(title: "Strategy", value: strategyID)
+                }
             }
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.72))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -140,8 +144,8 @@ private struct PositionCard: View {
     private var metricColumns: [GridItem] {
         [
             GridItem(
-                .adaptive(minimum: 116, maximum: 180),
-                spacing: 8,
+                .adaptive(minimum: 92, maximum: 150),
+                spacing: 6,
                 alignment: .leading
             )
         ]
@@ -161,7 +165,7 @@ private struct PositionMetric: View {
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.callout.monospacedDigit())
+                .font(.caption.monospacedDigit().weight(.semibold))
                 .foregroundStyle(tint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
@@ -173,8 +177,8 @@ private struct PositionMetric: View {
                     .minimumScaleFactor(0.72)
             }
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, minHeight: subtitle == nil ? 48 : 64, alignment: .leading)
+        .padding(7)
+        .frame(maxWidth: .infinity, minHeight: subtitle == nil ? 42 : 58, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
@@ -282,13 +286,13 @@ struct PositionExitProjection: Equatable {
 private struct EmptyPositionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("No open positions")
+            Text("열린 포지션 없음")
                 .font(.callout.weight(.semibold))
-            Text("Live USDT-M Futures positions will appear here after the account syncs.")
+            Text("서버가 읽어온 USDT-M Futures 포지션이 여기에 표시됩니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.58))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

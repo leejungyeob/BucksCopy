@@ -62,6 +62,82 @@ struct ServerPaperRunnerStatus: Equatable {
     let failures: [String]
     let storagePath: String?
     let control: ServerPaperRunnerControl?
+    var live: ServerLiveStatus? = nil
+
+    init(
+        updatedAt: Date?,
+        mode: String,
+        symbols: [String],
+        latestClosedCandleOpenTime: Int?,
+        latestClosedCandleOpenTimeDate: Date?,
+        savedCandles: Int,
+        evaluations: Int,
+        skippedEvaluations: Int,
+        signals: Int,
+        failures: [String],
+        storagePath: String?,
+        control: ServerPaperRunnerControl?
+    ) {
+        self.init(
+            updatedAt: updatedAt,
+            mode: mode,
+            symbols: symbols,
+            latestClosedCandleOpenTime: latestClosedCandleOpenTime,
+            latestClosedCandleOpenTimeDate: latestClosedCandleOpenTimeDate,
+            savedCandles: savedCandles,
+            evaluations: evaluations,
+            skippedEvaluations: skippedEvaluations,
+            signals: signals,
+            failures: failures,
+            storagePath: storagePath,
+            control: control,
+            live: nil
+        )
+    }
+
+    init(
+        updatedAt: Date?,
+        mode: String,
+        symbols: [String],
+        latestClosedCandleOpenTime: Int?,
+        latestClosedCandleOpenTimeDate: Date?,
+        savedCandles: Int,
+        evaluations: Int,
+        skippedEvaluations: Int,
+        signals: Int,
+        failures: [String],
+        storagePath: String?,
+        control: ServerPaperRunnerControl?,
+        live: ServerLiveStatus?
+    ) {
+        self.updatedAt = updatedAt
+        self.mode = mode
+        self.symbols = symbols
+        self.latestClosedCandleOpenTime = latestClosedCandleOpenTime
+        self.latestClosedCandleOpenTimeDate = latestClosedCandleOpenTimeDate
+        self.savedCandles = savedCandles
+        self.evaluations = evaluations
+        self.skippedEvaluations = skippedEvaluations
+        self.signals = signals
+        self.failures = failures
+        self.storagePath = storagePath
+        self.control = control
+        self.live = live
+    }
+}
+
+struct ServerLiveStatus: Equatable {
+    let ready: Bool
+    let orderExecutionEnabled: Bool
+    let blockers: [String]
+    let orderBlockers: [String]
+    let executionConfig: ServerLiveExecutionConfig?
+}
+
+struct ServerLiveExecutionConfig: Equatable {
+    let marginUSDT: String
+    let marginMode: String
+    let positionMode: String
 }
 
 enum ServerRunnerConnectionState: Equatable {
