@@ -14,8 +14,17 @@ let package = Package(
         )
     ],
     targets: [
+        .systemLibrary(
+            name: "CSQLite",
+            path: "Server/CSQLite",
+            providers: [
+                .apt(["libsqlite3-dev"]),
+                .brew(["sqlite3"])
+            ]
+        ),
         .executableTarget(
             name: "BucksCopyPaperRunner",
+            dependencies: ["CSQLite"],
             path: ".",
             exclude: [
                 ".codex",
