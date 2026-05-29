@@ -12,14 +12,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --create-home --uid 10001 bucks
+RUN groupadd --gid 1000 runner \
+    && useradd --create-home --uid 1000 --gid 1000 runner
 RUN mkdir -p /var/lib/bucks-copy /var/log/bucks-copy \
-    && chown -R bucks:bucks /var/lib/bucks-copy /var/log/bucks-copy
+    && chown -R runner:runner /var/lib/bucks-copy /var/log/bucks-copy
 
 COPY --from=build /src/.build/release/BucksCopyPaperRunner /usr/local/bin/BucksCopyPaperRunner
 
-USER bucks
-WORKDIR /home/bucks
+USER runner
+WORKDIR /home/runner
 
 ENV BUCKS_COPY_DATA_DIR=/var/lib/bucks-copy
 ENV BUCKS_COPY_SYMBOLS=BTCUSDT,ETHUSDT

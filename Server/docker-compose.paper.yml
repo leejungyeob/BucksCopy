@@ -5,7 +5,6 @@ services:
       dockerfile: Server/Dockerfile
     container_name: bucks-copy-paper-runner
     restart: unless-stopped
-    user: "${BUCKS_COPY_RUNNER_UID:-1000}:${BUCKS_COPY_RUNNER_GID:-1000}"
     environment:
       BUCKS_COPY_DATA_DIR: /var/lib/bucks-copy
       BUCKS_COPY_SYMBOLS: ${BUCKS_COPY_SYMBOLS:-BTCUSDT,ETHUSDT}

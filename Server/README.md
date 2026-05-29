@@ -34,13 +34,13 @@ docker compose -f Server/docker-compose.paper.yml up -d --build
 docker compose -f Server/docker-compose.paper.yml logs -f
 ```
 
-On a normal Lightsail Ubuntu instance, `ubuntu` is UID/GID `1000`.
-If the mounted data/log folders are owned by a different user, set
-`BUCKS_COPY_RUNNER_UID` and `BUCKS_COPY_RUNNER_GID` in `.env` to the output of:
+On a normal Lightsail Ubuntu instance, `ubuntu` is UID/GID `1000`, and the
+paper runner container also runs as UID/GID `1000`. If the mounted data/log
+folders were created by an earlier root or container user, reset ownership:
 
 ```bash
-id -u
-id -g
+sudo chown -R ubuntu:ubuntu ~/bucks-copy-server/data ~/bucks-copy-server/logs
+chmod -R u+rwX ~/bucks-copy-server/data ~/bucks-copy-server/logs
 ```
 
 The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
