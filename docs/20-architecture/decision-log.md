@@ -619,6 +619,7 @@
   - runner는 현재 활성 live route인 BTC 15m Phase Vacuum Reclaim, BTC 15m Vacuum Pulse, ETH 15m Vacuum Pulse 조건을 Python으로 이식하고, Bitget public REST `15m` candle만 받아 file-based JSON 저장소에 저장합니다.
   - runner는 closed 15m candle별 `symbol × timeframe × strategy × openTime` key를 저장해 같은 candle의 paper signal 중복 평가를 막습니다.
   - runner는 `paper-runner-status.json`, `paper-runner-evaluations.jsonl`, `trade-event-logs.jsonl`에 상태와 paper signal을 남깁니다.
+  - runner는 서버 로컬 바인딩용 HTTP API(`/health`, `/status`, `/logs`, `/candles`, `/control`)를 제공하고, Docker Compose는 host `127.0.0.1`에만 포트를 노출합니다.
   - 이 단계는 private Bitget API, credential 저장, live order, protection order를 포함하지 않습니다.
 - Consequences:
   - Lightsail 서버에서 Docker Compose로 paper runner를 먼저 장시간 검증할 수 있습니다.

@@ -34,6 +34,19 @@ docker compose -f Server/docker-compose.paper.yml up -d --build
 docker compose -f Server/docker-compose.paper.yml logs -f
 ```
 
+The compose API port is bound to `127.0.0.1` on the server by default. It is
+intended for server-local checks or an SSH tunnel first, not direct internet
+exposure.
+
+```bash
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/status
+curl 'http://127.0.0.1:8787/logs?limit=20'
+curl -X POST http://127.0.0.1:8787/control \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled":false}'
+```
+
 If the mounted data/log folders were created by an earlier container attempt
 with restrictive permissions, reset ownership once:
 
@@ -48,6 +61,7 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 - `trade-event-logs.jsonl`: paper signal and heartbeat records
 - `paper-runner-status.json`: latest runner status for the future API/UI
 - `paper-runner-evaluations.jsonl`: duplicate evaluation guard by `symbol/timeframe/strategy/openTime`
+- `paper-runner-control.json`: paper evaluation ON/OFF state
 
 ## Safety Boundary
 

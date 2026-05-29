@@ -4,14 +4,17 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import threading
 import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, getcontext
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 getcontext().prec = 34
@@ -20,6 +23,8 @@ TIMEFRAME = "15m"
 TIMEFRAME_SECONDS = 15 * 60
 PRODUCT_TYPE = "USDT-FUTURES"
 DEFAULT_BASE_URL = "https://api.bitget.com"
+DEFAULT_API_HOST = "0.0.0.0"
+DEFAULT_API_PORT = 8787
 
 
 def dec(value: str | int | float | Decimal) -> Decimal:
@@ -51,6 +56,14 @@ def parse_bool(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def clamp_int(value: str | None, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value) if value is not None else default
+    except ValueError:
+        parsed = default
+    return min(max(parsed, minimum), maximum)
+
+
 def ssl_context() -> ssl.SSLContext:
     cafile = os.environ.get("SSL_CERT_FILE")
     candidates = [
@@ -63,6 +76,15 @@ def ssl_context() -> ssl.SSLContext:
         if candidate and Path(candidate).exists():
             return ssl.create_default_context(cafile=candidate)
     return ssl.create_default_context()
+
+
+def read_json_file(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return default
 
 
 @dataclass(frozen=True)
@@ -481,6 +503,81 @@ def evaluate_strategy(candles: list[Candle], params: dict[str, Any], generated_a
     return None
 
 
+class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
+    runner: "PaperRunner"
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return
+
+    def do_GET(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/health":
+            self.write_json(
+                {
+                    "ok": True,
+                    "mode": "paper",
+                    "control": self.runner.load_control(),
+                    "updatedAt": iso(now_utc()),
+                }
+            )
+            return
+        if parsed.path == "/status":
+            status = self.runner.load_status()
+            status["control"] = self.runner.load_control()
+            self.write_json(status)
+            return
+        if parsed.path == "/control":
+            self.write_json(self.runner.load_control())
+            return
+        if parsed.path == "/logs":
+            query = parse_qs(parsed.query)
+            limit = clamp_int(query.get("limit", [None])[0], default=50, minimum=1, maximum=500)
+            self.write_json({"items": self.runner.load_recent_logs(limit), "limit": limit})
+            return
+        if parsed.path == "/candles":
+            query = parse_qs(parsed.query)
+            symbol = query.get("symbol", [""])[0].upper()
+            limit = clamp_int(query.get("limit", [None])[0], default=100, minimum=1, maximum=1000)
+            if symbol not in self.runner.symbols:
+                self.write_json({"error": "symbol is not configured for this runner"}, HTTPStatus.BAD_REQUEST)
+                return
+            candles = [candle.to_record() for candle in self.runner.load_candles(symbol)[-limit:]]
+            self.write_json({"symbol": symbol, "timeframe": TIMEFRAME, "items": candles, "limit": limit})
+            return
+        self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path != "/control":
+            self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        body = self.rfile.read(length) if length > 0 else b"{}"
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            self.write_json({"error": "invalid json body"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if "enabled" not in payload or not isinstance(payload["enabled"], bool):
+            self.write_json({"error": "enabled boolean is required"}, HTTPStatus.BAD_REQUEST)
+            return
+        control = self.runner.save_control(payload["enabled"], updated_by="api")
+        self.write_json(control)
+
+    def write_json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
+        body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        self.send_response(status.value)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 class PaperRunner:
     def __init__(self) -> None:
         self.data_dir = Path(os.environ.get("BUCKS_COPY_DATA_DIR", "/var/lib/bucks-copy"))
@@ -489,8 +586,14 @@ class PaperRunner:
         self.poll_seconds = max(int(os.environ.get("BUCKS_COPY_POLL_SECONDS", "30")), 5)
         self.base_url = os.environ.get("BUCKS_COPY_BITGET_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
         self.run_once = parse_bool(os.environ.get("BUCKS_COPY_RUN_ONCE"))
+        self.api_host = os.environ.get("BUCKS_COPY_API_HOST", DEFAULT_API_HOST)
+        self.api_port = clamp_int(os.environ.get("BUCKS_COPY_API_PORT"), DEFAULT_API_PORT, 1, 65535)
+        self.api_enabled = parse_bool(os.environ.get("BUCKS_COPY_API_ENABLED"), default=not self.run_once)
+        self.lock = threading.RLock()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.evaluated_keys = self.load_evaluated_keys()
+        if not (self.data_dir / "paper-runner-control.json").exists():
+            self.save_control(True, updated_by="runner")
 
     @staticmethod
     def parse_symbols(value: str) -> list[str]:
@@ -583,7 +686,16 @@ class PaperRunner:
     def has_evaluated(self, key: str) -> bool:
         return key in self.evaluated_keys
 
-    def mark_evaluated(self, key: str, symbol: str, strategy_id: str, open_time: int, produced_signal: bool, evaluated_at: datetime) -> None:
+    def mark_evaluated(
+        self,
+        key: str,
+        symbol: str,
+        strategy_id: str,
+        open_time: int,
+        produced_signal: bool,
+        evaluated_at: datetime,
+        skipped_reason: str | None = None,
+    ) -> None:
         if key in self.evaluated_keys:
             return
         self.evaluated_keys.add(key)
@@ -597,9 +709,61 @@ class PaperRunner:
                 "candleOpenTime": open_time,
                 "candleOpenTimeISO": open_time_iso(open_time),
                 "producedSignal": produced_signal,
+                "skippedReason": skipped_reason,
                 "evaluatedAt": iso(evaluated_at),
             },
         )
+
+    def load_status(self) -> dict[str, Any]:
+        return read_json_file(
+            self.data_dir / "paper-runner-status.json",
+            {
+                "updatedAt": None,
+                "mode": "paper",
+                "symbols": self.symbols,
+                "latestClosedCandleOpenTime": None,
+                "latestClosedCandleOpenTimeISO": None,
+                "savedCandles": 0,
+                "evaluations": 0,
+                "signals": 0,
+                "failures": [],
+                "storagePath": str(self.data_dir),
+            },
+        )
+
+    def load_control(self) -> dict[str, Any]:
+        control = read_json_file(self.data_dir / "paper-runner-control.json", {})
+        enabled = bool(control.get("enabled", True))
+        return {
+            "enabled": enabled,
+            "mode": "paper",
+            "updatedAt": control.get("updatedAt"),
+            "updatedBy": control.get("updatedBy"),
+        }
+
+    def save_control(self, enabled: bool, updated_by: str) -> dict[str, Any]:
+        with self.lock:
+            control = {
+                "enabled": enabled,
+                "mode": "paper",
+                "updatedAt": iso(now_utc()),
+                "updatedBy": updated_by,
+            }
+            self.atomic_write_json(self.data_dir / "paper-runner-control.json", control, pretty=True)
+            return control
+
+    def load_recent_logs(self, limit: int) -> list[dict[str, Any]]:
+        path = self.data_dir / "trade-event-logs.jsonl"
+        if not path.exists():
+            return []
+        lines = path.read_text(encoding="utf-8").splitlines()
+        records: list[dict[str, Any]] = []
+        for line in lines[-limit:]:
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return records
 
     def append_jsonl(self, path: Path, record: dict[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as handle:
@@ -682,7 +846,7 @@ class PaperRunner:
                 "message": (
                     f"Paper runner heartbeat. Symbols {','.join(status['symbols'])}, "
                     f"saved candles {status['savedCandles']}, evaluations {status['evaluations']}, "
-                    f"signals {status['signals']}, failures {len(status['failures'])}, "
+                    f"skipped {status.get('skippedEvaluations', 0)}, signals {status['signals']}, failures {len(status['failures'])}, "
                     f"elapsed {elapsed:.2f}s. No live orders enabled."
                 ),
                 "metadata": {
@@ -693,6 +857,8 @@ class PaperRunner:
                         "symbols": ",".join(status["symbols"]),
                         "savedCandles": str(status["savedCandles"]),
                         "evaluations": str(status["evaluations"]),
+                        "skippedEvaluations": str(status.get("skippedEvaluations", 0)),
+                        "enabled": str(status.get("control", {}).get("enabled", True)).lower(),
                         "signals": str(status["signals"]),
                         "failures": str(len(status["failures"])),
                         "storagePath": str(self.data_dir),
@@ -704,8 +870,11 @@ class PaperRunner:
 
     def run_once_cycle(self) -> None:
         started_at = now_utc()
+        control = self.load_control()
+        strategy_enabled = bool(control["enabled"])
         saved_candles = 0
         evaluations = 0
+        skipped_evaluations = 0
         signals = 0
         failures: list[str] = []
         latest_closed_open_time: int | None = None
@@ -726,6 +895,18 @@ class PaperRunner:
                     strategy_id = params["strategy_id"]
                     key = f"{symbol}:{TIMEFRAME}:{strategy_id}:{latest_closed.open_time}"
                     if self.has_evaluated(key):
+                        continue
+                    if not strategy_enabled:
+                        skipped_evaluations += 1
+                        self.mark_evaluated(
+                            key,
+                            symbol,
+                            strategy_id,
+                            latest_closed.open_time,
+                            produced_signal=False,
+                            evaluated_at=now_utc(),
+                            skipped_reason="paper runner disabled",
+                        )
                         continue
                     evaluations += 1
                     evaluated_at = now_utc()
@@ -749,9 +930,11 @@ class PaperRunner:
             "latestClosedCandleOpenTimeISO": open_time_iso(latest_closed_open_time) if latest_closed_open_time else None,
             "savedCandles": saved_candles,
             "evaluations": evaluations,
+            "skippedEvaluations": skipped_evaluations,
             "signals": signals,
             "failures": failures,
             "storagePath": str(self.data_dir),
+            "control": control,
         }
         self.atomic_write_json(self.data_dir / "paper-runner-status.json", status, pretty=True)
         self.maybe_record_heartbeat(status, started_at, updated_at)
@@ -760,16 +943,27 @@ class PaperRunner:
         print(
             f"[{iso(updated_at)}] paper-runner={status_text} "
             f"symbols={','.join(self.symbols)} latestClosed={latest_text} "
-            f"saved={saved_candles} evaluations={evaluations} signals={signals} failures={len(failures)}",
+            f"saved={saved_candles} enabled={str(strategy_enabled).lower()} "
+            f"evaluations={evaluations} skipped={skipped_evaluations} "
+            f"signals={signals} failures={len(failures)}",
             flush=True,
         )
 
     def run(self) -> None:
+        if self.api_enabled:
+            self.start_api_server()
         while True:
             self.run_once_cycle()
             if self.run_once:
                 return
             time.sleep(self.poll_seconds)
+
+    def start_api_server(self) -> None:
+        handler = type("BoundPaperRunnerAPIHandler", (PaperRunnerAPIHandler,), {"runner": self})
+        server = ThreadingHTTPServer((self.api_host, self.api_port), handler)
+        thread = threading.Thread(target=server.serve_forever, name="paper-runner-api", daemon=True)
+        thread.start()
+        print(f"paper-runner-api=listening host={self.api_host} port={self.api_port}", flush=True)
 
 
 def main() -> None:
