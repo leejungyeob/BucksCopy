@@ -10,22 +10,25 @@ struct CredentialPanel: View {
 
     var body: some View {
         DashboardPanel {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Bitget Login")
+                    Label("Bitget 로그인", systemImage: "key.fill")
                         .font(.headline)
                     Spacer()
                     statusBadge
                 }
 
-                TextField("APIKey", text: $apiKey)
+                TextField("API Key", text: $apiKey)
                     .textFieldStyle(.roundedBorder)
-                SecureField("SecretKey", text: $secretKey)
+                    .controlSize(.large)
+                SecureField("Secret Key", text: $secretKey)
                     .textFieldStyle(.roundedBorder)
+                    .controlSize(.large)
                 SecureField("Passphrase", text: $passphrase)
                     .textFieldStyle(.roundedBorder)
+                    .controlSize(.large)
 
-                Text("api.buckscopy.com")
+                Label("api.buckscopy.com", systemImage: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -36,95 +39,49 @@ struct CredentialPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Button {
-                    onConnect(apiKey, secretKey, passphrase)
-                    apiKey = ""
-                    secretKey = ""
-                    passphrase = ""
-                } label: {
-                    Text("Connect")
+                Button(action: submit) {
+                    Label("로그인", systemImage: "arrow.right.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!canSubmit)
             }
         }
+    }
+
+    private var canSubmit: Bool {
+        apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
+            secretKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
+            passphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false &&
+            !isValidating
+    }
+
+    private var isValidating: Bool {
+        if case .validating = credentialStatus { return true }
+        return false
+    }
+
+    private func submit() {
+        onConnect(apiKey, secretKey, passphrase)
+        apiKey = ""
+        secretKey = ""
+        passphrase = ""
     }
 
     @ViewBuilder
     private var statusBadge: some View {
         switch credentialStatus {
         case .disconnected:
-            Badge(text: "Disconnected", color: .secondary)
+            Badge(text: "로그아웃", color: .secondary)
         case .saved:
-            Badge(text: "Saved", color: .blue)
+            Badge(text: "저장됨", color: .blue)
         case .validating:
-            Badge(text: "Connecting", color: .orange)
+            Badge(text: "연결 중", color: .orange)
         case .connected:
-            Badge(text: "Connected", color: .green)
+            Badge(text: "로그인됨", color: .green)
         case .failed:
-            Badge(text: "Failed", color: .red)
-        }
-    }
-}
-
-struct AccountSummaryPanel: View {
-    let account: AccountSnapshot?
-    let positionCount: Int
-    let onRefresh: () -> Void
-    let onDisconnect: () -> Void
-
-    var body: some View {
-        DashboardPanel {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("My Account")
-                        .font(.headline)
-                    Spacer()
-                    Badge(text: "Connected", color: .green)
-                }
-
-                if let account {
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                        GridRow {
-                            Text("Equity")
-                                .foregroundStyle(.secondary)
-                            Text(account.accountEquity.dashboardText)
-                                .fontWeight(.semibold)
-                        }
-                        GridRow {
-                            Text("Available")
-                                .foregroundStyle(.secondary)
-                            Text(account.available.dashboardText)
-                        }
-                        GridRow {
-                            Text("Unrealized")
-                                .foregroundStyle(.secondary)
-                            Text(account.unrealizedProfitLoss.dashboardText)
-                                .foregroundStyle(account.unrealizedProfitLoss >= 0 ? .green : .red)
-                        }
-                        GridRow {
-                            Text("Positions")
-                                .foregroundStyle(.secondary)
-                            Text("\(positionCount)")
-                        }
-                    }
-                    .font(.callout.monospacedDigit())
-                } else {
-                    Text("Connected. Account snapshot will appear after refresh.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Button("Refresh") {
-                        onRefresh()
-                    }
-                    Spacer()
-                    Button("Disconnect", role: .destructive) {
-                        onDisconnect()
-                    }
-                }
-            }
+            Badge(text: "실패", color: .red)
         }
     }
 }

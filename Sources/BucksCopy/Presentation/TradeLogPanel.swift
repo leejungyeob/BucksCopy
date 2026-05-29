@@ -9,7 +9,7 @@ struct TradeLogPanel: View {
         DashboardPanel {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(language == .korean ? "거래 정보" : "Trade Info")
+                    Text(language == .korean ? "매매기록" : "Trade History")
                         .font(.headline)
                     Spacer()
                     Picker("", selection: Binding(
@@ -27,7 +27,7 @@ struct TradeLogPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         if logs.isEmpty {
-                            Text(language == .korean ? "아직 기록된 이벤트가 없습니다." : "No events yet.")
+                            Text(language == .korean ? "아직 매매기록이 없습니다." : "No trades yet.")
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {

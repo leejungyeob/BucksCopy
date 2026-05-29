@@ -10,6 +10,7 @@ mkdir -p "$BUILD_DIR" "$ROOT_DIR/Derived/Reports"
 swiftc \
   "$ROOT_DIR/Sources/BucksCopy/Domains/TradingModels.swift" \
   "$ROOT_DIR/Sources/BucksCopy/Domains/StrategyModels.swift" \
+  "$ROOT_DIR/Sources/BucksCopy/Domains/ServerPaperRunnerModels.swift" \
   "$ROOT_DIR/Sources/BucksCopy/Domains/TradeEventLog.swift" \
   "$ROOT_DIR/Sources/BucksCopy/Domains/TradingFeePolicy.swift" \
   "$ROOT_DIR/Sources/BucksCopy/Domains/StrategyRiskPolicy.swift" \
