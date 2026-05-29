@@ -30,5 +30,6 @@
 | [docs/40-agents/token-optimization-playbook.md](../40-agents/token-optimization-playbook.md) | 하네스/토큰 운영 기준 | 검증 스크립트, fixture, trace 규칙 변경 |
 | [docs/50-migration/migration-playbook.md](../50-migration/migration-playbook.md) | 단계적 구조 이전 | migration 절차/검증 변경 |
 | [docs/50-migration/aws-lightsail-runner-workflow.html](../50-migration/aws-lightsail-runner-workflow.html) | AWS Lightsail server runner 전환 절차와 리스크 지도 | server runner 운영 전환 계획 변경 |
+| [docs/50-migration/server-runner-handoff.md](../50-migration/server-runner-handoff.md) | 다른 노트북/Codex 세션에서 서버 runner 작업을 이어받기 위한 현재 상태, 배포, 롤백 문서 | server runner 운영 상태, 인수인계 절차 변경 |
 | [.codex/contracts/handoff-template.yaml](../../.codex/contracts/handoff-template.yaml) | 위임 handoff 계약 | 필수 handoff 필드 변경 |
 | [.codex/contracts/run-trace-template.json](../../.codex/contracts/run-trace-template.json) | 실행 trace 형식 | trace 필드 변경 |
