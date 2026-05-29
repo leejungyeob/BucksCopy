@@ -19,6 +19,7 @@ final class DashboardViewModel: ObservableObject {
     private let candleStreamService: CandleStreamService?
     private let logStore: TradeEventLogStore
     private let signalEvaluator: TradingSignalEvaluator
+    private let serverPaperRunnerService: ServerPaperRunnerService?
     private let liveMonitor: MultiTimeframeLiveTradingMonitor
     private let liveMonitorIntervalNanoseconds: UInt64
     private let backtestEngine: BacktestEngine
@@ -32,6 +33,7 @@ final class DashboardViewModel: ObservableObject {
     private var candleStreamTask: Task<Void, Never>?
     private var positionStreamTask: Task<Void, Never>?
     private var positionPollingTask: Task<Void, Never>?
+    private var serverRunnerPollingTask: Task<Void, Never>?
     private var backtestTask: Task<Void, Never>?
     private var liveMonitorTask: Task<Void, Never>?
     private let initialCandleDisplayLimit = 1_200
@@ -56,6 +58,8 @@ final class DashboardViewModel: ObservableObject {
         logStore: TradeEventLogStore,
         signalEvaluator: TradingSignalEvaluator,
         liveExecutor: LiveTradeExecutor? = nil,
+        serverPaperRunnerService: ServerPaperRunnerService? = nil,
+        serverPaperRunnerEndpoint: String = "",
         backtestEngine: BacktestEngine? = nil,
         strategyRegistry: StrategyRegistry,
         clock: Clock = SystemClock(),
@@ -92,6 +96,7 @@ final class DashboardViewModel: ObservableObject {
             )
         }
         self.signalEvaluator = signalEvaluator
+        self.serverPaperRunnerService = serverPaperRunnerService
         self.liveMonitor = MultiTimeframeLiveTradingMonitor(
             candleRepository: candleRepository,
             candleBackfillRepository: candleBackfillRepository,
@@ -104,6 +109,7 @@ final class DashboardViewModel: ObservableObject {
         self.strategyRegistry = strategyRegistry
         self.clock = clock
         self.historyBackfillPolicy = historyBackfillPolicy
+        self.state.serverRunnerEndpoint = serverPaperRunnerEndpoint
         self.state.strategyConfig = routedStrategyConfig(
             self.state.strategyConfig,
             for: self.state.selectedTimeframe,
@@ -126,6 +132,7 @@ final class DashboardViewModel: ObservableObject {
         candleStreamTask?.cancel()
         positionStreamTask?.cancel()
         positionPollingTask?.cancel()
+        serverRunnerPollingTask?.cancel()
         backtestTask?.cancel()
         liveMonitorTask?.cancel()
     }
@@ -157,8 +164,46 @@ final class DashboardViewModel: ObservableObject {
             loadRecentLogs()
             startSelectedLiveCandleStream()
             startInitialMarketDataSync()
+            startServerRunnerPolling()
         } catch {
             state.credentialStatus = .failed(message: sanitizedError(error))
+        }
+    }
+
+    func refreshServerRunnerStatus() {
+        guard serverPaperRunnerService != nil else { return }
+        Task { [weak self] in
+            await self?.loadServerRunnerSnapshot()
+        }
+    }
+
+    func setServerPaperRunnerEnabled(_ enabled: Bool) {
+        guard let serverPaperRunnerService else { return }
+        state.serverRunnerConnectionState = .refreshing
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let control = try await serverPaperRunnerService.updateControl(enabled: enabled)
+                if let status = self.state.serverRunnerStatus {
+                    self.state.serverRunnerStatus = ServerPaperRunnerStatus(
+                        updatedAt: status.updatedAt,
+                        mode: status.mode,
+                        symbols: status.symbols,
+                        latestClosedCandleOpenTime: status.latestClosedCandleOpenTime,
+                        latestClosedCandleOpenTimeDate: status.latestClosedCandleOpenTimeDate,
+                        savedCandles: status.savedCandles,
+                        evaluations: status.evaluations,
+                        skippedEvaluations: status.skippedEvaluations,
+                        signals: status.signals,
+                        failures: status.failures,
+                        storagePath: status.storagePath,
+                        control: control
+                    )
+                }
+                await self.loadServerRunnerSnapshot()
+            } catch {
+                self.state.serverRunnerConnectionState = .failed(message: self.sanitizedError(error))
+            }
         }
     }
 
@@ -1417,6 +1462,39 @@ final class DashboardViewModel: ObservableObject {
         refreshVisibleLogs()
     }
 
+    private func startServerRunnerPolling() {
+        guard serverPaperRunnerService != nil else { return }
+        serverRunnerPollingTask?.cancel()
+        serverRunnerPollingTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await self.loadServerRunnerSnapshot()
+                do {
+                    try await Task.sleep(nanoseconds: 15_000_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func loadServerRunnerSnapshot() async {
+        guard let serverPaperRunnerService else { return }
+        state.serverRunnerConnectionState = .refreshing
+        do {
+            async let status = serverPaperRunnerService.fetchStatus()
+            async let logs = serverPaperRunnerService.fetchLogs(limit: 50)
+            let snapshot = try await status
+            let serverLogs = try await logs
+            state.serverRunnerStatus = snapshot
+            state.serverRunnerLogs = serverLogs
+            state.serverRunnerConnectionState = .connected(checkedAt: clock.now)
+            refreshVisibleLogs()
+        } catch {
+            state.serverRunnerConnectionState = .failed(message: sanitizedError(error))
+        }
+    }
+
     private func appendAutomationLog(_ log: TradeEventLog) {
         do {
             try logStore.append(log)
@@ -1451,7 +1529,7 @@ final class DashboardViewModel: ObservableObject {
         if state.positions.isEmpty == false {
             state.positions = positionsWithChartProtectionLevels(state.positions)
         }
-        state.recentLogs = (persistentLogs + sessionLogs)
+        state.recentLogs = (persistentLogs + state.serverRunnerLogs + sessionLogs)
             .sorted { $0.timestamp < $1.timestamp }
     }
 
@@ -1770,6 +1848,12 @@ final class DashboardViewModel: ObservableObject {
             return "시작금액은 0보다 커야 합니다. 현재 \(initialCapital.riskText)"
         case let error as SQLiteDatabaseError:
             return "SQLite database error: \(error.description)"
+        case ServerPaperRunnerClientError.invalidURL:
+            return "Server runner URL is invalid."
+        case ServerPaperRunnerClientError.httpStatus(let status):
+            return "Server runner request failed with HTTP \(status)."
+        case ServerPaperRunnerClientError.emptyResponse:
+            return "Server runner returned an empty response."
         default:
             let nsError = error as NSError
             if nsError.domain == NSURLErrorDomain {

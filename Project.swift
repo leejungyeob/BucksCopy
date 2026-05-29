@@ -19,7 +19,10 @@ let project = Project(
                 "CFBundleDisplayName": "BucksCopy",
                 "CFBundleShortVersionString": "0.1.0",
                 "CFBundleVersion": "1",
-                "LSMinimumSystemVersion": "14.0"
+                "LSMinimumSystemVersion": "14.0",
+                "NSAppTransportSecurity": [
+                    "NSAllowsLocalNetworking": true
+                ]
             ]),
             sources: ["Sources/BucksCopy/**"],
             dependencies: [],

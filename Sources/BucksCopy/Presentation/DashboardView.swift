@@ -58,6 +58,8 @@ struct DashboardView: View {
             onMaximumRiskPerTradeChange: viewModel.updateMaximumRiskPerTrade,
             onMaximumPositionMarginChange: viewModel.updateMaximumPositionMargin,
             onSignalConfirmationModeChange: viewModel.updateSignalConfirmationMode,
+            onRefreshServerRunner: viewModel.refreshServerRunnerStatus,
+            onSetServerRunnerEnabled: viewModel.setServerPaperRunnerEnabled,
             onStartLive: viewModel.startLiveBot,
             onStopLive: viewModel.stopLiveBot
         )
@@ -74,7 +76,10 @@ struct DashboardView: View {
             activeStrategyRoutes: activeStrategyRoutes,
             strategyConfig: viewModel.state.strategyConfig,
             selectedLeverageRange: viewModel.selectedLeverageRange,
-            runState: viewModel.state.runState
+            runState: viewModel.state.runState,
+            serverRunnerEndpoint: viewModel.state.serverRunnerEndpoint,
+            serverRunnerConnectionState: viewModel.state.serverRunnerConnectionState,
+            serverRunnerStatus: viewModel.state.serverRunnerStatus
         )
     }
 
@@ -473,6 +478,9 @@ private struct DashboardLeftSnapshot: Equatable {
     let strategyConfig: StrategyConfig
     let selectedLeverageRange: ClosedRange<Int>
     let runState: StrategyRunState
+    let serverRunnerEndpoint: String
+    let serverRunnerConnectionState: ServerRunnerConnectionState
+    let serverRunnerStatus: ServerPaperRunnerStatus?
 
     var isConnected: Bool {
         if case .connected = credentialStatus {
@@ -492,6 +500,8 @@ private struct DashboardLeftColumn: View, Equatable {
     let onMaximumRiskPerTradeChange: (Decimal) -> Void
     let onMaximumPositionMarginChange: (Decimal) -> Void
     let onSignalConfirmationModeChange: (SignalConfirmationMode) -> Void
+    let onRefreshServerRunner: () -> Void
+    let onSetServerRunnerEnabled: (Bool) -> Void
     let onStartLive: () -> Void
     let onStopLive: () -> Void
 
@@ -527,6 +537,13 @@ private struct DashboardLeftColumn: View, Equatable {
                     onMaximumRiskPerTradeChange: onMaximumRiskPerTradeChange,
                     onMaximumPositionMarginChange: onMaximumPositionMarginChange,
                     onSignalConfirmationModeChange: onSignalConfirmationModeChange
+                )
+                ServerRunnerPanel(
+                    endpoint: snapshot.serverRunnerEndpoint,
+                    connectionState: snapshot.serverRunnerConnectionState,
+                    status: snapshot.serverRunnerStatus,
+                    onRefresh: onRefreshServerRunner,
+                    onSetEnabled: onSetServerRunnerEnabled
                 )
                 BotControlPanel(
                     runState: snapshot.runState,

@@ -47,6 +47,13 @@ curl -X POST http://127.0.0.1:8787/control \
   -d '{"enabled":false}'
 ```
 
+To point the macOS app at the server without exposing the API publicly, keep an
+SSH tunnel open on the Mac:
+
+```bash
+ssh -L 8787:127.0.0.1:8787 ubuntu@<server-public-ip>
+```
+
 If the mounted data/log folders were created by an earlier container attempt
 with restrictive permissions, reset ownership once:
 

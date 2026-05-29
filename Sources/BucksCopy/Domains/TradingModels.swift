@@ -589,6 +589,10 @@ struct DashboardState: Equatable {
     var liveAutomationSession: LiveAutomationSession?
     var automationLogs: [TradeEventLog] = []
     var recentLogs: [TradeEventLog] = []
+    var serverRunnerEndpoint: String = ""
+    var serverRunnerConnectionState: ServerRunnerConnectionState = .idle
+    var serverRunnerStatus: ServerPaperRunnerStatus?
+    var serverRunnerLogs: [TradeEventLog] = []
 
     var isConnected: Bool {
         if case .connected = credentialStatus {

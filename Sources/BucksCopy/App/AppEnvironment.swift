@@ -34,6 +34,7 @@ struct AppEnvironment {
                 strategyRegistry: strategyRegistry,
                 logStore: logStore
             )
+            let serverRunnerClient = Self.isRunningTests ? nil : Self.makeServerRunnerClient()
             let liveExecutor = LiveTradeExecutor(
                 orderPlacer: liveOrderClient,
                 leverageSetter: liveOrderClient,
@@ -56,6 +57,8 @@ struct AppEnvironment {
                 logStore: logStore,
                 signalEvaluator: signalEvaluator,
                 liveExecutor: liveExecutor,
+                serverPaperRunnerService: serverRunnerClient,
+                serverPaperRunnerEndpoint: serverRunnerClient?.endpointText ?? "",
                 strategyRegistry: strategyRegistry
             )
         } catch {
@@ -70,6 +73,7 @@ struct AppEnvironment {
                 strategyRegistry: strategyRegistry,
                 logStore: fallbackLogStore
             )
+            let serverRunnerClient = Self.isRunningTests ? nil : Self.makeServerRunnerClient()
             let liveExecutor = LiveTradeExecutor(
                 orderPlacer: fallbackLiveOrderClient,
                 leverageSetter: fallbackLiveOrderClient,
@@ -85,9 +89,18 @@ struct AppEnvironment {
                 logStore: fallbackLogStore,
                 signalEvaluator: signalEvaluator,
                 liveExecutor: liveExecutor,
+                serverPaperRunnerService: serverRunnerClient,
+                serverPaperRunnerEndpoint: serverRunnerClient?.endpointText ?? "",
                 strategyRegistry: strategyRegistry
             )
         }
+    }
+
+    private static func makeServerRunnerClient() -> ServerPaperRunnerHTTPClient {
+        let endpoint = ProcessInfo.processInfo.environment["BUCKS_COPY_SERVER_API_BASE_URL"] ??
+            "http://127.0.0.1:8787"
+        let url = URL(string: endpoint) ?? URL(string: "http://127.0.0.1:8787")!
+        return ServerPaperRunnerHTTPClient(baseURL: url)
     }
 
     private static func databasePath() throws -> String {
