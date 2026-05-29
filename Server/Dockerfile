@@ -4,6 +4,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --no-cache-dir cryptography==42.0.8
+
 WORKDIR /app
 COPY Server/PaperRunnerPython/paper_runner.py /app/paper_runner.py
 RUN mkdir -p /var/lib/bucks-copy /var/log/bucks-copy

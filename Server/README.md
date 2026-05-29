@@ -4,7 +4,8 @@
 
 - 현재 서버 단계는 실거래가 아니라 `paper-runner`입니다.
 - runner는 Bitget public REST로 `15m` candle만 받아 공용 JSON 파일에 저장하고, 사용자별 paper 상태/control/log를 분리합니다.
-- Bitget API key, secret, passphrase는 `/auth/bitget/login` 후 서버 메모리에만 두고, 디스크/env/log에는 저장하지 않습니다.
+- Bitget API key, secret, passphrase는 `/auth/bitget/login` 후 서버 메모리에 올리고, `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY`가 설정된 운영 환경에서는 AES-256-GCM으로 암호화해 사용자별 파일에 저장합니다.
+- Bitget credential 원문, 서명 payload, private response 원문은 디스크/env/log에 저장하지 않습니다.
 
 ## Paper Runner
 
@@ -94,6 +95,27 @@ docker compose --env-file .env -f Server/docker-compose.paper.yml up -d --build
 curl -H 'Authorization: Bearer <token>' http://127.0.0.1:8787/users/me/status
 ```
 
+For always-on server use, set a high-entropy credential encryption key in
+`.env` before accepting Bitget logins:
+
+```bash
+python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+```
+
+```text
+BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY=<generated-random-key>
+```
+
+When this key is set, `/auth/bitget/login` stores each Bitget credential as
+`users/{userID}/bitget-credential.enc.json` using AES-256-GCM. The runner
+restores those credentials on container restart so account/position reads and
+future server-side automation can continue without the Mac app staying open.
+The `.env` file and encrypted credential files must stay on the server and must
+not be committed.
+
 The macOS app reads:
 
 ```bash
@@ -168,12 +190,12 @@ curl -X POST https://api.example.com/auth/bitget/login \
 
 The runner validates the credential with Bitget USDT-M Futures account read,
 creates or reuses a user-scoped bearer token in `auth-users.json`, and returns
-that app session token. The Bitget secret and passphrase are not written to
-disk by this paper runner.
+that app session token. If `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` is set, the
+runner also writes an AES-256-GCM encrypted credential record under the user
+directory and restores it on restart. Without that key, credentials remain
+memory-only.
 
-After a successful login, the runner keeps the Bitget API key, secret, and
-passphrase in process memory only. While that container process is alive, the
-app can use the server session token to read:
+After a successful login, the app can use the server session token to read:
 
 ```bash
 curl https://api.example.com/users/me/account \
@@ -189,12 +211,14 @@ curl -X DELETE https://api.example.com/users/me/session \
   -H 'Authorization: Bearer <token>'
 ```
 
-Logout removes the bearer token and the in-memory Bitget credential for that
-user. User-scoped paper runner files remain on disk.
+Logout removes the bearer token, the in-memory Bitget credential, and the
+encrypted credential file for that user. User-scoped paper runner files remain
+on disk.
 
-If the container restarts, `auth-users.json` can still recognize the app session
-token, but the in-memory Bitget credential is gone. In that case private
-account/position reads return `409` and the app asks for Bitget login again.
+If `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` is not configured and the container
+restarts, `auth-users.json` can still recognize the app session token, but the
+in-memory Bitget credential is gone. In that case private account/position reads
+return `409` and the app asks for Bitget login again.
 
 If the mounted data/log folders were created by an earlier container attempt
 with restrictive permissions, reset ownership once:
@@ -208,6 +232,7 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 
 - `candles-{symbol}-15m.json`: normalized Bitget public OHLCV candles
 - `auth-users.json`: optional bearer-token user mapping, not committed
+- `users/{userID}/bitget-credential.enc.json`: optional AES-256-GCM encrypted Bitget credential, not committed
 - `users/{userID}/trade-event-logs.jsonl`: user paper signal and heartbeat records
 - `users/{userID}/paper-runner-status.json`: latest user paper runner status
 - `users/{userID}/paper-runner-evaluations.jsonl`: duplicate evaluation guard by `symbol/timeframe/strategy/openTime`
@@ -217,10 +242,11 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 
 - Private Bitget REST is limited to login validation plus read-only account and
   position snapshots for the authenticated user.
-- Bitget API key, secret, and passphrase are process-memory only and disappear
-  on container restart.
+- Bitget API key, secret, and passphrase are process-memory only unless
+  `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` enables AES-256-GCM encrypted
+  user-scoped credential storage.
 - `DELETE /users/me/session` revokes the app bearer token and clears the
-  process-memory Bitget credential for that user.
+  process-memory and encrypted Bitget credential for that user.
 - No WebSocket private login.
 - No order placement.
 - No Bitget API key/secret/passphrase disk, env, or log storage.

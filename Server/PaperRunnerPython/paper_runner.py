@@ -22,6 +22,11 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except ImportError:
+    AESGCM = None
+
 getcontext().prec = 34
 
 TIMEFRAME = "15m"
@@ -32,6 +37,7 @@ DEFAULT_API_HOST = "0.0.0.0"
 DEFAULT_API_PORT = 8787
 DEFAULT_USER_ID = "local-admin"
 USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+CREDENTIAL_ENCRYPTION_ALGORITHM = "AES-256-GCM"
 
 
 def dec(value: str | int | float | Decimal) -> Decimal:
@@ -120,6 +126,22 @@ def read_json_file(path: Path, default: Any) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return default
+
+
+def encryption_key_from_env(value: str | None) -> bytes | None:
+    if value is None or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        padded = text + "=" * (-len(text) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+        if len(decoded) == 32:
+            return decoded
+    except Exception:
+        pass
+    if len(text) < 32:
+        raise ValueError("BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY must be at least 32 characters.")
+    return hashlib.sha256(text.encode("utf-8")).digest()
 
 
 @dataclass(frozen=True)
@@ -754,6 +776,11 @@ class PaperRunner:
             os.environ.get("BUCKS_COPY_AUTH_USERS_PATH", str(self.data_dir / "auth-users.json"))
         )
         self.require_auth = parse_bool(os.environ.get("BUCKS_COPY_REQUIRE_AUTH"), default=False)
+        self.credential_encryption_key = encryption_key_from_env(
+            os.environ.get("BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY")
+        )
+        if self.credential_encryption_key is not None and AESGCM is None:
+            raise ValueError("cryptography package is required for persistent credential encryption.")
         self.lock = threading.RLock()
         self.bitget_credentials_by_user_id: dict[str, BitgetCredential] = {}
         self.auth_tokens_by_user_id = self.load_auth_users()
@@ -762,6 +789,7 @@ class PaperRunner:
         self.migrate_legacy_default_user_files()
         for user_id in self.user_ids:
             self.ensure_user_storage(user_id)
+            self.restore_persistent_credential(user_id)
         self.evaluated_keys_by_user = {user_id: self.load_evaluated_keys(user_id) for user_id in self.user_ids}
 
     @staticmethod
@@ -818,6 +846,10 @@ class PaperRunner:
         digest = hashlib.sha256(api_key.strip().encode("utf-8")).hexdigest()[:24]
         return validate_user_id(f"bitget-{digest}")
 
+    @property
+    def persistent_credential_enabled(self) -> bool:
+        return self.credential_encryption_key is not None
+
     def login_with_bitget(self, api_key: str, secret_key: str, passphrase: str) -> dict[str, Any]:
         credential = BitgetCredential(
             api_key=api_key,
@@ -835,11 +867,12 @@ class PaperRunner:
                 self.user_ids = sorted(set(self.user_ids + [user_id]))
             self.ensure_user_storage(user_id)
             self.evaluated_keys_by_user.setdefault(user_id, self.load_evaluated_keys(user_id))
+            self.save_persistent_credential(user_id, credential)
             self.save_auth_users()
         return {
             "authToken": token,
             "mode": "paper",
-            "credentialScope": "memory",
+            "credentialScope": "encrypted" if self.persistent_credential_enabled else "memory",
             "redactedIdentifier": credential.redacted_identifier,
             "userID": user_id,
             "accounts": accounts,
@@ -851,7 +884,89 @@ class PaperRunner:
             self.auth_tokens_by_user_id.pop(user_id, None)
             self.bitget_credentials_by_user_id.pop(user_id, None)
             self.auth_required = self.require_auth or bool(self.auth_tokens_by_user_id)
+            self.delete_persistent_credential(user_id)
             self.save_auth_users()
+
+    def credential_record_path(self, user_id: str) -> Path:
+        return self.user_dir(user_id) / "bitget-credential.enc.json"
+
+    def save_persistent_credential(self, user_id: str, credential: BitgetCredential) -> None:
+        if not self.persistent_credential_enabled:
+            return
+        assert self.credential_encryption_key is not None
+        assert AESGCM is not None
+        plaintext = json.dumps(
+            {
+                "apiKey": credential.api_key,
+                "secretKey": credential.secret_key,
+                "passphrase": credential.passphrase,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        nonce = secrets.token_bytes(12)
+        ciphertext = AESGCM(self.credential_encryption_key).encrypt(
+            nonce,
+            plaintext,
+            user_id.encode("utf-8"),
+        )
+        record = {
+            "version": 1,
+            "algorithm": CREDENTIAL_ENCRYPTION_ALGORITHM,
+            "nonce": base64.urlsafe_b64encode(nonce).decode("ascii"),
+            "ciphertext": base64.urlsafe_b64encode(ciphertext).decode("ascii"),
+            "redactedIdentifier": credential.redacted_identifier,
+            "updatedAt": iso(now_utc()),
+        }
+        path = self.credential_record_path(user_id)
+        self.atomic_write_json(path, record, pretty=True)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+    def restore_persistent_credential(self, user_id: str) -> None:
+        if not self.persistent_credential_enabled:
+            return
+        path = self.credential_record_path(user_id)
+        if not path.exists():
+            return
+        try:
+            credential = self.load_persistent_credential(user_id)
+        except Exception:
+            return
+        self.bitget_credentials_by_user_id[user_id] = credential
+
+    def load_persistent_credential(self, user_id: str) -> BitgetCredential:
+        if not self.persistent_credential_enabled:
+            raise BitgetLoginError("Persistent credential storage is disabled.")
+        assert self.credential_encryption_key is not None
+        assert AESGCM is not None
+        payload = json.loads(self.credential_record_path(user_id).read_text(encoding="utf-8"))
+        if payload.get("version") != 1 or payload.get("algorithm") != CREDENTIAL_ENCRYPTION_ALGORITHM:
+            raise ValueError("unsupported encrypted credential record")
+        nonce = base64.urlsafe_b64decode(str(payload["nonce"]).encode("ascii"))
+        ciphertext = base64.urlsafe_b64decode(str(payload["ciphertext"]).encode("ascii"))
+        plaintext = AESGCM(self.credential_encryption_key).decrypt(
+            nonce,
+            ciphertext,
+            user_id.encode("utf-8"),
+        )
+        record = json.loads(plaintext.decode("utf-8"))
+        api_key = str(record.get("apiKey", "")).strip()
+        secret_key = str(record.get("secretKey", "")).strip()
+        passphrase = str(record.get("passphrase", "")).strip()
+        if not api_key or not secret_key or not passphrase:
+            raise ValueError("encrypted credential record is incomplete")
+        return BitgetCredential(api_key=api_key, secret_key=secret_key, passphrase=passphrase)
+
+    def delete_persistent_credential(self, user_id: str) -> None:
+        path = self.credential_record_path(user_id)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
     def fetch_user_accounts(self, user_id: str) -> list[dict[str, Any]]:
         return self.fetch_bitget_accounts(self.credential_for_user(user_id))

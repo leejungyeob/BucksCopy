@@ -722,3 +722,23 @@
   - 사용자는 앱에서 명시적으로 서버 session을 폐기할 수 있습니다.
   - revoke 이후 기존 bearer token으로 `/users/me/*` 요청을 보내면 401로 실패해야 합니다.
   - server-side live execution 전에는 여전히 encrypted credential storage, account/position polling policy, protection order state machine이 별도 필요합니다.
+
+## 0041. Server Bitget Credential Uses AES-GCM Persistent Storage
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 서버 runner를 붙이는 주 목적은 Mac 앱을 꺼도 서버가 사용자별 자동매매 상태 확인과 이후 live execution을 계속 수행하는 것입니다.
+  - memory-only credential은 배포, Docker restart, host reboot 이후 account/position read와 향후 live execution을 이어갈 수 없습니다.
+  - plain credential 저장은 금지이며, encryption key와 encrypted credential 파일 경계를 분리해야 합니다.
+- Decision:
+  - 서버는 `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY`가 설정된 경우 Bitget API key/secret/passphrase를 사용자별 `bitget-credential.enc.json`에 AES-256-GCM으로 저장합니다.
+  - encrypted record는 `version`, `algorithm`, `nonce`, `ciphertext`, `redactedIdentifier`, `updatedAt`만 포함하며 plaintext credential을 포함하지 않습니다.
+  - AES-GCM additional authenticated data는 userID를 사용해 credential file과 user scope가 섞이지 않게 합니다.
+  - 서버 부팅 시 auth user별 encrypted credential을 복호화해 process memory에 복원합니다. 복호화 실패 시 secret을 로그로 출력하지 않고 기존 409 재로그인 경계로 남깁니다.
+  - encryption key가 없으면 기존 memory-only 동작을 유지합니다.
+  - logout/revoke는 bearer token, process-memory credential, encrypted credential file을 모두 제거합니다.
+- Consequences:
+  - 서버 재시작 후에도 encrypted credential과 token이 남아 있으면 account/position read를 복원할 수 있습니다.
+  - `.env` encryption key가 유출되면 encrypted credential 파일을 복호화할 수 있으므로 서버 파일 권한과 backup 경계가 중요해졌습니다.
+  - live execution 전에는 여전히 account/position polling policy, explicit live consent, duplicate runner lock, exchange-side TP/SL protection, fail-closed close path가 필요합니다.

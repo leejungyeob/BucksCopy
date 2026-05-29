@@ -21,7 +21,8 @@
 - API key, secret, passphrase가 코드/문서/fixture/log에 하드코딩되지 않았는가
 - `.env`, local config, sample 값이 실제 credential처럼 보이지 않는가
 - 서명 payload, signature, raw header가 로그에 남지 않는가
-- server paper runner는 `/auth/bitget/login` 이후 Bitget API key/secret/passphrase를 process memory에만 보관하고 disk/env/log에 남기지 않는가
+- server paper runner는 `/auth/bitget/login` 이후 Bitget API key/secret/passphrase를 process memory에 올리고, persistent mode에서는 AES-256-GCM encrypted user file에만 저장하는가
+- server credential encryption key는 `.env`/secret manager 경계에만 있고 코드/문서/로그에 남지 않는가
 - macOS 앱의 server runner bearer token은 Keychain-facing Data adapter에만 저장되고 UI/log에는 redacted token만 표시되는가
 - public server runner API는 HTTPS reverse proxy 뒤에서만 공개되고, raw `8787` HTTP port가 internet-open 상태가 아닌가
 - public server runner API는 `BUCKS_COPY_REQUIRE_AUTH=true`를 강제하며 token 없는 `/users/me/*` 요청이 401로 실패하는가
@@ -31,8 +32,9 @@
 - credential 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
 - server runner endpoint/token 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
 - macOS 앱의 서버 로그인 flow가 Bitget secret/passphrase를 Keychain에 저장하지 않고 server session token만 저장하는가
-- 로그아웃/Disconnect가 서버 session token을 revoke하고 process-memory Bitget credential을 제거하는가
-- server runner 재시작 후 in-memory Bitget credential이 사라진 상태에서 account/position read가 409로 실패하고 앱이 재로그인을 요구하는가
+- 로그아웃/Disconnect가 서버 session token을 revoke하고 process-memory/encrypted Bitget credential을 제거하는가
+- encryption key가 없는 server runner 재시작 후 in-memory Bitget credential이 사라진 상태에서 account/position read가 409로 실패하고 앱이 재로그인을 요구하는가
+- encryption key가 있는 server runner 재시작 후 encrypted credential이 복원되어 account/position read가 유지되는가
 - 로그아웃/credential 삭제 시 관련 local state가 정리되는가
 - Live execution record와 민감 주문/account data가 구분되는가
 - local market history DB에 API key, secret, passphrase, signature, raw private response가 저장되지 않는가
