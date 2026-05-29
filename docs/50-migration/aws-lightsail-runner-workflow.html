@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BucksCopy AWS Lightsail Runner Workflow</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #18202f;
+      --muted: #657083;
+      --line: #dfe4ed;
+      --blue: #2563eb;
+      --blue-soft: #eaf1ff;
+      --green: #16834f;
+      --green-soft: #e8f7ef;
+      --amber: #a35f00;
+      --amber-soft: #fff3d7;
+      --orange: #b44900;
+      --orange-soft: #ffe7d3;
+      --red: #b42318;
+      --red-soft: #fde7e4;
+      --gray-soft: #eef2f7;
+      --shadow: 0 12px 30px rgba(24, 32, 47, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 24px;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    aside {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    aside h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+    }
+
+    nav {
+      display: grid;
+      gap: 8px;
+    }
+
+    nav a {
+      display: block;
+      padding: 8px 10px;
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    nav a:hover {
+      background: var(--blue-soft);
+      text-decoration: none;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    header,
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+      padding: 28px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.2;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 34px;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 22px;
+      margin-bottom: 16px;
+    }
+
+    h3 {
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    ul,
+    ol {
+      margin: 0;
+      padding-left: 22px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    code {
+      background: var(--gray-soft);
+      border-radius: 5px;
+      padding: 2px 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow: auto;
+      background: #101828;
+      color: #f2f4f7;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 12px 0 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .lead {
+      color: var(--muted);
+      font-size: 16px;
+      max-width: 860px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 10px;
+      white-space: nowrap;
+    }
+
+    .done {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .next {
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .low {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .medium {
+      color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .high {
+      color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .critical {
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: #fff;
+    }
+
+    .card p:last-child {
+      margin-bottom: 0;
+    }
+
+    .callout {
+      border-left: 4px solid var(--blue);
+      background: var(--blue-soft);
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin-top: 14px;
+    }
+
+    .warning {
+      border-left-color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .danger {
+      border-left-color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .node {
+      position: relative;
+      min-height: 112px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .node:not(:last-child)::after {
+      content: ">";
+      position: absolute;
+      right: -10px;
+      top: 42px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 800;
+      z-index: 2;
+    }
+
+    .node span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 6px;
+    }
+
+    .timeline {
+      position: relative;
+      display: grid;
+      gap: 14px;
+    }
+
+    .phase {
+      display: grid;
+      grid-template-columns: 126px minmax(0, 1fr);
+      gap: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 16px;
+    }
+
+    .phase-time {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .phase-title {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px 14px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: #f2f5f9;
+      color: #344054;
+      font-size: 13px;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .status-list {
+      display: grid;
+      gap: 10px;
+      padding-left: 0;
+      list-style: none;
+    }
+
+    .status-list li {
+      display: grid;
+      grid-template-columns: 84px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fff;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .shell {
+        grid-template-columns: 1fr;
+        padding: 16px;
+      }
+
+      aside {
+        position: static;
+      }
+
+      .grid.two,
+      .grid.three,
+      .workflow {
+        grid-template-columns: 1fr;
+      }
+
+      .node:not(:last-child)::after {
+        content: "v";
+        right: 50%;
+        top: auto;
+        bottom: -14px;
+        transform: translateX(50%);
+      }
+
+      .phase {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <h2>Jump Links</h2>
+      <nav aria-label="문서 이동">
+        <a href="#summary">결론</a>
+        <a href="#done">지금까지 한 일</a>
+        <a href="#next">바로 다음 작업</a>
+        <a href="#workflow">운영 워크플로우</a>
+        <a href="#timeline">타임라인</a>
+        <a href="#risks">리스크 테이블</a>
+        <a href="#validation">검증과 롤백</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header id="top">
+        <h1>BucksCopy 서버 러너 전환 계획</h1>
+        <p class="lead">
+          목표는 Mac을 꺼도 15분봉 자동매매 판단과 주문 관리가 계속 실행되도록,
+          macOS 앱을 실거래 실행 주체에서 서버 상태판/제어 클라이언트로 바꾸는 것입니다.
+        </p>
+        <div class="meta">
+          <span class="badge done">완료: AWS 계정 안전장치</span>
+          <span class="badge done">완료: 15m 전용 앱 런타임 정리</span>
+          <span class="badge next">다음: paper runner 배포</span>
+          <span class="badge critical">금지: Bitget 실거래 키 선등록</span>
+        </div>
+      </header>
+
+      <section id="summary">
+        <h2>결론</h2>
+        <div class="grid two">
+          <div class="card">
+            <h3>지금 다음에 할 일</h3>
+            <p>
+              Lightsail 서버 기본 세팅은 끝났습니다. 다음은 repo의 server paper runner를 서버에 올려
+              15분봉 candle 수집, closed candle 전략 평가, heartbeat/status 저장을 검증하는 단계입니다.
+              아직 Bitget API key, secret, passphrase는 서버에 넣지 않습니다.
+            </p>
+          </div>
+          <div class="card">
+            <h3>앱 수정 순서</h3>
+            <p>
+              앱부터 뜯지 않습니다. 서버에 paper runner와 상태 API가 먼저 생긴 뒤,
+              앱을 서버 상태 조회/ON-OFF 클라이언트로 바꿉니다.
+            </p>
+          </div>
+        </div>
+        <div class="callout warning">
+          실거래 전환은 마지막 단계입니다. 서버 러너가 15분봉 candle, heartbeat, status, restart recovery를 안정적으로 처리하는지 먼저 확인해야 합니다.
+        </div>
+      </section>
+
+      <section id="done">
+        <h2>지금까지 한 일</h2>
+        <ul class="status-list">
+          <li>
+            <span class="badge done">완료</span>
+            <div>AWS 계정을 새로 만들고 Root user MFA를 설정했습니다.</div>
+          </li>
+          <li>
+            <span class="badge done">완료</span>
+            <div>AWS Budget 알림을 설정해 예상치 못한 과금 리스크를 줄였습니다.</div>
+          </li>
+          <li>
+            <span class="badge done">완료</span>
+            <div>Lightsail 서버를 만들고 Static IPv4를 붙였습니다.</div>
+          </li>
+          <li>
+            <span class="badge done">완료</span>
+            <div>IPv4 firewall은 SSH 22와 HTTPS 443 중심으로 정리했습니다.</div>
+          </li>
+          <li>
+            <span class="badge done">완료</span>
+              <div>IPv6는 현재 필요하지 않아 꺼두는 방향으로 정리했습니다.</div>
+          </li>
+          <li>
+            <span class="badge done">완료</span>
+            <div>Ubuntu 내부 UFW 방화벽, 기본 패키지, Docker, Docker Compose, 서버 작업 폴더를 준비했습니다.</div>
+          </li>
+          <li>
+            <span class="badge done">완료</span>
+            <div>
+              앱 런타임은 15분봉 중심으로 단순화했습니다. Dashboard/Live 경로는 15m closed candle 기준이며,
+              higher timeframe REST/WS 런타임 의존은 제거하는 방향으로 정리했습니다.
+            </div>
+          </li>
+          <li>
+            <span class="badge done">검증</span>
+            <div>
+              macOS test suite는 113개 테스트 기준으로 통과했고, repo check script와 diff whitespace check도 통과했습니다.
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section id="next">
+        <h2>바로 다음 작업</h2>
+        <div class="grid two">
+          <div class="card">
+            <h3>1. Paper runner 파일 배포</h3>
+            <ol>
+              <li>repo의 <code>Server/</code>, <code>Sources/</code>, <code>Package.swift</code>를 서버 작업 폴더에 올립니다.</li>
+              <li>서버의 <code>~/bucks-copy-server/app</code> 아래에서 Docker Compose를 실행합니다.</li>
+              <li>첫 실행은 paper mode이며 private Bitget API를 호출하지 않습니다.</li>
+            </ol>
+            <pre>cd ~/bucks-copy-server/app/BucksCopy
+cp Server/env.paper.example .env
+docker compose -f Server/docker-compose.paper.yml up -d --build</pre>
+          </div>
+
+          <div class="card">
+            <h3>2. Runner 상태 확인</h3>
+            <ol>
+              <li>Docker 로그에서 15m candle 저장과 paper 평가 summary를 확인합니다.</li>
+              <li>SQLite 파일이 <code>/home/ubuntu/bucks-copy-server/data</code> 아래 생성되는지 봅니다.</li>
+              <li>24시간 동안 heartbeat와 candle update가 끊기지 않는지 검증합니다.</li>
+            </ol>
+            <pre>docker compose -f Server/docker-compose.paper.yml logs -f
+ls -lah ~/bucks-copy-server/data</pre>
+          </div>
+        </div>
+
+        <div class="callout danger">
+          이 단계에서 AWS access key, Bitget API key, secret, passphrase를 입력하지 않습니다.
+          서버 기본 세팅과 paper runner 준비가 끝난 뒤 별도 secret 저장 절차로 옮깁니다.
+        </div>
+      </section>
+
+      <section id="workflow">
+        <h2>운영 워크플로우</h2>
+        <div class="workflow" aria-label="서버 러너 운영 흐름">
+          <div class="node">
+            <h3>macOS App</h3>
+            <span>상태 조회, 거래 기록, 자동매매 ON/OFF</span>
+          </div>
+          <div class="node">
+            <h3>Backend API</h3>
+            <span>관리자 토큰 확인, 설정 저장, 러너 제어</span>
+          </div>
+          <div class="node">
+            <h3>Trading Runner</h3>
+            <span>15m closed candle 수집, 전략 판단, 주문 의도 생성</span>
+          </div>
+          <div class="node">
+            <h3>Bitget</h3>
+            <span>USDT-M Futures candle, order, position, protection</span>
+          </div>
+          <div class="node">
+            <h3>DB / Logs</h3>
+            <span>heartbeat, status, signal, trade, protection 상태</span>
+          </div>
+        </div>
+
+        <div class="grid three" style="margin-top: 16px;">
+          <div class="card">
+            <h3>데이터 기준</h3>
+            <p>런타임 전략 판단은 15분봉 closed candle만 사용합니다. 진행 중인 candle은 진입 판단에 쓰지 않습니다.</p>
+          </div>
+          <div class="card">
+            <h3>앱 책임</h3>
+            <p>앱은 Bitget에 직접 주문하지 않고, 서버의 status/log/on-off API만 호출합니다.</p>
+          </div>
+          <div class="card">
+            <h3>서버 책임</h3>
+            <p>서버가 candle 수집, 전략 평가, 주문 실행, TP/SL 보호주문, fail-closed 처리를 소유합니다.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="timeline">
+        <h2>타임라인</h2>
+        <div class="timeline">
+          <div class="phase">
+            <div class="phase-time">Phase 0</div>
+            <div>
+              <div class="phase-title">
+                <h3>전략/데이터 단순화</h3>
+                <span class="badge done">완료</span>
+              </div>
+              <p>앱 런타임을 15분봉 closed candle 중심으로 정리했습니다. 백테스트와 실시간 판단 간극을 줄이는 방향입니다.</p>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-time">Phase 1</div>
+            <div>
+              <div class="phase-title">
+                <h3>AWS 계정과 Lightsail 기본 보안</h3>
+                <span class="badge done">완료</span>
+              </div>
+              <p>MFA, Budget, Static IPv4, 기본 firewall, IPv6 비활성화까지 마쳤습니다.</p>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-time">Phase 2</div>
+            <div>
+              <div class="phase-title">
+                <h3>서버 부트스트랩</h3>
+                <span class="badge next">다음</span>
+              </div>
+              <p>SSH 접속, OS 업데이트, Docker, 서버 디렉터리, system user, basic firewall hardening을 진행합니다.</p>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-time">Phase 3</div>
+            <div>
+              <div class="phase-title">
+                <h3>Paper Runner</h3>
+                <span class="badge medium">중요</span>
+              </div>
+              <p>15분봉 candle을 수집하고 전략 판단/로그/heartbeat만 남깁니다. 이 단계에서는 주문을 절대 보내지 않습니다.</p>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-time">Phase 4</div>
+            <div>
+              <div class="phase-title">
+                <h3>Status API</h3>
+                <span class="badge medium">중요</span>
+              </div>
+              <p>앱이 사용할 status, logs, positions, automation on/off API를 만듭니다. HTTPS와 관리자 토큰이 필요합니다.</p>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-time">Phase 5</div>
+            <div>
+              <div class="phase-title">
+                <h3>macOS 앱 클라이언트 전환</h3>
+                <span class="badge high">주의</span>
+              </div>
+              <p>앱의 직접 live loop와 Bitget 주문 책임을 서버 호출로 바꿉니다. 기존 로컬 실거래 경로는 paper 검증 전 제거하지 않습니다.</p>
+            </div>
+          </div>
+
+          <div class="phase">
+            <div class="phase-time">Phase 6</div>
+            <div>
+              <div class="phase-title">
+                <h3>소액 Live 검증</h3>
+                <span class="badge critical">고위험</span>
+              </div>
+              <p>Bitget API key를 withdrawal 권한 없이 만들고 Static IPv4 whitelist를 설정한 뒤, 최소 금액으로 보호주문과 fail-closed를 검증합니다.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="risks">
+        <h2>리스크 테이블</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>위험도</th>
+              <th>리스크</th>
+              <th>왜 문제인가</th>
+              <th>대응</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="badge critical">Critical</span></td>
+              <td>Bitget secret 노출</td>
+              <td>계정 탈취와 무단 주문으로 이어질 수 있습니다.</td>
+              <td>클라이언트/Firestore/로그에 저장 금지. 서버 secret 저장소에서만 사용.</td>
+            </tr>
+            <tr>
+              <td><span class="badge critical">Critical</span></td>
+              <td>TP/SL 보호주문 실패</td>
+              <td>진입 후 포지션이 무방비 상태로 남을 수 있습니다.</td>
+              <td>보호주문 최소 5회 재시도, 실패 시 경고 후 fail-closed 시장가 청산.</td>
+            </tr>
+            <tr>
+              <td><span class="badge high">High</span></td>
+              <td>러너 중복 실행</td>
+              <td>같은 signal에 대해 주문이 두 번 나갈 수 있습니다.</td>
+              <td>서버 단일 process lock, DB 기반 candle/signal idempotency 적용.</td>
+            </tr>
+            <tr>
+              <td><span class="badge high">High</span></td>
+              <td>서버 재시작 후 포지션 상태 불일치</td>
+              <td>서버가 실제 Bitget 포지션과 다른 상태로 판단할 수 있습니다.</td>
+              <td>부팅 시 Bitget position/order reconciliation을 먼저 수행.</td>
+            </tr>
+            <tr>
+              <td><span class="badge medium">Medium</span></td>
+              <td>15분봉 candle 누락</td>
+              <td>전략 판단 시점이 밀리거나 signal이 빠질 수 있습니다.</td>
+              <td>WebSocket 보조, 3초/주기 REST 재확인, startup gap fill 적용.</td>
+            </tr>
+            <tr>
+              <td><span class="badge medium">Medium</span></td>
+              <td>앱 ON/OFF 반영 지연</td>
+              <td>사용자가 끈 뒤에도 한 번 더 평가될 수 있습니다.</td>
+              <td>runner 평가 직전 automation state를 재조회하고 변경 이력을 기록.</td>
+            </tr>
+            <tr>
+              <td><span class="badge low">Low</span></td>
+              <td>HTTPS 인증서 만료</td>
+              <td>앱이 서버 API에 접속하지 못할 수 있습니다.</td>
+              <td>Caddy 또는 certbot 자동 갱신, 만료 알림 설정.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="validation">
+        <h2>검증과 롤백</h2>
+        <div class="grid two">
+          <div class="card">
+            <h3>검증 기준</h3>
+            <ul>
+              <li>서버가 24시간 이상 재시작 없이 heartbeat를 남깁니다.</li>
+              <li>15분봉 closed candle이 누락 없이 저장됩니다.</li>
+              <li>paper signal과 기존 백테스트 조건이 같은 candle boundary를 사용합니다.</li>
+              <li>ON/OFF 상태가 runner 평가 직전에 반영됩니다.</li>
+              <li>실거래 전 protection order와 fail-closed 시나리오 테스트가 통과합니다.</li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <h3>롤백 기준</h3>
+            <ul>
+              <li>서버 runner는 paper mode부터 시작합니다.</li>
+              <li>기존 macOS 앱 실거래 경로는 서버 검증 전까지 제거하지 않습니다.</li>
+              <li>서버 상태가 불안정하면 automation OFF로 두고 candle/log 수집만 유지합니다.</li>
+              <li>실거래 키 등록 전 단계에서는 서버를 삭제해도 거래 영향이 없습니다.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout">
+          다음 대화에서 필요한 것은 Lightsail 브라우저 SSH에 접속한 뒤 나온 Ubuntu 버전과 Static IPv4뿐입니다.
+          AWS 비밀번호, SSH private key, Bitget API secret은 공유하지 않습니다.
+        </div>
+        <p class="footer-note">
+          문서 작성일: 2026-05-29 / 범위: AWS Lightsail 기반 단일 사용자 BucksCopy server runner migration.
+        </p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

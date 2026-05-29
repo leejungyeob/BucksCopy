@@ -13,12 +13,13 @@
 | 문서/하네스 변경 | agent config/routing/trace checks |
 | macOS UI 변경 | 수동 스모크 + 상태/입력 validation |
 | Bitget REST/WS 변경 | DTO mapping, signature boundary, reconnect/backoff, error mapping |
-| dashboard 변경 | connect-only credential flow, auto-connect, timeframe switching, position table, Live start/stop consent gate, log persistence |
+| dashboard 변경 | connect-only credential flow, auto-connect, 15m timeframe enforcement, position table, Live start/stop consent gate, log persistence |
 | symbol catalog / Watchlist 변경 | `symbolStatus=normal`, `supportMarginCoins` contains `USDT`, Watchlist-only subscription |
 | local market history 변경 | upsert idempotency, startup gap fill, closed-candle-only read, no secret persistence |
+| server paper runner 변경 | Swift Package build, 15m public candle fetch, SQLite status/log persistence, duplicate paper evaluation guard, no private Bitget/order path |
 | credential storage 변경 | Security checklist + Keychain delete/read/write failure cases |
 | candle builder 변경 | 15m/1H/4H/12H/1D bucket, boundary timestamp, missing/out-of-order input |
-| strategy 변경 | built-in registry coverage, signal generation, no duplicate order intent, backtest closed-candle 기준, live forming-candle 기준 |
+| strategy 변경 | built-in registry coverage, signal generation, no duplicate order intent, backtest/live closed-candle 기준 |
 | backtest/strategy validation 변경 | engine-level deterministic tests, local-candle validation runner, risk-blocked signal count, primary result consistency |
 | live execution 변경 | decision log + Security + TDD Guide, DTO mapping, fill confirmation, position verification, protection retry, fail-closed close/skip |
 
@@ -33,12 +34,12 @@
 
 - API credential 입력 -> Connect -> Keychain 저장 -> 연결 테스트 성공 -> credential 원문 로그 없음
 - 앱 재시작 -> 저장된 credential 자동 연결 -> 계정 요약 UI 표시
-- Dashboard 시작 -> 로컬 candle seed/load -> 단일 SwiftUI Canvas price chart 표시 -> timeframe 변경 시 candle series 교체
+- Dashboard 시작 -> 로컬 15m candle seed/load -> 단일 SwiftUI Canvas price chart 표시 -> higher timeframe 선택 시 상태 변경 없음
 - Chart 조작 -> 확대/축소와 좌우/상하 drag pan이 candle viewport와 price range를 연속적으로 바꿈
 - USDT-M Futures catalog 로드 -> `normal` + `USDT` margin 중 BTCUSDT/ETHUSDT만 앱 catalog와 Watchlist에 보관
 - Watchlist 선택 -> 선택된 심볼만 WebSocket 구독 -> 선택 해제된 심볼은 strategy 대상 제외
-- REST candle backfill 성공 -> 같은 심볼/타임프레임 WebSocket candle 구독 시작 -> push candle이 SQLite와 chart state에 upsert
-- Dashboard 시작 -> BTCUSDT/ETHUSDT Watchlist의 `15m`, `1H`, `4H`, `12H`, `1D` 저장 상태 확인 -> 미완료 라우트만 REST backfill -> 완료 라우트는 재다운로드 없이 건너뜀
+- REST 15m candle backfill 성공 -> 같은 심볼의 15m WebSocket candle 구독 시작 -> push candle이 SQLite와 chart state에 upsert
+- Dashboard 시작 -> BTCUSDT/ETHUSDT Watchlist의 `15m` 저장 상태 확인 -> 미완료 라우트만 REST backfill -> 완료 라우트는 재다운로드 없이 건너뜀
 - Bitget position fixture -> read-only `PositionSnapshot` 매핑 -> live order API 호출 없음
 - WebSocket disconnect -> ping timeout 감지 -> backoff reconnect -> 중복 subscribe 없음
 - Watchlist가 단일 연결 권장선인 50채널을 초과 -> validation 실패 또는 명시적 연결 분리
@@ -51,14 +52,18 @@
 - 백테스트 중 포지션이 여러 candle 뒤에 청산 -> 그 사이 candle은 신규 진입 평가는 건너뛰되 이후 지표 history에는 포함
 - 백테스트 실행 중 전략/코인/시간봉 변경 -> 기존 작업 취소 -> 이전 결과가 새 설정에 섞이지 않음
 - 다중 전략 포트폴리오 설정 -> 한 시간봉에 여러 전략 활성화 -> closed candle마다 해당 symbol/timeframe의 활성 전략을 모두 평가
-- Live monitor 시작 -> 현재 차트가 15m를 보고 있어도 Watchlist의 `15m`, `1H`, `4H`, `12H`, `1D` 최신 completed/forming candle을 모두 평가 -> 추천 전략 신호가 있으면 Live 로그에 해당 시간봉이 기록
-- Live monitor 실행 -> 기본 3초 주기로 최신 completed/forming candle을 재평가 -> 30초 대기 없이 진행 중 candle 신호를 후보로 올림
-- Live monitor 시작 -> 현재 최신 completed candle key를 먼저 priming -> Start Live 전에 이미 닫힌 candle 신호는 실주문으로 쓰지 않음 -> 진행 중 forming candle 또는 다음 completed candle 신호부터 주문 후보 허용
+- Live monitor 시작 -> Watchlist의 `15m` 최신 completed candle만 평가 -> 추천 전략 신호가 있으면 Live 로그에 15m가 기록
+- Live monitor 실행 -> 기본 3초 주기로 REST/local 최신 completed 15m candle을 재확인 -> 진행 중 candle 신호는 후보로 올리지 않음
+- Live monitor 시작 -> 현재 최신 completed 15m candle key를 먼저 priming -> Start Live 전에 이미 닫힌 candle 신호는 실주문으로 쓰지 않음 -> 다음 completed 15m candle 신호부터 주문 후보 허용
+- Server paper runner 시작 -> Bitget public REST에서 Watchlist `15m` candle만 가져옴 -> SQLite `candles`에 upsert -> closed candle만 전략 평가에 사용
+- Server paper runner 반복 실행 -> 같은 `symbol/timeframe/strategy/candle openTime`은 `paper_runner_evaluations`로 중복 평가하지 않음
+- Server paper runner signal 발생 -> `trade_event_logs`에 `PAPER` signal을 남기고 live order API는 호출하지 않음
+- Server paper runner heartbeat -> `paper_runner_status`에 최신 상태를 저장하고 credential, signature, raw private response를 저장하지 않음
 - Live 진입 로그에 TP1/TP2/손절가가 기록되고 Bitget position snapshot의 TP/SL이 비어 있음 -> 차트와 포지션 패널은 같은 symbol/side의 최근 live entry log 값으로 ENTRY/TP1/TP2/SL을 함께 표시
 - Live 진입 로그에 TP1/TP2/손절가가 있고 position snapshot의 TP/SL이 비어 있음 -> Live monitor portfolio arbitration은 log 보강값으로 기존 포지션의 남은 손익비를 계산
 - Live monitor 시작 -> 현재 USDT account equity를 자동매매 시작 기록으로 영구 저장 -> 하단 자동매매 기록 패널이 새 시작마다 리셋되지 않고 누적 시드, 현재 equity, 추정 순수익, 누적 기간, 진입/청산 로그 수, 확정 승패/승률, 리스크 이벤트를 표시
 - 같은 `symbol/timeframe/strategy/candle openTime` signal을 반복 평가 -> live order가 중복 생성되지 않음
-- forming candle에서 no-signal 발생 -> candle key를 잠그지 않음 -> 같은 candle이 업데이트되어 signal 조건을 만족하면 live 후보로 평가
+- forming candle 수신 -> SQLite/chart에는 반영 가능하지만 Live monitor는 해당 candle이 closed 상태가 될 때까지 entry 평가에서 제외
 - 같은 실행 주기에 여러 추천 전략 신호가 발생 -> 손익비가 가장 높은 후보 1개만 live order로 기록
 - 손익비가 같은 여러 신호가 발생 -> 계좌 기준 기대순익 금액이 가장 큰 후보를 선택
 - ETHUSDT short 포지션 보유 중 ETHUSDT short 새 신호 발생 -> 같은 symbol/side 슬롯이 점유되어 신규 진입/변경 없이 보류
@@ -66,7 +71,7 @@
 - app-created live entry log와 매칭되는 포지션이 전략별 최대 보유기간을 초과 -> Live monitor가 신규 진입 평가 전에 close-positions 요청 -> close log에 `청산 근거`와 경과 봉수 기록
 - 새 신호로 기존 포지션을 시장가 정리 -> close log에 청산 직전 PnL과 승/패 판정 기록 -> 하단 자동매매 기록의 승패/승률에 반영
 - 진행 중 포지션의 남은 손익비/기대수익이 새 신호 이상 -> 새 신호를 보류하고 기존 포지션 유지 decision 기록
-- 선택 화면 시간봉 변경 -> 표시 candle과 설정 UI만 바뀌고 실행 중 Live monitor의 다른 시간봉 감시는 유지
+- higher timeframe 선택 시도 -> Dashboard/Backtest selector가 15m 상태를 유지하고 Live monitor 범위도 15m로 유지
 - 전략 × 시간봉 백테스트 -> 조합별 승률/순손익/거래 수/최대 낙폭 표시 -> 포트폴리오 합산 성과와 분리해 비교 가능
 - 동일 symbol/timeframe에서 여러 전략이 동시에 signal 생성 -> 중복 진입, 같은 방향 추가 진입, 반대 신호 처리 정책이 deterministic하게 적용
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal -> live/backtest 모두 risk-blocked로 처리
@@ -95,4 +100,4 @@
 5. Watchlist에 없는 심볼은 subscription, strategy, live order 단계에서 모두 제외되는지 확인합니다.
 6. Local market history에는 API key, secret, passphrase, raw private response가 저장되지 않는지 확인합니다.
 7. Backtest runner는 앱 시작 시 자동으로 실행되지 않고, 수동 실행 경로에서만 대량 candle을 읽는지 확인합니다.
-8. Live monitor는 UI 선택 시간봉과 독립적으로 Watchlist 전체 시간봉을 평가하되, 같은 candle openTime에서 중복 주문을 만들지 않는지 확인합니다.
+8. Live monitor는 UI 상태와 독립적으로 Watchlist 15m closed candle만 평가하되, 같은 candle openTime에서 중복 주문을 만들지 않는지 확인합니다.

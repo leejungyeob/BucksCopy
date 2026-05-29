@@ -138,7 +138,7 @@ final class StrategyTests: XCTestCase {
             ),
             []
         )
-        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
             strategyID: ETHOneHourMomentumBurstStrategy.identifier,
             for: .oneHour,
             symbol: FuturesSymbol("ETHUSDT")
@@ -148,7 +148,7 @@ final class StrategyTests: XCTestCase {
                 for: .oneHour,
                 symbol: FuturesSymbol("ETHUSDT")
             ),
-            [ETHOneHourMomentumBurstStrategy.identifier]
+            []
         )
         XCTAssertEqual(
             StrategyTimeframeRouting.recommendedStrategyIDs(

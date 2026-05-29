@@ -182,7 +182,7 @@ struct DashboardView: View {
 
     private var activeStrategyRoutes: [ActiveStrategyRoute] {
         viewModel.state.watchlist.flatMap { symbol in
-            CandleTimeframe.allCases.flatMap { timeframe in
+            CandleTimeframe.liveTradingCases.flatMap { timeframe in
                 viewModel.strategyDefinitions(for: timeframe, symbol: symbol).map {
                     ActiveStrategyRoute(symbol: symbol, timeframe: timeframe, definition: $0)
                 }

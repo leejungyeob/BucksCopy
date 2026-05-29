@@ -2,7 +2,7 @@ import XCTest
 @testable import BucksCopy
 
 final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
-    func testEvaluatesRecommendedStrategiesAcrossAllTimeframesAndSkipsDuplicateCandle() async throws {
+    func testEvaluatesRecommendedStrategiesAcrossConfiguredTimeframesAndSkipsDuplicateCandle() async throws {
         let symbol = FuturesSymbol("SOLUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
@@ -18,7 +18,8 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
             candleBackfillRepository: nil,
             signalEvaluator: runner,
             liveExecutor: monitorLiveExecutor(logStore: logStore),
-            strategyRegistry: registry
+            strategyRegistry: registry,
+            monitoredTimeframes: [.fourHours]
         )
 
         try candleRepository.upsertCandles(donchianBreakoutCandles(
@@ -74,7 +75,8 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
                 confirmationEngine: passingConfirmationEngine()
             ),
             liveExecutor: monitorLiveExecutor(logStore: logStore),
-            strategyRegistry: registry
+            strategyRegistry: registry,
+            monitoredTimeframes: [.fourHours]
         )
 
         let result = await monitor.evaluateOnce(
@@ -85,11 +87,7 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
         )
 
         XCTAssertEqual(result.signalCount, 1)
-        XCTAssertEqual(backfillRepository.requestedTimeframes, Set([
-            .fourHours,
-            .twelveHours,
-            .oneDay
-        ]))
+        XCTAssertEqual(backfillRepository.requestedTimeframes, Set([.fourHours]))
         let storedCandles = try candleRepository.loadCandles(
             symbol: symbol,
             timeframe: .fourHours,
@@ -124,7 +122,8 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
                 CandleTimeframe.fourHours.duration + 60
             )),
             remoteRefreshAttempts: 1,
-            remoteRefreshRetryDelayNanoseconds: 0
+            remoteRefreshRetryDelayNanoseconds: 0,
+            monitoredTimeframes: [.fourHours]
         )
 
         let result = await monitor.evaluateOnce(
@@ -162,7 +161,8 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
             liveExecutor: monitorLiveExecutor(logStore: logStore),
             strategyRegistry: registry,
             remoteRefreshAttempts: 3,
-            remoteRefreshRetryDelayNanoseconds: 0
+            remoteRefreshRetryDelayNanoseconds: 0,
+            monitoredTimeframes: [.fourHours]
         )
 
         let result = await monitor.evaluateOnce(
@@ -177,7 +177,7 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
         XCTAssertEqual(backfillRepository.attempts[.fourHours], 3)
     }
 
-    func testEvaluatesFormingCandleWhenItCanGenerateLiveSignal() async throws {
+    func testIgnoresFormingCandleEvenWhenItCouldGenerateLiveSignal() async throws {
         let symbol = FuturesSymbol("SOLUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
@@ -202,7 +202,8 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
             strategyRegistry: registry,
             clock: FixedClock(now: latestSignalCandle.openTime.addingTimeInterval(
                 CandleTimeframe.fourHours.duration - 60
-            ))
+            )),
+            monitoredTimeframes: [.fourHours]
         )
 
         let result = await monitor.evaluateOnce(
@@ -213,10 +214,13 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
         )
 
         XCTAssertTrue(result.failures.isEmpty)
-        XCTAssertEqual(result.signalCount, 1)
+        XCTAssertEqual(result.signalCount, 0)
+        XCTAssertFalse(result.evaluations.contains {
+            $0.candleOpenTime == latestSignalCandle.openTime
+        })
     }
 
-    func testReevaluatesFormingCandleAfterNoSignalUpdate() async throws {
+    func testDoesNotReevaluateFormingCandleAfterNoSignalUpdate() async throws {
         let symbol = FuturesSymbol("SOLUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
@@ -238,7 +242,8 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
             ),
             liveExecutor: monitorLiveExecutor(logStore: logStore),
             strategyRegistry: registry,
-            clock: FixedClock(now: latestOpenTime.addingTimeInterval(60))
+            clock: FixedClock(now: latestOpenTime.addingTimeInterval(60)),
+            monitoredTimeframes: [.fourHours]
         )
 
         try candleRepository.upsertCandles(noSignalCandles)
@@ -264,11 +269,16 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
 
         XCTAssertTrue(noSignalRun.failures.isEmpty)
         XCTAssertEqual(noSignalRun.signalCount, 0)
-        XCTAssertEqual(noSignalRun.evaluations.count, 1)
-        XCTAssertEqual(updatedSignalRun.signalCount, 1)
+        XCTAssertFalse(noSignalRun.evaluations.contains {
+            $0.candleOpenTime == latestOpenTime
+        })
+        XCTAssertEqual(updatedSignalRun.signalCount, 0)
+        XCTAssertFalse(updatedSignalRun.evaluations.contains {
+            $0.candleOpenTime == latestOpenTime
+        })
     }
 
-    func testSynthesizesHigherTimeframeFormingCandleFromFreshFifteenMinuteFallback() async throws {
+    func testDoesNotSynthesizeHigherTimeframeFormingCandleFromFifteenMinuteFallback() async throws {
         let symbol = FuturesSymbol("SOLUSDT")
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
@@ -290,7 +300,8 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
             strategyRegistry: registry,
             clock: FixedClock(now: formingFourHourOpenTime.addingTimeInterval(60)),
             remoteRefreshAttempts: 1,
-            remoteRefreshRetryDelayNanoseconds: 0
+            remoteRefreshRetryDelayNanoseconds: 0,
+            monitoredTimeframes: [.fourHours]
         )
 
         try candleRepository.upsertCandles((0..<34).map { offset in
@@ -325,8 +336,10 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
         )
 
         XCTAssertFalse(result.failures.contains { $0.timeframe == .fourHours })
-        XCTAssertEqual(result.signalCount, 1)
-        XCTAssertEqual(result.evaluations.first?.candleOpenTime, formingFourHourOpenTime)
+        XCTAssertEqual(result.signalCount, 0)
+        XCTAssertFalse(result.evaluations.contains {
+            $0.candleOpenTime == formingFourHourOpenTime
+        })
     }
 
     func testPrimingCurrentClosedCandlesPreventsStartupEntryUntilNextClosedCandle() async throws {
@@ -343,7 +356,8 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
                 confirmationEngine: passingConfirmationEngine()
             ),
             liveExecutor: monitorLiveExecutor(logStore: logStore),
-            strategyRegistry: registry
+            strategyRegistry: registry,
+            monitoredTimeframes: [.fourHours]
         )
 
         try candleRepository.upsertCandles(donchianBreakoutCandles(

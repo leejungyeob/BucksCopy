@@ -43,6 +43,10 @@ enum CandleTimeframe: String, Codable, CaseIterable, Identifiable {
     case twelveHours = "12H"
     case oneDay = "1D"
 
+    static let dashboardCases: [CandleTimeframe] = [.fifteenMinutes]
+    static let marketDataSyncCases: [CandleTimeframe] = [.fifteenMinutes]
+    static let liveTradingCases: [CandleTimeframe] = [.fifteenMinutes]
+
     var id: String { rawValue }
 
     var displayName: String { rawValue }
@@ -221,7 +225,7 @@ struct BacktestConfiguration: Codable, Equatable {
 
     static let `default` = BacktestConfiguration(
         symbol: FuturesSymbol("BTCUSDT"),
-        timeframe: .twelveHours,
+        timeframe: .fifteenMinutes,
         strategyConfig: StrategyConfig.default,
         initialCapital: 100,
         comparesSignalConfirmation: false
@@ -569,7 +573,7 @@ struct DashboardState: Equatable {
     var symbolCatalog: [ContractSpec] = []
     var watchlist: [FuturesSymbol] = Self.defaultWatchlist
     var selectedSymbol: FuturesSymbol = FuturesSymbol("BTCUSDT")
-    var selectedTimeframe: CandleTimeframe = .twelveHours
+    var selectedTimeframe: CandleTimeframe = .fifteenMinutes
     var candles: [Candle] = []
     var candleStatus: CandleLoadStatus = .idle
     var candleHistoryStatus: CandleHistoryLoadStatus = .idle

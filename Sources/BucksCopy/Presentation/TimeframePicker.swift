@@ -9,12 +9,12 @@ struct TimeframePicker: View {
             get: { selection },
             set: onSelect
         )) {
-            ForEach(CandleTimeframe.allCases) { timeframe in
+            ForEach(CandleTimeframe.dashboardCases) { timeframe in
                 Text(timeframe.displayName)
                     .tag(timeframe)
             }
         }
         .pickerStyle(.segmented)
-        .frame(width: 360)
+        .frame(width: 120)
     }
 }

@@ -21,7 +21,7 @@ struct StrategyConfig: Codable, Equatable {
     var maximumHoldingCandles: Int?
     var signalConfirmation: SignalConfirmationConfig
 
-    static let `default` = VWMATouchTrendStrategy().definition.defaultConfig
+    static let `default` = BTCFifteenMinuteVacuumPulseStrategy().definition.defaultConfig
 
     init(
         strategyID: String,
@@ -262,6 +262,11 @@ enum StrategyTimeframeRouting {
         ),
         StrategyRouteKey(
             symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .oneHour,
+            strategyID: ETHOneHourMomentumBurstStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
             timeframe: .fifteenMinutes,
             strategyID: XStrategy.identifier
         ),
@@ -322,11 +327,6 @@ enum StrategyTimeframeRouting {
             symbol: FuturesSymbol("ETHUSDT"),
             timeframe: .fifteenMinutes,
             strategyID: ETHFifteenMinuteVacuumPulseStrategy.identifier
-        ),
-        StrategyRouteKey(
-            symbol: FuturesSymbol("ETHUSDT"),
-            timeframe: .oneHour,
-            strategyID: ETHOneHourMomentumBurstStrategy.identifier
         )
     ]
 }

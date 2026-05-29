@@ -182,6 +182,12 @@ extension Decimal {
         formatter.numberStyle = .decimal
         return formatter.string(from: number) ?? number.stringValue
     }
+
+    var signedPercentText: String {
+        let sign = self > 0 ? "+" : self < 0 ? "-" : ""
+        let absolute = self < 0 ? -self : self
+        return "\(sign)\(absolute.riskText)%"
+    }
 }
 
 func absoluteDecimal(_ value: Decimal) -> Decimal {

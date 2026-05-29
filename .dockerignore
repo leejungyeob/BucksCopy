@@ -1,0 +1,11 @@
+.git
+.build
+.DS_Store
+BucksCopy.xcodeproj
+BucksCopy.xcworkspace
+Derived
+DerivedData
+.tuist-cache
+.codex/runs
+fixtures
+Tests

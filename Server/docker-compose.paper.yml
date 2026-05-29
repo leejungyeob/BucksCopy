@@ -1,0 +1,15 @@
+services:
+  paper-runner:
+    build:
+      context: ..
+      dockerfile: Server/Dockerfile
+    container_name: bucks-copy-paper-runner
+    restart: unless-stopped
+    environment:
+      BUCKS_COPY_DATA_DIR: /var/lib/bucks-copy
+      BUCKS_COPY_SYMBOLS: ${BUCKS_COPY_SYMBOLS:-BTCUSDT,ETHUSDT}
+      BUCKS_COPY_CANDLE_LIMIT: ${BUCKS_COPY_CANDLE_LIMIT:-500}
+      BUCKS_COPY_POLL_SECONDS: ${BUCKS_COPY_POLL_SECONDS:-30}
+    volumes:
+      - ${BUCKS_COPY_HOST_DATA_DIR:-../server-data}:/var/lib/bucks-copy
+      - ${BUCKS_COPY_HOST_LOG_DIR:-../server-logs}:/var/log/bucks-copy

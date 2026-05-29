@@ -62,7 +62,11 @@ final class DashboardViewModel: ObservableObject {
         historyBackfillPolicy: CandleHistoryBackfillPolicy = .live,
         liveMonitorIntervalNanoseconds: UInt64 = 3_000_000_000
     ) {
-        self.state = state
+        var initialState = state
+        if CandleTimeframe.dashboardCases.contains(initialState.selectedTimeframe) == false {
+            initialState.selectedTimeframe = .fifteenMinutes
+        }
+        self.state = initialState
         self.credentialStore = credentialStore
         self.accountRepository = accountRepository
         self.positionRepository = positionRepository
@@ -100,6 +104,18 @@ final class DashboardViewModel: ObservableObject {
         self.strategyRegistry = strategyRegistry
         self.clock = clock
         self.historyBackfillPolicy = historyBackfillPolicy
+        self.state.strategyConfig = routedStrategyConfig(
+            self.state.strategyConfig,
+            for: self.state.selectedTimeframe,
+            symbol: self.state.selectedSymbol
+        )
+        if CandleTimeframe.dashboardCases.contains(self.state.backtestConfiguration.timeframe) {
+            self.state.backtestConfiguration.strategyConfig = routedStrategyConfig(
+                self.state.backtestConfiguration.strategyConfig,
+                for: self.state.backtestConfiguration.timeframe,
+                symbol: self.state.backtestConfiguration.symbol
+            )
+        }
     }
 
     deinit {
@@ -403,7 +419,11 @@ final class DashboardViewModel: ObservableObject {
     func selectSymbol(_ symbol: FuturesSymbol) {
         guard state.watchlist.contains(symbol) else { return }
         state.selectedSymbol = symbol
-        state.strategyConfig.leverage = clampedLeverage(state.strategyConfig.leverage, for: symbol)
+        state.strategyConfig = routedStrategyConfig(
+            state.strategyConfig,
+            for: state.selectedTimeframe,
+            symbol: symbol
+        )
         candleDisplayLimit = initialCandleDisplayLimit
         state.candleHistoryStatus = .idle
         stopLiveCandleStream()
@@ -412,6 +432,7 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func selectTimeframe(_ timeframe: CandleTimeframe) {
+        guard CandleTimeframe.dashboardCases.contains(timeframe) else { return }
         state.selectedTimeframe = timeframe
         state.strategyConfig = routedStrategyConfig(
             state.strategyConfig,
@@ -462,14 +483,16 @@ final class DashboardViewModel: ObservableObject {
     func selectBacktestSymbol(_ symbol: FuturesSymbol) {
         guard state.watchlist.contains(symbol) else { return }
         state.backtestConfiguration.symbol = symbol
-        state.backtestConfiguration.strategyConfig.leverage = clampedLeverage(
-            state.backtestConfiguration.strategyConfig.leverage,
-            for: symbol
+        state.backtestConfiguration.strategyConfig = routedStrategyConfig(
+            state.backtestConfiguration.strategyConfig,
+            for: state.backtestConfiguration.timeframe,
+            symbol: symbol
         )
         resetBacktest()
     }
 
     func selectBacktestTimeframe(_ timeframe: CandleTimeframe) {
+        guard CandleTimeframe.dashboardCases.contains(timeframe) else { return }
         state.backtestConfiguration.timeframe = timeframe
         state.backtestConfiguration.strategyConfig = routedStrategyConfig(
             state.backtestConfiguration.strategyConfig,
@@ -568,7 +591,7 @@ final class DashboardViewModel: ObservableObject {
         appendSessionLog(.init(
             timestamp: startedAt,
             category: .bot,
-            message: "Live auto trading started for Watchlist across all timeframes."
+            message: "Live auto trading started for Watchlist on 15m closed candles."
         ))
 
         liveMonitorTask = Task { [weak self] in
@@ -594,7 +617,7 @@ final class DashboardViewModel: ObservableObject {
         appendSessionLogOnce(key: "live-monitor.primed", .init(
             timestamp: clock.now,
             category: .bot,
-            message: "Live monitor armed after marking \(result.primedCount) latest completed candle route(s) as already seen. New entries can start from the current forming candle or the next completed candle."
+            message: "Live monitor armed after marking \(result.primedCount) latest completed 15m candle route(s) as already seen. New entries can start from the next completed candle."
         ))
 
         for failure in result.failures.prefix(3) {
@@ -811,7 +834,7 @@ final class DashboardViewModel: ObservableObject {
 
     private func startInitialMarketDataSync() {
         let routes = state.watchlist.flatMap { symbol in
-            CandleTimeframe.allCases.map { timeframe in
+            CandleTimeframe.marketDataSyncCases.map { timeframe in
                 (symbol: symbol, timeframe: timeframe)
             }
         }

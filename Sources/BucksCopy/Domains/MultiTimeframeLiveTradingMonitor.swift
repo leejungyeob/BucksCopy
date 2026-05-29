@@ -45,6 +45,7 @@ actor MultiTimeframeLiveTradingMonitor {
     private let candleLimit: Int
     private let remoteRefreshAttempts: Int
     private let remoteRefreshRetryDelayNanoseconds: UInt64
+    private let monitoredTimeframes: [CandleTimeframe]
     private var evaluatedCandleKeys: Set<String> = []
 
     init(
@@ -56,7 +57,8 @@ actor MultiTimeframeLiveTradingMonitor {
         clock: Clock = SystemClock(),
         candleLimit: Int = 500,
         remoteRefreshAttempts: Int = 3,
-        remoteRefreshRetryDelayNanoseconds: UInt64 = 500_000_000
+        remoteRefreshRetryDelayNanoseconds: UInt64 = 500_000_000,
+        monitoredTimeframes: [CandleTimeframe] = CandleTimeframe.liveTradingCases
     ) {
         self.candleRepository = candleRepository
         self.candleBackfillRepository = candleBackfillRepository
@@ -67,6 +69,7 @@ actor MultiTimeframeLiveTradingMonitor {
         self.candleLimit = candleLimit
         self.remoteRefreshAttempts = max(remoteRefreshAttempts, 1)
         self.remoteRefreshRetryDelayNanoseconds = remoteRefreshRetryDelayNanoseconds
+        self.monitoredTimeframes = monitoredTimeframes.isEmpty ? CandleTimeframe.liveTradingCases : monitoredTimeframes
     }
 
     func primeLatestClosedCandles(watchlist: [FuturesSymbol]) async -> LiveMonitorPrimingResult {
@@ -74,7 +77,7 @@ actor MultiTimeframeLiveTradingMonitor {
         var failures: [LiveMonitorFailure] = []
 
         for symbol in watchlist {
-            for timeframe in CandleTimeframe.allCases {
+            for timeframe in monitoredTimeframes {
                 do {
                     try Task.checkCancellation()
                     let definitions = strategyRegistry.definitions(
@@ -85,8 +88,7 @@ actor MultiTimeframeLiveTradingMonitor {
 
                     let candles = try await latestCandles(
                         symbol: symbol,
-                        timeframe: timeframe,
-                        includesFormingCandle: false
+                        timeframe: timeframe
                     )
                     guard let latestCandle = candles.last else { continue }
 
@@ -162,7 +164,7 @@ actor MultiTimeframeLiveTradingMonitor {
         }
 
         for symbol in watchlist {
-            for timeframe in CandleTimeframe.allCases {
+            for timeframe in monitoredTimeframes {
                 do {
                     try Task.checkCancellation()
                     let definitions = strategyRegistry.definitions(
@@ -173,11 +175,9 @@ actor MultiTimeframeLiveTradingMonitor {
 
                     let candles = try await latestCandles(
                         symbol: symbol,
-                        timeframe: timeframe,
-                        includesFormingCandle: true
+                        timeframe: timeframe
                     )
                     guard let latestCandle = candles.last else { continue }
-                    let latestCandleIsForming = isFormingForLive(latestCandle, timeframe: timeframe)
 
                     for definition in definitions {
                         let key = evaluatedKey(
@@ -203,12 +203,12 @@ actor MultiTimeframeLiveTradingMonitor {
                                 candleOpenTime: latestCandle.openTime,
                                 candles: candles,
                                 config: config,
-                                includesLiveFormingCandle: true
+                                includesLiveFormingCandle: false
                             )
                             if let candidate {
                                 evaluatedCandleKeys.insert(key)
                                 candidates.append(candidate)
-                            } else if latestCandleIsForming == false {
+                            } else {
                                 evaluatedCandleKeys.insert(key)
                             }
                             evaluations.append(LiveMonitorEvaluation(
@@ -292,8 +292,7 @@ actor MultiTimeframeLiveTradingMonitor {
 
     private func latestCandles(
         symbol: FuturesSymbol,
-        timeframe: CandleTimeframe,
-        includesFormingCandle: Bool
+        timeframe: CandleTimeframe
     ) async throws -> [Candle] {
         var backfillError: Error?
         if let candleBackfillRepository {
@@ -316,86 +315,15 @@ actor MultiTimeframeLiveTradingMonitor {
             timeframe: timeframe,
             limit: candleLimit
         )
-        .filter {
-            isUsableForLive($0, timeframe: timeframe, includesFormingCandle: includesFormingCandle)
-        }
+        .filter { isUsableForLive($0, timeframe: timeframe) }
         .sorted { $0.openTime < $1.openTime }
-        let localCandles = try candlesIncludingSynthesizedFormingCandle(
-            storedCandles,
-            symbol: symbol,
-            timeframe: timeframe,
-            includesFormingCandle: includesFormingCandle
-        )
 
         if let backfillError,
-           isLocalFallbackFresh(localCandles, timeframe: timeframe) == false {
+           isLocalFallbackFresh(storedCandles, timeframe: timeframe) == false {
             throw backfillError
         }
 
-        return localCandles
-    }
-
-    private func candlesIncludingSynthesizedFormingCandle(
-        _ candles: [Candle],
-        symbol: FuturesSymbol,
-        timeframe: CandleTimeframe,
-        includesFormingCandle: Bool
-    ) throws -> [Candle] {
-        guard includesFormingCandle,
-              timeframe != .fifteenMinutes,
-              let synthesized = try synthesizeFormingCandleFromFifteenMinutes(
-                symbol: symbol,
-                timeframe: timeframe
-              ) else {
-            return candles
-        }
-
-        let merged = candles
-            .filter { $0.openTime != synthesized.openTime }
-            + [synthesized]
-        return Array(merged.sorted { $0.openTime < $1.openTime }.suffix(candleLimit))
-    }
-
-    private func synthesizeFormingCandleFromFifteenMinutes(
-        symbol: FuturesSymbol,
-        timeframe: CandleTimeframe
-    ) throws -> Candle? {
-        let openTime = bucketOpenTime(containing: clock.now, timeframe: timeframe)
-        guard openTime.addingTimeInterval(timeframe.duration) > clock.now else {
-            return nil
-        }
-
-        let requiredSubCandles = Int(ceil(timeframe.duration / CandleTimeframe.fifteenMinutes.duration))
-        let fifteenMinuteCandles = try candleRepository.loadCandles(
-            symbol: symbol,
-            timeframe: .fifteenMinutes,
-            limit: max(requiredSubCandles + 4, 8)
-        )
-        .filter {
-            $0.openTime >= openTime &&
-                $0.openTime < openTime.addingTimeInterval(timeframe.duration) &&
-                isUsableForLive($0, timeframe: .fifteenMinutes, includesFormingCandle: true)
-        }
-        .sorted { $0.openTime < $1.openTime }
-
-        guard let first = fifteenMinuteCandles.first,
-              let latest = fifteenMinuteCandles.last,
-              isLocalFallbackFresh(fifteenMinuteCandles, timeframe: .fifteenMinutes) else {
-            return nil
-        }
-
-        return Candle(
-            productType: .usdtFutures,
-            symbol: symbol,
-            timeframe: timeframe,
-            openTime: openTime,
-            open: first.open,
-            high: fifteenMinuteCandles.map(\.high).max() ?? first.high,
-            low: fifteenMinuteCandles.map(\.low).min() ?? first.low,
-            close: latest.close,
-            volume: fifteenMinuteCandles.reduce(Decimal(0)) { $0 + $1.volume },
-            isClosed: false
-        )
+        return storedCandles
     }
 
     private func fetchRemoteCandlesWithRetry(
@@ -447,42 +375,16 @@ actor MultiTimeframeLiveTradingMonitor {
         return age >= 0 && age <= maximumAge
     }
 
-    private func bucketOpenTime(containing date: Date, timeframe: CandleTimeframe) -> Date {
-        let offset = exchangeOpenOffset(for: timeframe)
-        let duration = timeframe.duration
-        let seconds = date.timeIntervalSince1970
-        let bucket = floor((seconds - offset) / duration) * duration + offset
-        return Date(timeIntervalSince1970: bucket)
-    }
-
-    private func exchangeOpenOffset(for timeframe: CandleTimeframe) -> TimeInterval {
-        switch timeframe {
-        case .fifteenMinutes, .oneHour, .fourHours:
-            return 0
-        case .twelveHours:
-            return 4 * 60 * 60
-        case .oneDay:
-            return 16 * 60 * 60
-        }
-    }
-
     private func isUsableForLive(
         _ candle: Candle,
-        timeframe: CandleTimeframe,
-        includesFormingCandle: Bool
+        timeframe: CandleTimeframe
     ) -> Bool {
         if candle.isClosed,
            candle.openTime.addingTimeInterval(timeframe.duration) <= clock.now {
             return true
         }
 
-        return includesFormingCandle &&
-            isFormingForLive(candle, timeframe: timeframe)
-    }
-
-    private func isFormingForLive(_ candle: Candle, timeframe: CandleTimeframe) -> Bool {
-        candle.openTime <= clock.now &&
-            candle.openTime.addingTimeInterval(timeframe.duration) > clock.now
+        return false
     }
 
     private func publicFailureMessage(_ error: Error) -> String {

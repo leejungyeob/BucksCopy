@@ -468,7 +468,7 @@ struct BacktestEngine {
             minimumTradeCount: minimumTradeCount,
             recommendedMode: .gate,
             recommendedRequiredScore: bestCandidate.requiredScore,
-            reason: "OFF 대비 \(bestCandidate.netReturnDeltaPercent.percentText) 개선 후보",
+            reason: "OFF 대비 \(bestCandidate.netReturnDeltaPercent.signedPercentText) 개선 후보",
             candidates: rankedCandidates
         )
     }

@@ -10,7 +10,7 @@ struct DemoDataSeeder {
     func seedIfNeeded() throws {
         let symbols = [FuturesSymbol("BTCUSDT"), FuturesSymbol("ETHUSDT")]
         for symbol in symbols {
-            for timeframe in CandleTimeframe.allCases {
+            for timeframe in CandleTimeframe.marketDataSyncCases {
                 let existing = try candleRepository.loadCandles(
                     symbol: symbol,
                     timeframe: timeframe,

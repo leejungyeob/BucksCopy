@@ -19,7 +19,7 @@
 4. Strategy는 주문 API를 직접 부르지 않고 live execution gateway contract만 사용합니다.
 5. Candle 생성은 deterministic하게 테스트 가능한 Domain/Data 경계로 둡니다.
 6. Watchlist에 없는 심볼은 WebSocket 구독, strategy 실행, live order 생성 대상이 아닙니다.
-7. Backtest/validation strategy는 closed candle만 소비하고, Live monitor는 명시적으로 모델링된 현재 forming candle도 후보 평가에 포함할 수 있습니다.
+7. Backtest/validation strategy와 Live monitor는 모두 closed candle만 소비합니다.
 
 ## 레이어별 책임
 
@@ -64,7 +64,7 @@ flowchart LR
 | Public REST | `GET /api/v2/mix/market/history-candles` | Backfill older finished candles when normal candle range is insufficient |
 | Public WS | `ticker` | Latest price, bid/ask, funding/state display |
 | Public WS | `trade` | Trade stream for higher-fidelity market input |
-| Public WS | `candle1m` | Default live candle input for internal aggregation |
+| Public WS | `candle15m` | Dashboard/Live runtime candle input |
 | Private REST | `GET /api/v2/mix/account/accounts` | Credential test and account snapshot |
 | Private REST | `GET /api/v2/mix/position/all-position` | Position snapshot and replacement scoring input |
 | Private REST | `POST /api/v2/mix/account/set-leverage` | Set symbol leverage before live entry |
@@ -100,13 +100,13 @@ flowchart LR
 
 - Store market history locally for Watchlist symbols because Bitget candle APIs cannot guarantee unlimited lookback from the current moment.
 - v1 default storage is a SQLite-backed Data adapter. Do not store API key, secret, passphrase, or raw private account/order payloads in this DB.
-- Persist normalized 1m closed exchange candles and derived closed candles for `15m`, `1H`, `4H`, `12H`, and `1D`.
+- Persist normalized exchange OHLCV candles. Current Dashboard/Live runtime persists and refreshes `15m` only; higher timeframe cases remain for historical research/backtest code.
 - Use `(productType, symbol, granularity, openTime)` as the natural unique key so REST backfill and WebSocket updates are idempotent.
-- Current implementation: on app start, load local candles, then seed every Dashboard Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D` through Bitget REST candle backfill unless that symbol/timeframe already has a complete local history cursor. The selected chart keeps a matching public WebSocket candle subscription for live updates.
-- Selected symbol/timeframe changes reload the local chart view and switch only the matching live WebSocket candle subscription; they do not restart historical backfill for that tab.
+- Current implementation: on app start, load local candles, then seed every Dashboard Watchlist symbol for `15m` through Bitget REST candle backfill unless that symbol/timeframe already has a complete local history cursor. The selected chart keeps a matching public 15m WebSocket candle subscription for live updates.
+- Selected symbol changes reload the local chart view and switch the 15m live WebSocket candle subscription; higher timeframe REST/WS subscriptions are disabled in app runtime.
 - Target gap-fill implementation: load the last local closed candle per Watchlist symbol, request only the missing gap from Bitget, upsert the result, then resume WebSocket streaming.
 - If no local history exists, seed from the maximum officially queryable REST range, then continue accumulating locally from that point forward.
-- Keep in-progress candles either in memory or stored with an explicit non-closed state. Backtest/validation ignores non-closed candles; Live monitor may include the current forming candle when `openTime <= now < closeTime`.
+- Keep in-progress candles either in memory or stored with an explicit non-closed state. Backtest/validation and Live monitor ignore non-closed candles for entry decisions.
 - Public WebSocket candle pushes are stored with an explicit non-closed state until a later interval or REST refresh confirms closure.
 - Live execution keeps minimal local audit metadata for strategy review; raw private account/order payloads and raw order identifiers are not persisted in logs.
 
@@ -127,7 +127,7 @@ flowchart LR
 | `CredentialStatus` | disconnected/saved/validating/connected/failed UI state |
 | `DashboardState` | combined Presentation state for credential, Watchlist, candles, positions, strategy, logs |
 | `Watchlist` | user-selected tradable symbol set |
-| `Candle` | OHLCV data for 15m/1H/4H/12H/1D |
+| `Candle` | OHLCV data; Dashboard/Live runtime currently uses 15m only |
 | `MarketHistoryCursor` | last persisted closed candle per symbol/granularity |
 | `PositionSnapshot` | read-only Bitget current position projection |
 | `StrategyDefinition` | built-in strategy registry item |
@@ -154,16 +154,16 @@ References:
 
 ## Trading Defaults
 
-- Supported planning timeframes: `15m`, `1H`, `4H`, `12H`, `1D`.
-- Backtest strategy logic consumes closed candle data. Live monitoring explicitly models the current forming candle for earlier entry decisions.
+- Supported Dashboard/Live planning timeframe: `15m`. Higher timeframe enum cases remain for reproducible research/backtest code.
+- Backtest strategy logic and Live monitoring consume closed candle data only.
 - Built-in strategies must emit `entryPrice`, `stopLoss`, and `takeProfit` together when they produce a signal.
-- Built-in strategy inputs are limited to local OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget. Backtest input remains closed-only; Live input may include the latest forming candle.
+- Built-in strategy inputs are limited to local OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget. Backtest and Live input remain closed-only.
 - Built-in strategy set: BTC 15m Vacuum Pulse, ETH 15m Vacuum Pulse, BTC 15m Phase Vacuum Reclaim, X-Frequency, X, ETH 1H Momentum Burst, VWMA100 touch trend, Donchian channel breakout, and Time-Series momentum.
 - Strategy signals use the main strategy output and risk policy as the default trading path. Auxiliary indicator Gate data has been removed from the active decision path after validation showed weak path stability.
-- Live monitoring is independent from the chart-selected timeframe. When Live is running, it evaluates every Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D`, using the recommended strategy list for each timeframe.
+- Live monitoring is independent from transient chart state. When Live is running, it evaluates every Watchlist symbol on `15m` only, using the symbol-scoped recommended strategy list.
 - The Dashboard Live monitor loop evaluates candidates every 3 seconds by default until the engine is moved to a fully WebSocket-event-driven trigger.
 - Live monitoring stores a `(symbol, timeframe, strategy, candle open time)` key to avoid generating duplicate live entries from the same candle after a signal is accepted.
-- When Live starts, the monitor first primes the current latest completed candle keys for every Watchlist route. Those already-completed candles cannot create immediate live entries; the current forming candle remains eligible if it later emits a signal.
+- When Live starts, the monitor first primes the current latest completed 15m candle keys for every Watchlist route. Those already-completed candles cannot create immediate live entries; only the next completed 15m candle can create a new candidate.
 - Live monitoring collects all same-run strategy/timeframe candidates first, then selects a single portfolio candidate. Priority is deterministic: highest planned reward/risk first, then highest expected net profit amount, then lower account risk.
 - Open positions reserve one `symbol + side` slot. A new signal for an already-open same symbol/side is held until that position is closed; an opposite-side signal remains eligible in hedge mode so long and short can coexist.
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
@@ -196,10 +196,10 @@ References:
 ## Strategy Portfolio Plan
 
 - The long-term goal is not one universal strategy. The goal is to select roughly 4-5 high-quality strategies through local backtesting and run them as a portfolio.
-- The selection unit is `strategy × timeframe`, not strategy alone. A strategy can be enabled for multiple timeframes, and a single timeframe can have multiple enabled strategies.
+- The selection unit is `strategy × timeframe`, not strategy alone. Current active runtime is restricted to 15m, and a single timeframe can still have multiple enabled strategies.
 - Candidate combinations must be evaluated by win rate, net return after fees, trade count, drawdown, and blocked-signal frequency.
-- When a completed or current forming candle is available for a timeframe, every enabled strategy for that symbol and timeframe can be evaluated by the Live monitor.
-- The visible chart timeframe is only a viewing/editing context. It must not disable monitoring of other enabled timeframes while Live trading is running.
+- When a completed 15m candle is available, every enabled 15m strategy for that symbol can be evaluated by the Live monitor.
+- The visible chart is fixed to 15m in the current app runtime; UI state cannot broaden the Live monitor into higher timeframes.
 - More active combinations should increase trade opportunities, but execution must still cap risk by Watchlist symbol, leverage, open position state, duplicate signal handling, and opposite-signal handling.
 - Portfolio arbitration is global for the Live monitor run: simultaneous candidates compete for currently empty symbol/side slots, and only the top-ranked eligible candidate can create a live order.
 - Open positions with TP/SL data are scored by remaining reward/risk from mark price to TP/SL and expected remaining profit amount. When Bitget omits TP/SL fields but a matching live entry log has TP2/SL, the dashboard enriches the position before portfolio arbitration so an active protected position is not falsely scored as `0:1`. Positions without enough TP/SL data still receive the lowest comparable priority because their remaining reward/risk cannot be proven.
@@ -209,21 +209,16 @@ References:
 
 ## Strategy Research Notes
 
-- Current recommended routing is symbol-scoped after the latest requested activation:
+- Current recommended routing is symbol-scoped and 15m-only after the latest requested simplification:
   - `BTCUSDT 15m`: BTC 15m Phase Vacuum Reclaim, BTC 15m Vacuum Pulse
-  - `BTCUSDT 12H`: no recommended route
-  - `BTCUSDT 1D`: no recommended route
   - `ETHUSDT 15m`: ETH 15m Vacuum Pulse
-  - `ETHUSDT 1H`: ETH 1H Momentum Burst
-  - `ETHUSDT 12H`: no recommended route
-  - `ETHUSDT 1D`: no recommended route
+  - higher timeframes: no Dashboard/Live route
 - Current active route maximum holding windows:
   - `BTCUSDT 15m` Phase Vacuum Reclaim: `96` candles, about `24h`
   - `BTCUSDT 15m` Vacuum Pulse: `96` candles, about `24h`
   - `ETHUSDT 15m` Vacuum Pulse: `96` candles, about `24h`
-  - `ETHUSDT 1H` Momentum Burst: `72` candles, about `3d`
 - The active `BTCUSDT 15m` Phase Vacuum Reclaim route's latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$808.643489` from `$100`, with `+708.64%` net return, `51.28%` win rate, `156` trades, `33.77%` max drawdown, and `1.59` profit factor.
 - The active `BTCUSDT 15m` route is the BTC 15m Vacuum Pulse strategy. The latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$808.643489` from `$100`, with `+708.64%` net return, `68.69%` annualized return, `51.28%` win rate, `156` trades, `39.03` trades/year, `33.77%` max drawdown, and `1.59` profit factor.
 - The active `ETHUSDT 15m` route is the ETH 15m Vacuum Pulse strategy. The latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$637.452288` from `$100`, with `+537.45%` net return, `58.95%` annualized return, `49.15%` win rate, `118` trades, `29.52` trades/year, `22.00%` max drawdown, and `1.47` profit factor.
-- The active `ETHUSDT 1H` route is ETH 1H Momentum Burst. The latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$245.041148` from `$100`, with `+145.04%` net return, `50.43%` win rate, `232` trades, `39.24%` max drawdown, and `1.11` profit factor.
+- The former `ETHUSDT 1H` Momentum Burst route is pruned from Dashboard/Live runtime. Its latest stored local 4-year result remains `$245.041148` from `$100`, `+145.04%` net return, `50.43%` win rate, `232` trades, `39.24%` max drawdown, and `1.11` profit factor for research reference only.
 - Pruned strategy implementations remain in the built-in registry when useful for reproducible backtests, but symbol-scoped active routes keep them out of BTCUSDT/ETHUSDT live recommendations unless explicitly re-enabled.

@@ -1,0 +1,50 @@
+# BucksCopy Server
+
+## 한글 요약
+
+- 현재 서버 단계는 실거래가 아니라 `paper-runner`입니다.
+- runner는 Bitget public REST로 `15m` candle만 받아 SQLite에 저장하고, closed candle 기준으로 전략을 평가합니다.
+- Bitget API key, secret, passphrase는 아직 이 서버 배포에 넣지 않습니다.
+
+## Paper Runner
+
+Local one-shot check:
+
+```bash
+BUCKS_COPY_DATA_DIR=.server-data \
+BUCKS_COPY_RUN_ONCE=true \
+swift run BucksCopyPaperRunner
+```
+
+Docker one-shot check:
+
+```bash
+docker build -f Server/Dockerfile -t bucks-copy-paper-runner .
+docker run --rm \
+  -e BUCKS_COPY_RUN_ONCE=true \
+  -v "$PWD/.server-data:/var/lib/bucks-copy" \
+  bucks-copy-paper-runner
+```
+
+Server compose run from the repository root:
+
+```bash
+cp Server/env.paper.example .env
+docker compose -f Server/docker-compose.paper.yml up -d --build
+docker compose -f Server/docker-compose.paper.yml logs -f
+```
+
+The runner writes:
+
+- `candles`: normalized Bitget public OHLCV candles
+- `trade_event_logs`: paper signal and heartbeat records
+- `paper_runner_status`: latest runner status for the future API/UI
+- `paper_runner_evaluations`: duplicate evaluation guard by `symbol/timeframe/strategy/openTime`
+
+## Safety Boundary
+
+- No private Bitget REST calls.
+- No WebSocket private login.
+- No order placement.
+- No credential storage.
+- No live execution until a separate explicit server-side consent and protection-order flow is implemented.

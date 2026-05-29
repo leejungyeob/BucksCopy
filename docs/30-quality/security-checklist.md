@@ -21,6 +21,7 @@
 - API key, secret, passphrase가 코드/문서/fixture/log에 하드코딩되지 않았는가
 - `.env`, local config, sample 값이 실제 credential처럼 보이지 않는가
 - 서명 payload, signature, raw header가 로그에 남지 않는가
+- server paper runner는 public candle fetch만 수행하고 Bitget credential 입력/저장/env 참조를 하지 않는가
 
 ### Keychain / Storage
 
@@ -43,13 +44,14 @@
 ### Trading Safety
 
 - live order path가 credential 연결 + UI 실거래 동의 + Start Live 전에는 비활성화되어 있는가
+- server paper runner는 private REST, private WebSocket, live order, protection order client를 포함하지 않는가
 - strategy가 order API를 직접 호출하지 않는가
 - Watchlist에 없는 심볼로 order intent가 만들어지지 않는가
 - 다중 전략/시간봉이 동시에 signal을 만들 때 포트폴리오 중재 정책이 live order를 1개로 제한해 중복 주문과 과다 노출을 차단하는가
 - 같은 symbol/side 포지션이 열려 있을 때 새 신호가 기존 포지션을 중복 진입/교체하지 않는가
 - 반대 방향 동시 보유는 Bitget hedge mode에서만 의도대로 long/short 슬롯이 분리되는가
 - 시간봉별 여러 전략 활성화가 Watchlist, 레버리지, 기존 포지션 제한을 우회하지 않는가
-- Live 시작 시 이미 저장된 최신 completed candle 신호가 즉시 실주문으로 이어지지 않도록 startup priming이 적용되고, forming candle no-signal은 중복 방지 key로 잠그지 않는가
+- Live 시작 시 이미 저장된 최신 completed 15m candle 신호가 즉시 실주문으로 이어지지 않도록 startup priming이 적용되고, forming candle은 entry 평가에서 제외되는가
 - 자동매매 레버리지가 10x 이하로 제한되는가
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal이 차단되는가
 - 레버리지 반영 손절 위험이 설정된 1회 최대 손실률보다 큰 signal은 차단 대신 포지션 투입비율이 축소되는가

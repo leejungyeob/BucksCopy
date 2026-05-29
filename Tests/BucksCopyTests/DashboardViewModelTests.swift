@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class DashboardViewModelTests: XCTestCase {
-    func testTimeframeChangeReloadsCandlesForSelectedSymbol() async throws {
+    func testUnsupportedTimeframeChangeIsIgnored() async throws {
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
         let registry = StrategyRegistry()
@@ -24,37 +24,40 @@ final class DashboardViewModelTests: XCTestCase {
             count: 12
         ))
 
+        viewModel.selectTimeframe(.fifteenMinutes)
+        try await waitUntil { viewModel.state.candles.isEmpty == false }
+        let visibleFifteenMinuteCount = viewModel.state.candles.count
+
         viewModel.selectTimeframe(.oneHour)
 
-        XCTAssertEqual(viewModel.state.selectedTimeframe, .oneHour)
-        try await waitUntil { viewModel.state.candles.count == 12 }
-        XCTAssertEqual(viewModel.state.candles.count, 12)
-        XCTAssertTrue(viewModel.state.candles.allSatisfy { $0.timeframe == .oneHour })
+        XCTAssertEqual(viewModel.state.selectedTimeframe, .fifteenMinutes)
+        XCTAssertEqual(viewModel.state.candles.count, visibleFifteenMinuteCount)
+        XCTAssertTrue(viewModel.state.candles.allSatisfy { $0.timeframe == .fifteenMinutes })
     }
 
-    func testTimeframeChangeRoutesLiveStrategyToRecommendedDefault() {
+    func testHigherTimeframeSelectionDoesNotChangeLiveStrategy() {
         let viewModel = makeViewModel(credentialStore: InMemoryCredentialStore())
 
         viewModel.selectTimeframe(.twelveHours)
 
-        XCTAssertEqual(viewModel.state.selectedTimeframe, .twelveHours)
-        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, VWMATouchTrendStrategy.identifier)
+        XCTAssertEqual(viewModel.state.selectedTimeframe, .fifteenMinutes)
+        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, BTCFifteenMinuteVacuumPulseStrategy.identifier)
 
         viewModel.selectTimeframe(.fourHours)
 
-        XCTAssertEqual(viewModel.state.selectedTimeframe, .fourHours)
-        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, VWMATouchTrendStrategy.identifier)
+        XCTAssertEqual(viewModel.state.selectedTimeframe, .fifteenMinutes)
+        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, BTCFifteenMinuteVacuumPulseStrategy.identifier)
     }
 
-    func testBacktestTimeframeChangeRoutesStrategyToRecommendedDefault() {
+    func testHigherBacktestTimeframeSelectionIsIgnored() {
         let viewModel = makeViewModel(credentialStore: InMemoryCredentialStore())
 
         viewModel.selectBacktestTimeframe(.oneDay)
 
-        XCTAssertEqual(viewModel.state.backtestConfiguration.timeframe, .oneDay)
+        XCTAssertEqual(viewModel.state.backtestConfiguration.timeframe, .fifteenMinutes)
         XCTAssertEqual(
             viewModel.state.backtestConfiguration.strategyConfig.strategyID,
-            VWMATouchTrendStrategy.identifier
+            BTCFifteenMinuteVacuumPulseStrategy.identifier
         )
     }
 
@@ -64,10 +67,10 @@ final class DashboardViewModelTests: XCTestCase {
 
         viewModel.updateStrategy("removed-strategy")
 
-        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, VWMATouchTrendStrategy.identifier)
+        XCTAssertEqual(viewModel.state.strategyConfig.strategyID, BTCFifteenMinuteVacuumPulseStrategy.identifier)
     }
 
-    func testLiveBotMonitorsRecommendedStrategiesAcrossAllTimeframes() async throws {
+    func testLiveBotIgnoresHigherTimeframeRoutes() async throws {
         let symbol = FuturesSymbol("SOLUSDT")
         var state = DashboardState()
         state.credentialStatus = .connected(
@@ -77,7 +80,7 @@ final class DashboardViewModelTests: XCTestCase {
         state.watchlist = [symbol]
         state.selectedSymbol = symbol
         state.selectedTimeframe = .fifteenMinutes
-        state.strategyConfig = VWMATouchTrendStrategy().definition.defaultConfig
+        state.strategyConfig = StrategyConfig.default
         state.accounts = [
             AccountSnapshot(
                 marginCoin: "USDT",
@@ -153,12 +156,11 @@ final class DashboardViewModelTests: XCTestCase {
             startOffset: 200
         ))
 
-        try await waitUntil(timeout: 2) {
-            viewModel.state.recentLogs.contains {
-                $0.message.contains(DonchianChannelBreakoutStrategy.identifier) &&
-                    $0.message.contains("4H")
-            }
-        }
+        try await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertFalse(viewModel.state.recentLogs.contains {
+            $0.message.contains(DonchianChannelBreakoutStrategy.identifier) &&
+                $0.message.contains("4H")
+        })
 
         XCTAssertEqual(viewModel.state.selectedTimeframe, .fifteenMinutes)
 
@@ -205,12 +207,12 @@ final class DashboardViewModelTests: XCTestCase {
         try await waitUntil { viewModel.state.isConnected }
     }
 
-    func testBootstrapSeedsDefaultWatchlistAcrossAllTimeframes() async throws {
+    func testBootstrapSeedsDefaultWatchlistForFifteenMinuteTimeframe() async throws {
         let symbols = [FuturesSymbol("BTCUSDT"), FuturesSymbol("ETHUSDT")]
         var state = DashboardState()
         state.watchlist = symbols
         state.selectedSymbol = symbols[0]
-        state.selectedTimeframe = .twelveHours
+        state.selectedTimeframe = .fifteenMinutes
 
         let candleRepository = InMemoryCandleRepository()
         let logStore = InMemoryTradeEventLogStore()
@@ -234,7 +236,7 @@ final class DashboardViewModelTests: XCTestCase {
 
         try await waitUntil(timeout: 3) {
             if case .complete(let totalRoutes, _, _) = viewModel.state.marketDataBootstrapStatus {
-                return totalRoutes == symbols.count * CandleTimeframe.allCases.count
+                return totalRoutes == symbols.count * CandleTimeframe.marketDataSyncCases.count
             }
             return false
         }
@@ -244,7 +246,7 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(Set(backfillRepository.historicalRequestKeys), expectedRoutes)
 
         for symbol in symbols {
-            for timeframe in CandleTimeframe.allCases {
+            for timeframe in CandleTimeframe.marketDataSyncCases {
                 let candles = try candleRepository.loadCandles(
                     symbol: symbol,
                     timeframe: timeframe,
@@ -269,7 +271,7 @@ final class DashboardViewModelTests: XCTestCase {
 
         let candleRepository = InMemoryCandleRepository()
         for symbol in symbols {
-            for timeframe in CandleTimeframe.allCases {
+            for timeframe in CandleTimeframe.marketDataSyncCases {
                 try candleRepository.saveHistorySyncState(.init(
                     productType: .usdtFutures,
                     symbol: symbol,
@@ -302,7 +304,7 @@ final class DashboardViewModelTests: XCTestCase {
 
         try await waitUntil(timeout: 2) {
             if case .complete(let totalRoutes, let skippedRoutes, _) = viewModel.state.marketDataBootstrapStatus {
-                return totalRoutes == symbols.count * CandleTimeframe.allCases.count &&
+                return totalRoutes == symbols.count * CandleTimeframe.marketDataSyncCases.count &&
                     skippedRoutes == totalRoutes
             }
             return false
@@ -467,7 +469,7 @@ final class DashboardViewModelTests: XCTestCase {
         var state = DashboardState()
         state.watchlist = [FuturesSymbol("BTCUSDT"), FuturesSymbol("ETHUSDT")]
         state.selectedSymbol = FuturesSymbol("ETHUSDT")
-        state.selectedTimeframe = .oneHour
+        state.selectedTimeframe = .fifteenMinutes
         state.backtestConfiguration = BacktestConfiguration(
             symbol: FuturesSymbol("BTCUSDT"),
             timeframe: .fifteenMinutes,
@@ -501,7 +503,7 @@ final class DashboardViewModelTests: XCTestCase {
         }
 
         XCTAssertEqual(viewModel.state.selectedSymbol, FuturesSymbol("ETHUSDT"))
-        XCTAssertEqual(viewModel.state.selectedTimeframe, .oneHour)
+        XCTAssertEqual(viewModel.state.selectedTimeframe, .fifteenMinutes)
         XCTAssertEqual(viewModel.state.backtestResult?.symbol, FuturesSymbol("BTCUSDT"))
         XCTAssertEqual(viewModel.state.backtestResult?.timeframe, .fifteenMinutes)
         XCTAssertLessThanOrEqual(viewModel.backtestLeverageRange.upperBound, 10)
@@ -872,7 +874,7 @@ final class DashboardViewModelTests: XCTestCase {
 
     private func bootstrapRouteKeys(symbols: [FuturesSymbol]) -> Set<String> {
         Set(symbols.flatMap { symbol in
-            CandleTimeframe.allCases.map { timeframe in
+            CandleTimeframe.marketDataSyncCases.map { timeframe in
                 bootstrapRouteKey(symbol: symbol, timeframe: timeframe)
             }
         })

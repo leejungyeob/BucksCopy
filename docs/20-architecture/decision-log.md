@@ -584,3 +584,43 @@
   - `10x`와 `5%` 리스크 정책은 계속 적용됩니다. 다만 실제 available balance가 부족하면 주문 크기가 더 작아져 계좌 손실위험도 5%보다 낮아질 수 있습니다.
   - 신규 주문이 현재 운용 가능한 금액을 초과해 거래소에서 거절될 가능성을 줄입니다.
   - available balance가 너무 낮으면 신호가 있어도 주문이 차단될 수 있으며, 이는 잔고 초과 주문보다 안전한 실패입니다.
+
+## 0034. Restrict Runtime Market Data To 15m Closed Candles
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 사용자는 최근 검증에서 가장 유효했던 전략들이 15m 중심이고, 포지션도 하루 이상 길게 유지하지 않는 방향을 선호한다고 정리했습니다.
+  - 기존 런타임은 Watchlist의 `15m`, `1H`, `4H`, `12H`, `1D`를 REST로 각각 받아오고, Live monitor는 forming candle까지 후보 평가할 수 있어 closed-candle 백테스트와 live 진입 기준 사이에 간극이 있었습니다.
+  - 사용자는 앱 클라이언트를 항상 켜두지 않고도 자동매매가 지속되는 구조를 원하므로, UI 선택 상태와 실행 엔진 책임을 더 명확히 나눌 필요가 있습니다.
+- Decision:
+  - 이 결정은 0023의 Live forming candle evaluation을 Dashboard/Live runtime에서 supersede합니다.
+  - Dashboard/Live runtime의 candle REST backfill, public WebSocket candle subscription, Live monitor 평가 범위를 `15m`로 제한합니다.
+  - Live entry 평가는 closed 15m candle만 사용합니다. forming candle은 chart/cache에 반영될 수 있지만 strategy entry 후보에는 넣지 않습니다.
+  - `ETHUSDT 1H Momentum Burst`는 구현체와 연구 기록은 유지하되 Dashboard/Live active route에서 제거합니다.
+  - `CandleTimeframe`의 higher timeframe cases는 과거 데이터/백테스트 재현과 명시적 연구용으로 남기고, 앱 런타임 범위는 `dashboardCases`, `marketDataSyncCases`, `liveTradingCases` 상수로 제한합니다.
+  - 백그라운드 상시 실행은 이번 변경에 포함하지 않고 다음 구조 변경으로 분리합니다. 다음 단계는 UI 앱이 설정/상태 조회/Start-Stop만 담당하고, 별도 runner 또는 LaunchAgent가 REST/WS, strategy, live execution을 소유하는 형태입니다.
+- Consequences:
+  - 앱 시작 시 BTCUSDT/ETHUSDT의 15m history만 동기화하므로 REST 요청량과 local bootstrap 시간이 줄어듭니다.
+  - Live monitor는 UI에서 보이는 차트 상태가 아니라 Watchlist 15m closed candle 상태를 기준으로 판단합니다.
+  - closed-candle 백테스트와 live 판단 기준이 같아져, 진행 중 candle 무빙을 이용한 조기 진입 간극을 제거합니다.
+  - higher timeframe 전략은 registry와 generic research catalog에는 남을 수 있지만, symbol-scoped Dashboard/Live 추천 경로에는 포함되지 않습니다.
+
+## 0035. Introduce Server Paper Runner Before Remote Live Execution
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 사용자는 Mac을 꺼도 자동매매가 계속 실행되는 구조를 원했고, AWS Lightsail Ubuntu 서버를 준비했습니다.
+  - 기존 macOS 앱은 UI, Keychain credential, local candle storage, Live monitor를 모두 한 프로세스 안에 갖고 있어 Ubuntu 서버에 그대로 올릴 수 없습니다.
+  - 실거래 서버 전환은 credential 저장, 주문, 보호주문, fail-closed 책임을 옮기는 고위험 변경이므로 먼저 public market data와 paper signal만 검증해야 합니다.
+- Decision:
+  - repo root에 Swift Package executable `BucksCopyPaperRunner`를 추가합니다.
+  - `BucksCopyPaperRunner`는 기존 Domain 전략 코드를 재사용하고, Bitget public REST `15m` candle만 받아 SQLite에 저장합니다.
+  - runner는 closed 15m candle별 `symbol × timeframe × strategy × openTime` key를 저장해 같은 candle의 paper signal 중복 평가를 막습니다.
+  - runner는 `paper_runner_status`, `paper_runner_evaluations`, `trade_event_logs`에 상태와 paper signal을 남깁니다.
+  - 이 단계는 private Bitget API, credential 저장, live order, protection order를 포함하지 않습니다.
+- Consequences:
+  - Lightsail 서버에서 Docker Compose로 paper runner를 먼저 장시간 검증할 수 있습니다.
+  - macOS 앱을 서버 클라이언트로 바꾸기 전에 서버 DB/status/log contract를 확인할 수 있습니다.
+  - 실거래 서버 전환은 별도 decision으로 분리하고, credential secret storage, API auth, duplicate runner lock, position reconciliation, exchange-side protection 검증을 요구합니다.

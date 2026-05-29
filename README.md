@@ -13,7 +13,7 @@ macOS native crypto auto-trading app foundation for Bitget USDT-M Futures.
 | Trading mode | Live auto-trading with explicit Connect + consent + Start Live gate |
 | Data | Bitget REST and WebSocket v2 |
 | Local market history | SQLite-backed candle cache for Watchlist symbols |
-| Candle timeframes | 15m, 1H, 4H, 12H, 1D |
+| Candle timeframes | Dashboard/Live runtime uses 15m only; higher timeframe enum cases remain for research/backtest code |
 | Symbol activation | Load the full USDT-M Futures catalog, then trade only user-selected Watchlist symbols |
 | Dashboard v1 | Connect-only API credential panel, account summary, Watchlist, interactive Bitget-backed SwiftUI Canvas candles, real positions, Live bot log |
 
@@ -68,8 +68,8 @@ macOS native crypto auto-trading app foundation for Bitget USDT-M Futures.
 - `GET /api/v2/mix/position/all-position` loads read-only real position snapshots.
 - `Connect` stores credentials in Keychain and validates private API access in one action; saved credentials auto-connect on the next launch.
 - Only `symbolStatus=normal` symbols whose `supportMarginCoins` include `USDT` are valid Watchlist candidates.
-- After the initial REST candle backfill, the selected Watchlist symbol/timeframe starts a public WebSocket candle subscription and upserts live candle pushes into SQLite.
-- Public WebSocket subscriptions are created only for Watchlist symbols and are replaced when the selected symbol or timeframe changes.
+- After the initial REST candle backfill, the selected Watchlist symbol starts a public 15m WebSocket candle subscription and upserts live candle pushes into SQLite.
+- Public WebSocket subscriptions are created only for Watchlist symbols and the 15m timeframe.
 - One WebSocket connection should keep subscriptions at or below 50 channels; larger Watchlists must be split or rejected by validation.
 - Closed Watchlist candles are persisted locally so restart/warmup does not depend only on the exchange's current queryable range.
 - The candle chart shows one price pane with a right-side price axis, latest-price line, continuous candle-width zoom, and drag panning.
