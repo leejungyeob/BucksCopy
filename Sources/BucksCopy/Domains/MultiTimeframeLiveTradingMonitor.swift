@@ -124,11 +124,42 @@ actor MultiTimeframeLiveTradingMonitor {
         maximumPositionMarginPercentBySymbol: [FuturesSymbol: Decimal] = [:],
         openPositions: [PositionSnapshot] = [],
         accountEquity: Decimal? = nil,
+        accountAvailable: Decimal? = nil,
         contractSpecs: [ContractSpec] = []
     ) async -> LiveMonitorRunResult {
         var evaluations: [LiveMonitorEvaluation] = []
         var failures: [LiveMonitorFailure] = []
         var candidates: [TradeCandidate] = []
+
+        do {
+            let recentLogs = try signalEvaluator.recentLogs(limit: 1_000)
+            let holdingPeriodExits = PositionHoldingPeriodExitPolicy.expiredPositions(
+                openPositions: openPositions,
+                recentLogs: recentLogs,
+                strategyRegistry: strategyRegistry,
+                now: clock.now
+            )
+            if holdingPeriodExits.isEmpty == false {
+                let executionResult = try await liveExecutor.closeHoldingPeriodExits(holdingPeriodExits)
+                return LiveMonitorRunResult(
+                    evaluations: evaluations,
+                    failures: failures,
+                    executionResult: executionResult
+                )
+            }
+        } catch {
+            failures.append(LiveMonitorFailure(
+                symbol: openPositions.first?.symbol ?? watchlist.first ?? FuturesSymbol("UNKNOWN"),
+                timeframe: .fifteenMinutes,
+                strategyID: nil,
+                message: publicFailureMessage(error)
+            ))
+            return LiveMonitorRunResult(
+                evaluations: evaluations,
+                failures: failures,
+                executionResult: nil
+            )
+        }
 
         for symbol in watchlist {
             for timeframe in CandleTimeframe.allCases {
@@ -219,6 +250,7 @@ actor MultiTimeframeLiveTradingMonitor {
                 candidates: candidates,
                 openPositions: openPositions,
                 accountEquity: accountEquity,
+                accountAvailable: accountAvailable,
                 contractSpecs: contractSpecs
             )
         } catch {
@@ -241,6 +273,7 @@ actor MultiTimeframeLiveTradingMonitor {
         candidates: [TradeCandidate],
         openPositions: [PositionSnapshot],
         accountEquity: Decimal?,
+        accountAvailable: Decimal?,
         contractSpecs: [ContractSpec]
     ) async throws -> LiveTradeExecutionResult {
         let decision = PortfolioSignalSelectionPolicy.decision(
@@ -251,6 +284,7 @@ actor MultiTimeframeLiveTradingMonitor {
         return try await liveExecutor.execute(
             decision: decision,
             accountEquity: accountEquity,
+            accountAvailable: accountAvailable,
             contractSpecs: contractSpecs,
             signalEvaluator: signalEvaluator
         )
@@ -468,5 +502,146 @@ actor MultiTimeframeLiveTradingMonitor {
         }
 
         return String(describing: error)
+    }
+}
+
+enum PositionHoldingPeriodExitPolicy {
+    static func expiredPositions(
+        openPositions: [PositionSnapshot],
+        recentLogs: [TradeEventLog],
+        strategyRegistry: StrategyRegistry,
+        now: Date
+    ) -> [PositionHoldingPeriodExit] {
+        let entries = recentLogs
+            .compactMap(ManagedPositionEntry.init(log:))
+            .sorted { $0.enteredAt > $1.enteredAt }
+
+        return openPositions.compactMap { position in
+            guard position.total > 0,
+                  position.side != .unknown || position.positionMode == .oneWay,
+                  let entry = entries.first(where: { $0.matches(position) }),
+                  let definition = strategyRegistry.definition(id: entry.strategyID),
+                  let maximumHoldingCandles = definition.defaultConfig.maximumHoldingCandles,
+                  maximumHoldingCandles > 0 else {
+                return nil
+            }
+
+            let elapsed = now.timeIntervalSince(entry.enteredAt)
+            guard elapsed >= 0 else { return nil }
+            let maximumHoldingDuration = entry.timeframe.duration * Double(maximumHoldingCandles)
+            guard elapsed >= maximumHoldingDuration else { return nil }
+
+            let elapsedCandles = max(Int(floor(elapsed / entry.timeframe.duration)), maximumHoldingCandles)
+            let reason = [
+                "최대 보유 기간 \(maximumHoldingCandles)봉(\(durationText(maximumHoldingDuration))) 경과",
+                "진입 후 \(durationText(elapsed)) 동안 TP2/SL 종료가 확정되지 않아 \(entry.strategyID) \(entry.timeframe.rawValue) 진입 가설을 만료 처리",
+                "시장가 청산으로 포지션 시간을 리셋"
+            ].joined(separator: ": ")
+
+            return PositionHoldingPeriodExit(
+                position: position,
+                strategyID: entry.strategyID,
+                timeframe: entry.timeframe,
+                enteredAt: entry.enteredAt,
+                maximumHoldingCandles: maximumHoldingCandles,
+                elapsedCandles: elapsedCandles,
+                reason: reason
+            )
+        }
+    }
+
+    private static func durationText(_ seconds: TimeInterval) -> String {
+        let totalMinutes = max(Int(seconds / 60), 0)
+        let days = totalMinutes / (24 * 60)
+        let hours = (totalMinutes % (24 * 60)) / 60
+        let minutes = totalMinutes % 60
+
+        if days > 0, hours > 0 {
+            return "\(days)일 \(hours)시간"
+        }
+        if days > 0 {
+            return "\(days)일"
+        }
+        if hours > 0, minutes > 0 {
+            return "\(hours)시간 \(minutes)분"
+        }
+        if hours > 0 {
+            return "\(hours)시간"
+        }
+        return "\(minutes)분"
+    }
+}
+
+private struct ManagedPositionEntry {
+    let symbol: FuturesSymbol
+    let side: PositionSide
+    let strategyID: String
+    let timeframe: CandleTimeframe
+    let enteredAt: Date
+
+    init?(log: TradeEventLog) {
+        guard log.category == .liveOrder,
+              log.message.contains("order submitted") || log.metadata?.title.contains("진입") == true,
+              let symbol = log.symbol,
+              let side = Self.side(from: log),
+              let strategyID = Self.strategyID(from: log),
+              let timeframe = Self.timeframe(from: log) else {
+            return nil
+        }
+
+        self.symbol = symbol
+        self.side = side
+        self.strategyID = strategyID
+        self.timeframe = timeframe
+        self.enteredAt = log.timestamp
+    }
+
+    func matches(_ position: PositionSnapshot) -> Bool {
+        guard position.symbol == symbol else { return false }
+        if position.positionMode == .oneWay {
+            return true
+        }
+        return position.side == side
+    }
+
+    private static func side(from log: TradeEventLog) -> PositionSide? {
+        let tagLabels = log.metadata?.tags.map(\.label) ?? []
+        if tagLabels.contains("매수") || log.message.contains("Live buy order") {
+            return .long
+        }
+        if tagLabels.contains("매도") || log.message.contains("Live sell order") {
+            return .short
+        }
+        return nil
+    }
+
+    private static func timeframe(from log: TradeEventLog) -> CandleTimeframe? {
+        if let value = detailValue(in: log.metadata, for: "시간봉"),
+           let timeframe = CandleTimeframe(rawValue: value) {
+            return timeframe
+        }
+        return log.metadata?.tags.compactMap { CandleTimeframe(rawValue: $0.label) }.first
+    }
+
+    private static func strategyID(from log: TradeEventLog) -> String? {
+        if let value = detailValue(in: log.metadata, for: "매매전략"),
+           value.isEmpty == false {
+            return value
+        }
+
+        let excludedTags = Set(
+            ["LIVE", "START", "STOP", "매수", "매도", "LONG", "SHORT", "청산"] +
+                CandleTimeframe.allCases.map(\.rawValue)
+        )
+        return log.metadata?.tags.map(\.label).first { label in
+            !excludedTags.contains(label) && !label.hasSuffix("x")
+        }
+    }
+
+    private static func detailValue(
+        in metadata: TradeLogMetadata?,
+        for label: String
+    ) -> String? {
+        metadata?.details.first { $0.label == label }?.value
     }
 }

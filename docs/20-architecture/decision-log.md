@@ -464,3 +464,123 @@
   - 같은 방향 중복 진입/교체 churn을 줄이면서 반대 방향 hedge 진입은 허용됩니다.
   - 계정이 one-way mode이면 long/short 동시 보유는 거래소 정책상 의도대로 동작하지 않을 수 있으므로 live smoke에서 position mode 확인이 필요합니다.
   - 사용자가 수동으로 보호주문을 변경/삭제한 경우 Refresh 후 차트와 포지션 패널의 TP1/TP2/SL도 현재 거래소 pending plan 상태를 따릅니다.
+
+## 0027. Prune Weak Symbol-Scoped Strategy Routes
+
+- Status: accepted
+- Date: 2026-05-21
+- Context:
+  - 현재 추천 라우팅을 `10x` leverage / `5%` per-trade account-risk 조건으로 재검증한 뒤, 사용자는 낮은 수익률 또는 높은 MDD 대비 효율이 약한 특정 조합을 제거하기로 했습니다.
+  - 제거 대상은 전략 구현 전체가 아니라 `symbol × timeframe × strategy` route 단위입니다.
+- Decision:
+  - `BTCUSDT 15m X`를 추천 라우팅에서 제외합니다.
+  - `BTCUSDT 12H Time-Series momentum`을 추천 라우팅에서 제외합니다.
+  - `BTCUSDT 1D Donchian channel breakout`과 `BTCUSDT 1D VWMA100 touch trend`를 추천 라우팅에서 제외합니다.
+  - `ETHUSDT 1D Donchian channel breakout`을 추천 라우팅에서 제외합니다.
+  - 전략 구현체는 백테스트 재현성과 향후 명시적 재활성화를 위해 유지하고, active app route만 `blockedLiveRoutes`로 차단합니다.
+- Consequences:
+  - BTCUSDT 추천 route는 `15m X-Frequency`, `15m BTC 15m Phase Vacuum Reclaim`, `12H VWMA100 touch trend`, `12H Donchian channel breakout`만 남습니다.
+  - ETHUSDT 추천 route는 `1H ETH 1H Momentum Burst`, `12H Time-Series momentum`만 남습니다.
+  - Generic timeframe routing은 전략 카탈로그 성격으로 남아 있지만, Watchlist symbol이 주어지는 live/backtest 추천 경로에서는 symbol-scoped block list가 우선 적용됩니다.
+
+## 0028. Further Prune Routed Strategy Portfolio
+
+- Status: accepted
+- Date: 2026-05-21
+- Context:
+  - 0027 적용 직후 사용자는 추가로 세 개의 active route를 더 제외하기로 했습니다.
+  - 제거 대상은 계속 전략 구현 전체가 아니라 `symbol × timeframe × strategy` route 단위입니다.
+- Decision:
+  - `BTCUSDT 15m X-Frequency`를 추천 라우팅에서 제외합니다.
+  - `BTCUSDT 12H Donchian channel breakout`을 추천 라우팅에서 제외합니다.
+  - `ETHUSDT 12H Time-Series momentum`을 추천 라우팅에서 제외합니다.
+  - 전략 구현체와 generic timeframe catalog는 유지하고, symbol-scoped active route만 `blockedLiveRoutes`로 차단합니다.
+- Consequences:
+  - BTCUSDT 추천 route는 `15m BTC 15m Phase Vacuum Reclaim`, `12H VWMA100 touch trend`만 남습니다.
+  - ETHUSDT 추천 route는 `1H ETH 1H Momentum Burst`만 남습니다.
+  - 재활성화가 필요하면 route 단위로 block list에서 되돌리고 같은 조건의 백테스트를 다시 실행해야 합니다.
+
+## 0029. Route One Vacuum Pulse Strategy Per BTC/ETH Symbol
+
+- Status: accepted
+- Date: 2026-05-21
+- Context:
+  - 사용자는 `10x` leverage / `5%` per-trade account-risk 조건에서 최근 4년 15m candle 기준으로 BTCUSDT와 ETHUSDT 각각 하나의 공격형 전략을 원했습니다.
+  - 후보 탐색은 기존 Phase Vacuum/Reclaim/Momentum 계열을 기준으로 하되, 라우팅은 BTC/ETH 각각 하나의 active route만 남기는 방향으로 정리했습니다.
+- Decision:
+  - `BTC 15m Vacuum Pulse`를 새 BTCUSDT 15m active route로 추가합니다.
+  - `ETH 15m Vacuum Pulse`를 새 ETHUSDT 15m active route로 추가합니다.
+  - `BTCUSDT 15m BTC Phase Vacuum Reclaim`, `BTCUSDT 12H VWMA100 touch trend`, `ETHUSDT 1H ETH 1H Momentum Burst`는 구현체를 유지하되 active app route에서는 제외합니다.
+  - 두 Vacuum Pulse 전략의 default config는 `10x` leverage, `5%` per-trade account-risk, `100%` max margin, split TP/SL model 기준입니다.
+- Consequences:
+  - 현재 BTCUSDT/ETHUSDT active 추천 라우트는 각각 `15m Vacuum Pulse` 하나씩입니다.
+  - 최신 로컬 4년 검증 결과는 `BTCUSDT 15m Vacuum Pulse`: `$100 -> $808.643489`, `+708.64%`, annualized `68.69%`, `156` trades, annual trades `39.03`, MDD `33.77%`, PF `1.59`입니다.
+  - 최신 로컬 4년 검증 결과는 `ETHUSDT 15m Vacuum Pulse`: `$100 -> $637.452288`, `+537.45%`, annualized `58.95%`, `118` trades, annual trades `29.52`, MDD `22.00%`, PF `1.47`입니다.
+  - 사용자의 이상 목표인 annual trades 약 `100`회와 annualized return `300%`에는 못 미치므로, 이 결과는 live-ready 보장이 아니라 현재 로컬 데이터와 수수료/TP-SL 모델에서의 최선 후보로 관리합니다.
+
+## 0030. Reactivate Five Requested Symbol Routes
+
+- Status: accepted
+- Date: 2026-05-22
+- Context:
+  - 사용자는 Vacuum Pulse 2개만 남긴 상태가 아니라 기존 우수 후보 3개와 신규 Vacuum Pulse 2개를 함께 active route로 사용하길 원했습니다.
+  - 요청한 active set은 `BTCUSDT 15m BTC 15m Phase Vacuum Reclaim`, `BTCUSDT 12H VWMA100 touch trend`, `ETHUSDT 1H ETH 1H Momentum Burst`, `BTCUSDT 15m BTC 15m Vacuum Pulse`, `ETHUSDT 15m ETH 15m Vacuum Pulse`입니다.
+- Decision:
+  - 위 다섯 개 `symbol × timeframe × strategy` 조합을 `symbolScopedLiveRoutes`에 명시합니다.
+  - 기존 제외 대상 중 `BTCUSDT 15m Phase Vacuum Reclaim`, `BTCUSDT 12H VWMA100 touch trend`, `ETHUSDT 1H ETH 1H Momentum Burst`만 다시 활성화합니다.
+  - `BTCUSDT 15m X`, `BTCUSDT 15m X-Frequency`, `BTCUSDT 12H Donchian`, `BTCUSDT 12H Time-Series`, `BTCUSDT 1D Donchian/VWMA`, `ETHUSDT 12H Time-Series`, `ETHUSDT 1D Donchian` 등 사용자가 제거한 나머지 route는 계속 제외합니다.
+- Consequences:
+  - 0030 적용 당시 active 추천 route는 BTCUSDT 3개, ETHUSDT 2개였습니다.
+  - Live monitor는 동일 symbol/side 중복 포지션을 기존 portfolio policy로 걸러내며, 동시에 후보가 여러 개 나오면 reward/risk와 기대수익 기준으로 하나를 고릅니다.
+
+## 0031. Strategy Holding-Period Exit Rationale
+
+- Status: accepted
+- Date: 2026-05-22
+- Context:
+  - 사용자는 전략별로 포지션을 며칠까지 보유할지 정하고, 그 기간 안에 결과가 나오지 않으면 자동 종료하는 조건을 원했습니다.
+  - 단순 시간 만료가 아니라 해당 포지션을 왜 닫는지에 대한 근거도 로그와 백테스트 결과에 남아야 합니다.
+  - 실거래 경로에서는 수동/외부 포지션까지 앱이 임의 청산하면 전략 근거와 사용자 의도를 증명할 수 없습니다.
+- Decision:
+  - `StrategyConfig.maximumHoldingCandles`를 추가해 전략별 최대 보유 candle 수를 설정합니다.
+  - 적용 당시 active route 기본값은 `15m` 전략 `96`봉(약 24시간), `ETH 1H Momentum Burst` `72`봉(약 3일), `BTC 12H VWMA100` `14`봉(약 7일)이었습니다.
+  - 백테스트는 TP2/SL이 최대 보유기간 안에 확정되지 않으면 해당 candle 종가에서 시간 종료를 만들고, 잔여 물량은 시장가/taker 수수료로 보수적으로 계산합니다.
+  - Live monitor는 새 진입 평가 전에 app-created live entry log와 매칭되는 open position만 보유기간 만료 대상으로 봅니다.
+  - 보유기간 종료 close log에는 `청산 근거`, `매매전략`, `시간봉`, `진입시각`, `최대 보유`, `경과 봉수`를 남깁니다.
+- Consequences:
+  - 자동매매는 신호가 오래 지연되는 포지션의 시간을 강제로 리셋할 수 있고, 종료 사유도 감사 로그에서 확인할 수 있습니다.
+  - 보유기간 만료 청산이 발생한 평가 주기에는 새 진입을 만들지 않아 close와 entry가 같은 cycle에서 겹치지 않습니다.
+  - 수동/외부 포지션은 자동 시간 종료 대상에서 제외됩니다. 앱이 만든 진입 로그가 없으면 전략/timeframe 근거가 없기 때문입니다.
+  - TP1 체결 이후 남은 50%가 시간 종료되는 경우도 가능하며, 이 경우 백테스트 reason에는 TP1 이후 잔여 물량 종료라는 근거가 포함됩니다.
+
+## 0032. Remove BTCUSDT 12H VWMA100 Active Route
+
+- Status: accepted
+- Date: 2026-05-23
+- Context:
+  - 사용자가 `BTC 12H VWMA100 터치 추세`를 앱 적용 전략에서 삭제하라고 요청했습니다.
+  - 전략 구현체는 과거 백테스트 재현성과 명시적 재활성화 가능성을 위해 유지할 수 있습니다.
+- Decision:
+  - `BTCUSDT 12H VWMA100 touch trend`를 symbol-scoped active route에서 제거합니다.
+  - 12H generic catalog에는 VWMA100이 남아 있으므로, `BTCUSDT 12H VWMA100`을 `blockedLiveRoutes`에도 명시해 앱/Live 추천 경로에서 다시 살아나지 않게 합니다.
+- Consequences:
+  - 현재 active 추천 route는 BTCUSDT 15m 2개, ETHUSDT 15m 1개, ETHUSDT 1H 1개입니다.
+  - BTCUSDT 12H는 현재 추천 route가 없습니다.
+  - VWMA100 터치 추세 구현체와 기본 `14`봉 최대 보유 설정은 registry에 남지만, BTCUSDT active Live route에는 적용되지 않습니다.
+
+## 0033. Cap Live Entry Size By Available Balance
+
+- Status: accepted
+- Date: 2026-05-25
+- Context:
+  - Live monitor가 신호를 만들었지만 Bitget이 `40762 The order amount exceeds the balance`로 주문을 거절했습니다.
+  - 기존 리스크 정책은 `10x` leverage와 `5%` account-risk를 적용해 포지션 투입비율을 계산했지만, 실제 주문 수량 산출은 USDT `accountEquity`만 기준으로 삼았습니다.
+  - Bitget 주문 가능 금액은 열린 포지션, 예약 주문, 수수료 여유분 때문에 `accountEquity`보다 작은 `available` 기준으로 제한될 수 있습니다.
+- Decision:
+  - Dashboard Live monitor는 USDT `accountEquity`와 함께 `available`을 Live executor에 전달합니다.
+  - Live order sizing은 기존 risk-sized planned margin을 유지하되, 주문 직전 사용 증거금을 `available × 95%` 이하로 한 번 더 제한합니다.
+  - 제한 후 주문 수량이 Bitget 최소 주문 조건보다 작으면 live order size too small로 차단하고 주문을 제출하지 않습니다.
+- Consequences:
+  - `10x`와 `5%` 리스크 정책은 계속 적용됩니다. 다만 실제 available balance가 부족하면 주문 크기가 더 작아져 계좌 손실위험도 5%보다 낮아질 수 있습니다.
+  - 신규 주문이 현재 운용 가능한 금액을 초과해 거래소에서 거절될 가능성을 줄입니다.
+  - available balance가 너무 낮으면 신호가 있어도 주문이 차단될 수 있으며, 이는 잔고 초과 주문보다 안전한 실패입니다.

@@ -255,8 +255,9 @@ struct BTCFifteenMinutePhaseVacuumReclaimStrategy: TradingStrategy {
                 "stopATRBuffer": Decimal(string: "0.45")!,
                 "rewardRiskRatio": Decimal(string: "3.5")!
             ],
-            maximumRiskPerTradePercent: 15,
+            maximumRiskPerTradePercent: 5,
             maximumPositionMarginPercent: 100,
+            maximumHoldingCandles: 96,
             signalConfirmation: .disabled
         )
     )
@@ -349,6 +350,110 @@ struct BTCFifteenMinutePhaseVacuumReclaimStrategy: TradingStrategy {
         }
 
         return .noSignal
+    }
+}
+
+struct BTCFifteenMinuteVacuumPulseStrategy: TradingStrategy {
+    static let identifier = "btc-15m-vacuum-pulse"
+
+    let definition = StrategyDefinition(
+        id: Self.identifier,
+        name: "BTC 15m Vacuum Pulse",
+        summary: "BTCUSDT 15분봉 전용 4년 기준 phase reclaim pulse 전략",
+        defaultConfig: StrategyConfig(
+            strategyID: Self.identifier,
+            leverage: 10,
+            parameters: [
+                "fastMeanPeriod": 96,
+                "slowMeanPeriod": 384,
+                "atrPeriod": 14,
+                "volumeLookback": 144,
+                "reclaimLookback": 2,
+                "returnLookback": 2,
+                "returnThreshold": 0,
+                "minimumTrendSpread": Decimal(string: "0.002")!,
+                "maximumTrendSpread": Decimal(string: "0.020")!,
+                "minimumATRPercent": Decimal(string: "0.001")!,
+                "maximumATRPercent": Decimal(string: "0.0075")!,
+                "minimumCloseLocation": Decimal(string: "0.76")!,
+                "volumeMultiplier": Decimal(string: "2.0")!,
+                "pullbackATRBuffer": 0,
+                "breakoutATRBuffer": 0,
+                "stopATRBuffer": Decimal(string: "0.45")!,
+                "minimumStopPercent": 0,
+                "maximumStopPercent": 1,
+                "rewardRiskRatio": Decimal(string: "3.5")!,
+                "stopMode": 0,
+                "sideMode": 0,
+                "weekdayMask": 127
+            ],
+            maximumRiskPerTradePercent: 5,
+            maximumPositionMarginPercent: 100,
+            maximumHoldingCandles: 96,
+            signalConfirmation: .disabled
+        )
+    )
+
+    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        FifteenMinuteVacuumPulseEvaluator.evaluate(
+            context,
+            config: config,
+            definition: definition,
+            supportedSymbol: FuturesSymbol("BTCUSDT"),
+            label: "BTC 15m Vacuum Pulse"
+        )
+    }
+}
+
+struct ETHFifteenMinuteVacuumPulseStrategy: TradingStrategy {
+    static let identifier = "eth-15m-vacuum-pulse"
+
+    let definition = StrategyDefinition(
+        id: Self.identifier,
+        name: "ETH 15m Vacuum Pulse",
+        summary: "ETHUSDT 15분봉 전용 short-side reclaim pulse 전략",
+        defaultConfig: StrategyConfig(
+            strategyID: Self.identifier,
+            leverage: 10,
+            parameters: [
+                "fastMeanPeriod": 48,
+                "slowMeanPeriod": 256,
+                "atrPeriod": 10,
+                "volumeLookback": 32,
+                "reclaimLookback": 6,
+                "returnLookback": 6,
+                "returnThreshold": Decimal(string: "0.0025")!,
+                "minimumTrendSpread": Decimal(string: "0.001")!,
+                "maximumTrendSpread": Decimal(string: "0.015")!,
+                "minimumATRPercent": Decimal(string: "0.0004")!,
+                "maximumATRPercent": Decimal(string: "0.010")!,
+                "minimumCloseLocation": Decimal(string: "0.52")!,
+                "volumeMultiplier": Decimal(string: "0.85")!,
+                "pullbackATRBuffer": Decimal(string: "-0.1")!,
+                "breakoutATRBuffer": Decimal(string: "0.2")!,
+                "stopATRBuffer": Decimal(string: "1.25")!,
+                "minimumStopPercent": Decimal(string: "0.0008")!,
+                "maximumStopPercent": Decimal(string: "0.012")!,
+                "rewardRiskRatio": Decimal(string: "4.0")!,
+                "stopMode": 1,
+                "sideMode": -1,
+                "weekdayMask": 124
+            ],
+            maximumRiskPerTradePercent: 5,
+            maximumPositionMarginPercent: 100,
+            maximumHoldingCandles: 96,
+            signalConfirmation: .disabled
+        )
+    )
+
+    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        FifteenMinuteVacuumPulseEvaluator.evaluate(
+            context,
+            config: config,
+            definition: definition,
+            supportedSymbol: FuturesSymbol("ETHUSDT"),
+            label: "ETH 15m Vacuum Pulse"
+        )
     }
 }
 
@@ -625,6 +730,7 @@ struct ETHOneHourMomentumBurstStrategy: TradingStrategy {
                 "rewardRiskRatio": Decimal(string: "2.5")!,
                 "sideMode": 0
             ],
+            maximumHoldingCandles: 72,
             signalConfirmation: .disabled
         )
     )
@@ -649,7 +755,8 @@ struct VWMATouchTrendStrategy: TradingStrategy {
         defaultConfig: StrategyConfig(
             strategyID: Self.identifier,
             leverage: 2,
-            parameters: [:]
+            parameters: [:],
+            maximumHoldingCandles: 14
         )
     )
 
@@ -1328,6 +1435,166 @@ private enum ETHFifteenMinuteMomentumBurstEvaluator {
     }
 }
 
+private enum FifteenMinuteVacuumPulseEvaluator {
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+
+    static func evaluate(
+        _ context: StrategyContext,
+        config: StrategyConfig,
+        definition: StrategyDefinition,
+        supportedSymbol: FuturesSymbol,
+        label: String
+    ) -> StrategyEvaluation {
+        guard context.symbol == supportedSymbol,
+              context.timeframe == .fifteenMinutes else {
+            return .noSignal
+        }
+
+        let candles = context.closedCandles
+        let parameters = FifteenMinuteVacuumPulseParameters(overrides: config.parameters)
+        guard isAllowedWeekday(context.generatedAt, mask: parameters.weekdayMask),
+              candles.count >= parameters.slowMeanPeriod,
+              candles.count >= parameters.reclaimLookback + 1,
+              candles.count > parameters.returnLookback,
+              let fastMean = candles.simpleMovingAverage(period: parameters.fastMeanPeriod),
+              let slowMean = candles.simpleMovingAverage(period: parameters.slowMeanPeriod),
+              let atr = candles.averageTrueRange(period: parameters.atrPeriod),
+              let averageVolume = candles.averageVolume(period: parameters.volumeLookback),
+              let previousHigh = candles.highestHigh(
+                lookback: parameters.reclaimLookback,
+                endingAt: candles.count - 2
+              ),
+              let previousLow = candles.lowestLow(
+                lookback: parameters.reclaimLookback,
+                endingAt: candles.count - 2
+              ) else {
+            return .noSignal
+        }
+
+        let latest = candles[candles.count - 1]
+        let base = candles[candles.count - 1 - parameters.returnLookback]
+        let entry = latest.close
+        let range = latest.high - latest.low
+        guard entry > 0,
+              base.close > 0,
+              range > 0,
+              atr > 0,
+              averageVolume > 0,
+              latest.volume >= averageVolume * parameters.volumeMultiplier else {
+            return .noSignal
+        }
+
+        let trendSpread = absoluteDecimal(fastMean - slowMean) / entry
+        let atrPercent = atr / entry
+        let closeLocation = (latest.close - latest.low) / range
+        let returnValue = (latest.close - base.close) / base.close
+
+        guard trendSpread >= parameters.minimumTrendSpread,
+              trendSpread <= parameters.maximumTrendSpread,
+              atrPercent >= parameters.minimumATRPercent,
+              atrPercent <= parameters.maximumATRPercent else {
+            return .noSignal
+        }
+
+        if parameters.allowsLong,
+           fastMean > slowMean,
+           returnValue >= parameters.returnThreshold,
+           latest.low <= fastMean + atr * parameters.pullbackATRBuffer,
+           latest.close > fastMean,
+           latest.close > previousHigh + atr * parameters.breakoutATRBuffer,
+           latest.close > latest.open,
+           closeLocation >= parameters.minimumCloseLocation {
+            let stop = stopPrice(
+                side: .buy,
+                mode: parameters.stopMode,
+                latest: latest,
+                entry: entry,
+                fastMean: fastMean,
+                atr: atr,
+                buffer: parameters.stopATRBuffer
+            )
+            let risk = entry - stop
+            guard parameters.allowsRisk(risk, entry: entry) else { return .noSignal }
+            return strategyFixedTargetSignal(
+                definition: definition,
+                context: context,
+                side: .buy,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry + risk * parameters.rewardRiskRatio,
+                reason: "\(label): SMA\(parameters.fastMeanPeriod)/SMA\(parameters.slowMeanPeriod) 상승 phase reclaim"
+            )
+        }
+
+        if parameters.allowsShort,
+           fastMean < slowMean,
+           returnValue <= -parameters.returnThreshold,
+           latest.high >= fastMean - atr * parameters.pullbackATRBuffer,
+           latest.close < fastMean,
+           latest.close < previousLow - atr * parameters.breakoutATRBuffer,
+           latest.close < latest.open,
+           closeLocation <= 1 - parameters.minimumCloseLocation {
+            let stop = stopPrice(
+                side: .sell,
+                mode: parameters.stopMode,
+                latest: latest,
+                entry: entry,
+                fastMean: fastMean,
+                atr: atr,
+                buffer: parameters.stopATRBuffer
+            )
+            let risk = stop - entry
+            guard parameters.allowsRisk(risk, entry: entry) else { return .noSignal }
+            return strategyFixedTargetSignal(
+                definition: definition,
+                context: context,
+                side: .sell,
+                entry: entry,
+                stop: stop,
+                takeProfit: entry - risk * parameters.rewardRiskRatio,
+                reason: "\(label): SMA\(parameters.fastMeanPeriod)/SMA\(parameters.slowMeanPeriod) 하락 phase reclaim"
+            )
+        }
+
+        return .noSignal
+    }
+
+    private static func isAllowedWeekday(_ date: Date, mask: Int) -> Bool {
+        let calendarWeekday = utcCalendar.component(.weekday, from: date)
+        let mondayZeroBasedWeekday = (calendarWeekday + 5) % 7
+        return mask & (1 << mondayZeroBasedWeekday) != 0
+    }
+
+    private static func stopPrice(
+        side: TradeSide,
+        mode: Int,
+        latest: Candle,
+        entry: Decimal,
+        fastMean: Decimal,
+        atr: Decimal,
+        buffer: Decimal
+    ) -> Decimal {
+        switch (side, mode) {
+        case (.buy, 1):
+            return latest.low - atr * buffer
+        case (.sell, 1):
+            return latest.high + atr * buffer
+        case (.buy, 2):
+            return entry - atr * buffer
+        case (.sell, 2):
+            return entry + atr * buffer
+        case (.buy, _):
+            return Swift.min(latest.low, fastMean - atr * buffer)
+        case (.sell, _):
+            return Swift.max(latest.high, fastMean + atr * buffer)
+        }
+    }
+}
+
 private extension TradingStrategy {
     func fixedTargetSignal(
         context: StrategyContext,
@@ -1838,6 +2105,65 @@ private struct ETHOneHourMomentumBurstParameters {
     }
 }
 
+private struct FifteenMinuteVacuumPulseParameters {
+    let fastMeanPeriod: Int
+    let slowMeanPeriod: Int
+    let atrPeriod: Int
+    let volumeLookback: Int
+    let reclaimLookback: Int
+    let returnLookback: Int
+    let returnThreshold: Decimal
+    let minimumTrendSpread: Decimal
+    let maximumTrendSpread: Decimal
+    let minimumATRPercent: Decimal
+    let maximumATRPercent: Decimal
+    let volumeMultiplier: Decimal
+    let minimumCloseLocation: Decimal
+    let pullbackATRBuffer: Decimal
+    let breakoutATRBuffer: Decimal
+    let stopATRBuffer: Decimal
+    let minimumStopPercent: Decimal
+    let maximumStopPercent: Decimal
+    let rewardRiskRatio: Decimal
+    let stopMode: Int
+    let sideMode: Int
+    let weekdayMask: Int
+
+    var allowsLong: Bool { sideMode >= 0 }
+    var allowsShort: Bool { sideMode <= 0 }
+
+    func allowsRisk(_ risk: Decimal, entry: Decimal) -> Bool {
+        guard risk > 0, entry > 0 else { return false }
+        let riskPercent = risk / entry
+        return riskPercent >= minimumStopPercent && riskPercent <= maximumStopPercent
+    }
+
+    init(overrides: [String: Decimal]) {
+        fastMeanPeriod = intOverride("fastMeanPeriod", overrides: overrides, defaultValue: 96)
+        slowMeanPeriod = intOverride("slowMeanPeriod", overrides: overrides, defaultValue: 384)
+        atrPeriod = intOverride("atrPeriod", overrides: overrides, defaultValue: 14)
+        volumeLookback = intOverride("volumeLookback", overrides: overrides, defaultValue: 144)
+        reclaimLookback = intOverride("reclaimLookback", overrides: overrides, defaultValue: 2)
+        returnLookback = intOverride("returnLookback", overrides: overrides, defaultValue: 2)
+        returnThreshold = overrides["returnThreshold"] ?? 0
+        minimumTrendSpread = overrides["minimumTrendSpread"] ?? Decimal(string: "0.002")!
+        maximumTrendSpread = overrides["maximumTrendSpread"] ?? Decimal(string: "0.020")!
+        minimumATRPercent = overrides["minimumATRPercent"] ?? Decimal(string: "0.001")!
+        maximumATRPercent = overrides["maximumATRPercent"] ?? Decimal(string: "0.0075")!
+        volumeMultiplier = overrides["volumeMultiplier"] ?? Decimal(string: "2.0")!
+        minimumCloseLocation = overrides["minimumCloseLocation"] ?? Decimal(string: "0.76")!
+        pullbackATRBuffer = overrides["pullbackATRBuffer"] ?? 0
+        breakoutATRBuffer = overrides["breakoutATRBuffer"] ?? 0
+        stopATRBuffer = overrides["stopATRBuffer"] ?? Decimal(string: "0.45")!
+        minimumStopPercent = overrides["minimumStopPercent"] ?? 0
+        maximumStopPercent = overrides["maximumStopPercent"] ?? 1
+        rewardRiskRatio = overrides["rewardRiskRatio"] ?? Decimal(string: "3.5")!
+        stopMode = min(2, max(0, zeroBasedIntOverride("stopMode", overrides: overrides, defaultValue: 0)))
+        sideMode = sideModeOverride(overrides: overrides)
+        weekdayMask = min(127, max(1, intOverride("weekdayMask", overrides: overrides, defaultValue: 127)))
+    }
+}
+
 private struct DonchianBreakoutParameters {
     let lookback: Int
     let atrPeriod: Int
@@ -1915,6 +2241,15 @@ private func intOverride(
 ) -> Int {
     guard let value = overrides[key] else { return defaultValue }
     return max(1, Int(truncating: NSDecimalNumber(decimal: value)))
+}
+
+private func zeroBasedIntOverride(
+    _ key: String,
+    overrides: [String: Decimal],
+    defaultValue: Int
+) -> Int {
+    guard let value = overrides[key] else { return defaultValue }
+    return max(0, Int(truncating: NSDecimalNumber(decimal: value)))
 }
 
 private func sideModeOverride(overrides: [String: Decimal]) -> Int {

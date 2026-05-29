@@ -126,6 +126,10 @@ final class DashboardViewModel: ObservableObject {
         strategyRegistry.definitions(recommendedFor: timeframe, symbol: state.selectedSymbol)
     }
 
+    func strategyDefinitions(for timeframe: CandleTimeframe, symbol: FuturesSymbol) -> [StrategyDefinition] {
+        strategyRegistry.definitions(recommendedFor: timeframe, symbol: symbol)
+    }
+
     func bootstrap() {
         do {
             if let credential = try credentialStore.load() {
@@ -1364,6 +1368,7 @@ final class DashboardViewModel: ObservableObject {
             openPositions: positionsWithChartProtectionLevels(state.positions)
                 .filter { watchlist.contains($0.symbol) },
             accountEquity: usdtAccount?.accountEquity,
+            accountAvailable: usdtAccount?.available,
             contractSpecs: state.symbolCatalog
         )
 

@@ -8,9 +8,11 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(ids, Set([
             DonchianChannelBreakoutStrategy.identifier,
             ETHOneHourMomentumBurstStrategy.identifier,
+            ETHFifteenMinuteVacuumPulseStrategy.identifier,
             TimeSeriesMomentumStrategy.identifier,
             VWMATouchTrendStrategy.identifier,
             BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
+            BTCFifteenMinuteVacuumPulseStrategy.identifier,
             XOneHourLongStrategy.identifier,
             XOneHourShortStrategy.identifier,
             XFrequencyStrategy.identifier,
@@ -24,7 +26,9 @@ final class StrategyTests: XCTestCase {
             [
                 XStrategy.identifier,
                 XFrequencyStrategy.identifier,
-                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
+                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
+                BTCFifteenMinuteVacuumPulseStrategy.identifier,
+                ETHFifteenMinuteVacuumPulseStrategy.identifier
             ]
         )
         XCTAssertEqual(
@@ -66,7 +70,7 @@ final class StrategyTests: XCTestCase {
             []
         )
         XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
-            strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
+            strategyID: BTCFifteenMinuteVacuumPulseStrategy.identifier,
             for: .fifteenMinutes,
             symbol: FuturesSymbol("BTCUSDT")
         ))
@@ -76,10 +80,63 @@ final class StrategyTests: XCTestCase {
                 symbol: FuturesSymbol("BTCUSDT")
             ),
             [
-                XStrategy.identifier,
-                XFrequencyStrategy.identifier,
-                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
+                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
+                BTCFifteenMinuteVacuumPulseStrategy.identifier
             ]
+        )
+        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
+            strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
+            for: .fifteenMinutes,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: XStrategy.identifier,
+            for: .fifteenMinutes,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: XFrequencyStrategy.identifier,
+            for: .fifteenMinutes,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .twelveHours,
+                symbol: FuturesSymbol("BTCUSDT")
+            ),
+            []
+        )
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: VWMATouchTrendStrategy.identifier,
+            for: .twelveHours,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: DonchianChannelBreakoutStrategy.identifier,
+            for: .twelveHours,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: TimeSeriesMomentumStrategy.identifier,
+            for: .twelveHours,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: VWMATouchTrendStrategy.identifier,
+            for: .oneDay,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: DonchianChannelBreakoutStrategy.identifier,
+            for: .oneDay,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertEqual(
+            StrategyTimeframeRouting.recommendedStrategyIDs(
+                for: .oneDay,
+                symbol: FuturesSymbol("BTCUSDT")
+            ),
+            []
         )
         XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
             strategyID: ETHOneHourMomentumBurstStrategy.identifier,
@@ -100,18 +157,23 @@ final class StrategyTests: XCTestCase {
             ),
             []
         )
-        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
-            strategyID: VWMATouchTrendStrategy.identifier,
-            for: .oneDay,
-            symbol: FuturesSymbol("BTCUSDT")
-        ))
         XCTAssertEqual(
             StrategyTimeframeRouting.recommendedStrategyIDs(
                 for: .fifteenMinutes,
                 symbol: FuturesSymbol("ETHUSDT")
             ),
-            []
+            [ETHFifteenMinuteVacuumPulseStrategy.identifier]
         )
+        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
+            strategyID: ETHFifteenMinuteVacuumPulseStrategy.identifier,
+            for: .fifteenMinutes,
+            symbol: FuturesSymbol("ETHUSDT")
+        ))
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: BTCFifteenMinuteVacuumPulseStrategy.identifier,
+            for: .fifteenMinutes,
+            symbol: FuturesSymbol("ETHUSDT")
+        ))
         XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
             strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
             for: .fifteenMinutes,
@@ -129,8 +191,13 @@ final class StrategyTests: XCTestCase {
                 for: .twelveHours,
                 symbol: FuturesSymbol("ETHUSDT")
             ),
-            [TimeSeriesMomentumStrategy.identifier]
+            []
         )
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
+            strategyID: TimeSeriesMomentumStrategy.identifier,
+            for: .twelveHours,
+            symbol: FuturesSymbol("ETHUSDT")
+        ))
         XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
             strategyID: VWMATouchTrendStrategy.identifier,
             for: .oneDay,
@@ -141,7 +208,7 @@ final class StrategyTests: XCTestCase {
                 for: .oneDay,
                 symbol: FuturesSymbol("ETHUSDT")
             ),
-            [DonchianChannelBreakoutStrategy.identifier]
+            []
         )
     }
 
@@ -306,7 +373,7 @@ final class StrategyTests: XCTestCase {
             accuracy: 0.0001
         )
         XCTAssertEqual(strategy.definition.defaultConfig.leverage, 10)
-        XCTAssertEqual(strategy.definition.defaultConfig.maximumRiskPerTradePercent, 15)
+        XCTAssertEqual(strategy.definition.defaultConfig.maximumRiskPerTradePercent, 5)
 
         let ethEvaluation = try strategy.evaluate(
             StrategyContext(
@@ -700,6 +767,34 @@ final class StrategyTests: XCTestCase {
         XCTAssertEqual(trade.finalTakeProfitFillRatio, 0)
         XCTAssertEqual(trade.stopLossFillRatio, Decimal(string: "0.5"))
         XCTAssertEqual(trade.leveragedReturnPercent, Decimal(string: "3.71")!)
+    }
+
+    func testBacktestEngineClosesAtMaximumHoldingPeriodWithReason() throws {
+        let registry = StrategyRegistry(strategies: [FixtureSignalStrategy()])
+        let engine = BacktestEngine(strategyRegistry: registry)
+        var config = fixtureSignalConfig()
+        config.maximumHoldingCandles = 2
+        var candles = repeatedCandles(count: 40, close: 100)
+        candles.append(makeStrategyCandle(offset: 40, open: 100, high: 105, low: 95, close: 100))
+        candles.append(makeStrategyCandle(offset: 41, open: 100, high: 105, low: 95, close: 101))
+
+        let result = try engine.run(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            candles: candles,
+            config: config
+        )
+        let trade = try XCTUnwrap(result.trades.first)
+
+        XCTAssertEqual(result.totalTrades, 1)
+        XCTAssertEqual(trade.exitTime, candles[41].openTime)
+        XCTAssertEqual(trade.exitPrice, 101)
+        XCTAssertEqual(trade.partialTakeProfitFillRatio, 0)
+        XCTAssertEqual(trade.finalTakeProfitFillRatio, 0)
+        XCTAssertEqual(trade.stopLossFillRatio, 0)
+        XCTAssertTrue(trade.reason.contains("시간 종료"))
+        XCTAssertTrue(trade.reason.contains("최대 보유 2봉"))
+        XCTAssertTrue(trade.reason.contains("진입 가설"))
     }
 
     func testBacktestEngineAppliesStopLossMarketFeeToLosingTrades() throws {

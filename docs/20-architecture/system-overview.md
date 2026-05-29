@@ -158,7 +158,7 @@ References:
 - Backtest strategy logic consumes closed candle data. Live monitoring explicitly models the current forming candle for earlier entry decisions.
 - Built-in strategies must emit `entryPrice`, `stopLoss`, and `takeProfit` together when they produce a signal.
 - Built-in strategy inputs are limited to local OHLCV candles, so implemented indicators are computed internally from close/high/low/volume rather than requested from Bitget. Backtest input remains closed-only; Live input may include the latest forming candle.
-- Built-in strategy set: X, VWMA100 touch trend, Donchian channel breakout, and Time-Series momentum.
+- Built-in strategy set: BTC 15m Vacuum Pulse, ETH 15m Vacuum Pulse, BTC 15m Phase Vacuum Reclaim, X-Frequency, X, ETH 1H Momentum Burst, VWMA100 touch trend, Donchian channel breakout, and Time-Series momentum.
 - Strategy signals use the main strategy output and risk policy as the default trading path. Auxiliary indicator Gate data has been removed from the active decision path after validation showed weak path stability.
 - Live monitoring is independent from the chart-selected timeframe. When Live is running, it evaluates every Watchlist symbol across `15m`, `1H`, `4H`, `12H`, and `1D`, using the recommended strategy list for each timeframe.
 - The Dashboard Live monitor loop evaluates candidates every 3 seconds by default until the engine is moved to a fully WebSocket-event-driven trigger.
@@ -169,6 +169,8 @@ References:
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
 - Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, leverage above `10x`, and signals whose take-profit cannot cover estimated round-trip trading fees.
 - Risk policy sizes each position so `stop-loss percent × leverage × margin allocation <= configured max loss per trade`. The default max loss per trade is `5%`, and UI configuration is capped at `15%`.
+- Live order sizing starts from the risk-sized margin allocation, then caps required margin to `95%` of current USDT available balance before converting to contract size. This prevents equity-based sizing from exceeding spendable exchange balance when other positions or reservations already use margin.
+- Strategy config can define `maximumHoldingCandles`. If TP2/SL does not resolve before that window expires, the backtest closes the remaining position at the candle close with a conservative taker-fee market exit and records a Korean time-exit reason.
 - Current trading fee estimates distinguish order intent:
   - Entry after a closed-candle signal is assumed to be market execution, so it uses taker fee.
   - Take-profit protection is modeled as exchange-side reduce-only limit execution, so the planning model uses maker fee.
@@ -177,7 +179,7 @@ References:
 - Backtest capital is compounded from the configured starting amount. Each closed trade applies its position-sized net leveraged return percent to the current balance, and the final balance/net return are derived from that balance curve.
 - Backtest exits use two-stage take-profit by default: TP1 is the midpoint between entry and final target for 50% size, TP2 is the original final target for the remaining 50%, and after TP1 the remaining stop-loss moves to 25% of the entry-to-target distance.
 - Backtest results are shown in Korean-first metrics: win rate, trade count, net return, average reward/risk, max drawdown, and blocked signals.
-- Live execution records signal, risk decision, redacted exchange order metadata, and protection status separately.
+- Live execution records signal, risk decision, redacted exchange order metadata, protection status, and explicit close rationale separately.
 - The chart and position panel draw/display entry, TP1, TP2, and SL levels. TP2/SL come from the current position snapshot when available; when Bitget omits them on the position response, the dashboard supplements display and live-position scoring from the most recent live entry log for the same symbol/side.
 - Live execution requires a connected Bitget credential, explicit UI consent checkbox, and `Start Live`; deleting credentials stops the live monitor.
 
@@ -201,16 +203,27 @@ References:
 - More active combinations should increase trade opportunities, but execution must still cap risk by Watchlist symbol, leverage, open position state, duplicate signal handling, and opposite-signal handling.
 - Portfolio arbitration is global for the Live monitor run: simultaneous candidates compete for currently empty symbol/side slots, and only the top-ranked eligible candidate can create a live order.
 - Open positions with TP/SL data are scored by remaining reward/risk from mark price to TP/SL and expected remaining profit amount. When Bitget omits TP/SL fields but a matching live entry log has TP2/SL, the dashboard enriches the position before portfolio arbitration so an active protected position is not falsely scored as `0:1`. Positions without enough TP/SL data still receive the lowest comparable priority because their remaining reward/risk cannot be proven.
+- Before evaluating new entries, Live monitor checks open positions against app-created live entry logs. If a position's configured maximum holding window has expired, the monitor submits a close request first and skips new entries in that cycle.
+- Holding-period exits apply only when the app can match the open position to a prior live entry log containing symbol, side, strategy, and timeframe. Manual/external positions are not time-closed because the app cannot prove the strategy rationale.
 - Portfolio backtesting should eventually report both per-combination metrics and aggregate portfolio metrics so weak combinations can be removed without disabling the whole strategy family.
 
 ## Strategy Research Notes
 
-- Current recommended routing keeps the locally validated combinations from the `10x` leverage / `5%` per-trade account-risk backtest:
-  - `15m`: X, X-Frequency
-  - `4H`: Donchian channel breakout
-  - `12H`: VWMA100 touch trend, Donchian channel breakout, Time-Series momentum
-  - `1D`: VWMA100 touch trend, Donchian channel breakout
-- The `15m` X route is now the Phase-Spread Reclaim strategy. On the latest local BTCUSDT 15m four-year backtest window it finished at `$216.139727` from `$100`, with `+116.14%` net return, `72.22%` win rate, `54` trades, `10.96%` max drawdown, and `2.02` profit factor under `10x` leverage / `5%` per-trade account-risk settings.
-- The `15m` X-Frequency route keeps the same phase-spread reclaim family but uses a wider spread gate and stronger `1.5x` volume gate for a medium-frequency target. On the same backtest window it finished at `$276.774724` from `$100`, with `+176.77%` net return, `60.19%` win rate, `216` trades, `39.88%` max drawdown, and `1.29` profit factor. It is a higher-drawdown live route and should be monitored cautiously.
-- `1H` currently has no recommended live strategy route.
-- Strategies that failed the latest return, drawdown, or trade-count filters were removed from the built-in registry and implementation.
+- Current recommended routing is symbol-scoped after the latest requested activation:
+  - `BTCUSDT 15m`: BTC 15m Phase Vacuum Reclaim, BTC 15m Vacuum Pulse
+  - `BTCUSDT 12H`: no recommended route
+  - `BTCUSDT 1D`: no recommended route
+  - `ETHUSDT 15m`: ETH 15m Vacuum Pulse
+  - `ETHUSDT 1H`: ETH 1H Momentum Burst
+  - `ETHUSDT 12H`: no recommended route
+  - `ETHUSDT 1D`: no recommended route
+- Current active route maximum holding windows:
+  - `BTCUSDT 15m` Phase Vacuum Reclaim: `96` candles, about `24h`
+  - `BTCUSDT 15m` Vacuum Pulse: `96` candles, about `24h`
+  - `ETHUSDT 15m` Vacuum Pulse: `96` candles, about `24h`
+  - `ETHUSDT 1H` Momentum Burst: `72` candles, about `3d`
+- The active `BTCUSDT 15m` Phase Vacuum Reclaim route's latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$808.643489` from `$100`, with `+708.64%` net return, `51.28%` win rate, `156` trades, `33.77%` max drawdown, and `1.59` profit factor.
+- The active `BTCUSDT 15m` route is the BTC 15m Vacuum Pulse strategy. The latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$808.643489` from `$100`, with `+708.64%` net return, `68.69%` annualized return, `51.28%` win rate, `156` trades, `39.03` trades/year, `33.77%` max drawdown, and `1.59` profit factor.
+- The active `ETHUSDT 15m` route is the ETH 15m Vacuum Pulse strategy. The latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$637.452288` from `$100`, with `+537.45%` net return, `58.95%` annualized return, `49.15%` win rate, `118` trades, `29.52` trades/year, `22.00%` max drawdown, and `1.47` profit factor.
+- The active `ETHUSDT 1H` route is ETH 1H Momentum Burst. The latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$245.041148` from `$100`, with `+145.04%` net return, `50.43%` win rate, `232` trades, `39.24%` max drawdown, and `1.11` profit factor.
+- Pruned strategy implementations remain in the built-in registry when useful for reproducible backtests, but symbol-scoped active routes keep them out of BTCUSDT/ETHUSDT live recommendations unless explicitly re-enabled.

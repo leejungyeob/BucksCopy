@@ -63,13 +63,16 @@
 - 손익비가 같은 여러 신호가 발생 -> 계좌 기준 기대순익 금액이 가장 큰 후보를 선택
 - ETHUSDT short 포지션 보유 중 ETHUSDT short 새 신호 발생 -> 같은 symbol/side 슬롯이 점유되어 신규 진입/변경 없이 보류
 - ETHUSDT short 포지션 보유 중 ETHUSDT long 새 신호 발생 -> hedge mode 기준 반대 방향 슬롯이 비어 있으므로 후보로 허용
+- app-created live entry log와 매칭되는 포지션이 전략별 최대 보유기간을 초과 -> Live monitor가 신규 진입 평가 전에 close-positions 요청 -> close log에 `청산 근거`와 경과 봉수 기록
 - 새 신호로 기존 포지션을 시장가 정리 -> close log에 청산 직전 PnL과 승/패 판정 기록 -> 하단 자동매매 기록의 승패/승률에 반영
 - 진행 중 포지션의 남은 손익비/기대수익이 새 신호 이상 -> 새 신호를 보류하고 기존 포지션 유지 decision 기록
 - 선택 화면 시간봉 변경 -> 표시 candle과 설정 UI만 바뀌고 실행 중 Live monitor의 다른 시간봉 감시는 유지
 - 전략 × 시간봉 백테스트 -> 조합별 승률/순손익/거래 수/최대 낙폭 표시 -> 포트폴리오 합산 성과와 분리해 비교 가능
 - 동일 symbol/timeframe에서 여러 전략이 동시에 signal 생성 -> 중복 진입, 같은 방향 추가 진입, 반대 신호 처리 정책이 deterministic하게 적용
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal -> live/backtest 모두 risk-blocked로 처리
+- 최대 보유기간이 설정된 백테스트 거래가 TP2/SL 미도달 상태로 기간 만료 -> candle 종가 시간 종료, taker 수수료, Korean reason 기록
 - 손절폭이 큰 signal -> 차단하지 않고 `손절폭 × 레버리지 × 투입비율 <= 1회 최대 손실률`이 되도록 포지션 투입비율을 축소
+- Live order sizing -> risk-sized planned margin이 USDT available balance 95%보다 크면 available buffer 기준으로 주문 수량 축소
 - 1회 최대 손실률 설정 -> 기본 5%, UI 최대 15%로 제한
 - Backtest risk-blocked signal -> 차단 사유를 손절 위험, 손익비, 수수료, 레버리지 제한 등으로 집계해 결과 화면에 표시
 - TP 2분할 -> 진입가와 최종 목표가의 중간값에서 50% 익절 -> 남은 50%는 최종 목표가 또는 profit-lock stop 중 먼저 닿는 가격에 청산

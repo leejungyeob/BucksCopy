@@ -158,12 +158,14 @@ struct BacktestEngine {
 
             guard let exit = simulatedExit(
                 signal: confirmedSignal,
+                timeframe: timeframe,
                 candles: closedCandles,
                 startingAt: index + 1,
                 leverage: config.leverage,
                 positionMarginRatio: riskDecision.positionMarginRatio,
                 accountRiskPercent: riskDecision.accountRiskPercent,
-                startingBalance: currentBalance
+                startingBalance: currentBalance,
+                maximumHoldingCandles: config.maximumHoldingCandles
             ) else {
                 openSignals += 1
                 if let score = confirmationDecision.score {
@@ -503,21 +505,25 @@ struct BacktestEngine {
 
     private func simulatedExit(
         signal: StrategySignal,
+        timeframe: CandleTimeframe,
         candles: [Candle],
         startingAt startIndex: Int,
         leverage: Int,
         positionMarginRatio: Decimal,
         accountRiskPercent: Decimal,
-        startingBalance: Decimal
+        startingBalance: Decimal,
+        maximumHoldingCandles: Int?
     ) -> (trade: BacktestTrade, exitIndex: Int)? {
         guard startIndex < candles.count else { return nil }
 
         let partialTakeProfit = signal.partialTakeProfit
         let profitLockStopLoss = signal.profitLockStopLossAfterPartialTakeProfit
+        let maximumHoldingCandles = maximumHoldingCandles.flatMap { $0 > 0 ? $0 : nil }
         var didHitPartialTakeProfit = false
 
         for index in startIndex..<candles.count {
             let candle = candles[index]
+            let heldCandles = index - startIndex + 1
             let activeStopLoss = didHitPartialTakeProfit ? profitLockStopLoss : signal.stopLoss
             let hitStop: Bool
             let hitPartialTakeProfit: Bool
@@ -603,6 +609,41 @@ struct BacktestEngine {
             if hitPartialTakeProfit {
                 didHitPartialTakeProfit = true
             }
+
+            if let maximumHoldingCandles,
+               heldCandles >= maximumHoldingCandles {
+                var legs: [SimulatedExitLeg] = []
+                if didHitPartialTakeProfit {
+                    legs.append(SimulatedExitLeg(
+                        kind: .partialTakeProfit,
+                        price: partialTakeProfit,
+                        ratio: SplitTakeProfitPlan.partialTakeProfitRatio,
+                        exitExecution: .takeProfitLimit
+                    ))
+                }
+                legs.append(SimulatedExitLeg(
+                    kind: .timeExit,
+                    price: candle.close,
+                    ratio: didHitPartialTakeProfit ? SplitTakeProfitPlan.finalTakeProfitRatio : 1,
+                    exitExecution: .stopLossMarket
+                ))
+                return makeTrade(
+                    signal: signal,
+                    exitTime: candle.openTime,
+                    legs: legs,
+                    leverage: leverage,
+                    positionMarginRatio: positionMarginRatio,
+                    accountRiskPercent: accountRiskPercent,
+                    startingBalance: startingBalance,
+                    exitIndex: index,
+                    exitReasonOverride: holdingPeriodExitReason(
+                        signal: signal,
+                        timeframe: timeframe,
+                        maximumHoldingCandles: maximumHoldingCandles,
+                        didHitPartialTakeProfit: didHitPartialTakeProfit
+                    )
+                )
+            }
         }
 
         return nil
@@ -616,7 +657,8 @@ struct BacktestEngine {
         positionMarginRatio: Decimal,
         accountRiskPercent: Decimal,
         startingBalance: Decimal,
-        exitIndex: Int
+        exitIndex: Int,
+        exitReasonOverride: String? = nil
     ) -> (trade: BacktestTrade, exitIndex: Int) {
         let returnPercent = legs.reduce(Decimal(0)) { partial, leg in
             let legPositionMarginRatio = positionMarginRatio * leg.ratio
@@ -643,9 +685,9 @@ struct BacktestEngine {
         let partialFillRatio = fillRatio(legs, kind: .partialTakeProfit)
         let finalFillRatio = fillRatio(legs, kind: .finalTakeProfit)
         let stopFillRatio = fillRatio(legs, kind: .stopLoss)
-        let exitReason = partialFillRatio > 0
+        let exitReason = exitReasonOverride ?? (partialFillRatio > 0
             ? "\(signal.reason) | TP1 \(signal.partialTakeProfit) 50%, SL 보호 \(signal.profitLockStopLossAfterPartialTakeProfit)"
-            : signal.reason
+            : signal.reason)
 
         let trade = BacktestTrade(
             symbol: signal.symbol,
@@ -671,6 +713,18 @@ struct BacktestEngine {
             reason: exitReason
         )
         return (trade, exitIndex)
+    }
+
+    private func holdingPeriodExitReason(
+        signal: StrategySignal,
+        timeframe: CandleTimeframe,
+        maximumHoldingCandles: Int,
+        didHitPartialTakeProfit: Bool
+    ) -> String {
+        let partialText = didHitPartialTakeProfit
+            ? "TP1 체결 후 잔여 50%가 TP2/SL에 도달하지 않음"
+            : "TP1/TP2/SL에 도달하지 않음"
+        return "\(signal.reason) | 시간 종료: 최대 보유 \(maximumHoldingCandles)봉(\(timeframe.rawValue)) 경과, \(partialText). 진입 가설이 지연되어 종가 기준 시장가 종료."
     }
 
     private func weightedExitPrice(_ legs: [SimulatedExitLeg]) -> Decimal {
@@ -757,6 +811,7 @@ private struct SimulatedExitLeg {
         case partialTakeProfit
         case finalTakeProfit
         case stopLoss
+        case timeExit
     }
 
     let kind: Kind

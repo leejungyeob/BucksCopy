@@ -377,6 +377,78 @@ final class MultiTimeframeLiveTradingMonitorTests: XCTestCase {
         XCTAssertEqual(startupRun.executionResult?.didSubmitOrder, false)
         XCTAssertEqual(nextCandleRun.signalCount, 1)
     }
+
+    func testClosesAppManagedPositionWhenMaximumHoldingPeriodExpires() async throws {
+        let symbol = FuturesSymbol("BTCUSDT")
+        let now = Date(timeIntervalSince1970: 200_000)
+        let clock = FixedClock(now: now)
+        let candleRepository = InMemoryCandleRepository()
+        let logStore = InMemoryTradeEventLogStore()
+        let client = TestLiveOrderClient()
+        let registry = StrategyRegistry(strategies: [BTCFifteenMinuteVacuumPulseStrategy()])
+        let executor = LiveTradeExecutor(
+            orderPlacer: client,
+            leverageSetter: client,
+            protectionInstaller: ExchangeProtectionInstaller(
+                orderPlacer: client,
+                retryPolicy: ExchangeProtectionRetryPolicy(retryDelayNanoseconds: 0)
+            ),
+            logStore: logStore,
+            clock: clock
+        )
+        let monitor = MultiTimeframeLiveTradingMonitor(
+            candleRepository: candleRepository,
+            candleBackfillRepository: nil,
+            signalEvaluator: TradingSignalEvaluator(
+                strategyRegistry: registry,
+                logStore: logStore,
+                confirmationEngine: passingConfirmationEngine(),
+                clock: clock
+            ),
+            liveExecutor: executor,
+            strategyRegistry: registry,
+            clock: clock
+        )
+        try logStore.append(TradeEventLog(
+            timestamp: now.addingTimeInterval(-CandleTimeframe.fifteenMinutes.duration * 97),
+            category: .liveOrder,
+            symbol: symbol,
+            message: "Live buy order submitted by \(BTCFifteenMinuteVacuumPulseStrategy.identifier) on 15m.",
+            metadata: TradeLogMetadata(
+                title: "BTCUSDT 15m 매수 진입",
+                tags: [
+                    TradeLogTag(label: "LIVE", tone: .success),
+                    TradeLogTag(label: "15m", tone: .accent),
+                    TradeLogTag(label: "매수", tone: .success),
+                    TradeLogTag(label: BTCFifteenMinuteVacuumPulseStrategy.identifier, tone: .neutral)
+                ],
+                details: [
+                    TradeLogDetail(label: "매매전략", value: BTCFifteenMinuteVacuumPulseStrategy.identifier),
+                    TradeLogDetail(label: "시간봉", value: "15m")
+                ]
+            )
+        ))
+
+        let result = await monitor.evaluateOnce(
+            watchlist: [symbol],
+            leverageBySymbol: [symbol: 10],
+            openPositions: [monitorPosition(symbol: symbol, side: .long)],
+            accountEquity: 1_000,
+            contractSpecs: [monitorContractSpec(symbol: symbol)]
+        )
+
+        XCTAssertEqual(client.closeRequests.count, 1)
+        XCTAssertEqual(client.closeRequests.first?.symbol, symbol)
+        XCTAssertEqual(client.closeRequests.first?.holdSide, .long)
+        XCTAssertEqual(result.executionResult?.didSubmitOrder, true)
+        XCTAssertTrue(result.evaluations.isEmpty)
+        let closeLog = try XCTUnwrap(try logStore.loadRecent(limit: 10).first {
+            $0.metadata?.title.contains("보유기간 종료") == true
+        })
+        XCTAssertTrue(closeLog.metadata?.details.contains {
+            $0.label == "청산 근거" && $0.value.contains("최대 보유 기간 96봉")
+        } ?? false)
+    }
 }
 
 private struct MonitorEvidenceRule: SignalConfirmationRule {
@@ -423,6 +495,29 @@ private func monitorContractSpec(symbol: FuturesSymbol) -> ContractSpec {
         volumePlace: 4,
         minLeverage: 1,
         maxLeverage: 10
+    )
+}
+
+private func monitorPosition(
+    symbol: FuturesSymbol,
+    side: PositionSide
+) -> PositionSnapshot {
+    PositionSnapshot(
+        symbol: symbol,
+        side: side,
+        total: 1,
+        available: 1,
+        openPriceAverage: 100,
+        markPrice: 101,
+        unrealizedProfitLoss: 1,
+        leverage: 10,
+        marginMode: "isolated",
+        positionMode: .hedge,
+        liquidationPrice: nil,
+        takeProfit: 120,
+        stopLoss: 90,
+        createdAt: nil,
+        updatedAt: nil
     )
 }
 

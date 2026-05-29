@@ -181,9 +181,11 @@ struct DashboardView: View {
     }
 
     private var activeStrategyRoutes: [ActiveStrategyRoute] {
-        CandleTimeframe.allCases.flatMap { timeframe in
-            viewModel.strategyDefinitions(for: timeframe).map {
-                ActiveStrategyRoute(timeframe: timeframe, definition: $0)
+        viewModel.state.watchlist.flatMap { symbol in
+            CandleTimeframe.allCases.flatMap { timeframe in
+                viewModel.strategyDefinitions(for: timeframe, symbol: symbol).map {
+                    ActiveStrategyRoute(symbol: symbol, timeframe: timeframe, definition: $0)
+                }
             }
         }
     }
@@ -541,11 +543,12 @@ private struct DashboardLeftColumn: View, Equatable {
 }
 
 private struct ActiveStrategyRoute: Equatable, Identifiable {
+    let symbol: FuturesSymbol
     let timeframe: CandleTimeframe
     let definition: StrategyDefinition
 
     var id: String {
-        "\(timeframe.rawValue):\(definition.id)"
+        "\(symbol.rawValue):\(timeframe.rawValue):\(definition.id)"
     }
 }
 
@@ -591,6 +594,13 @@ private struct ActiveStrategyRouteRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
+                Text(route.symbol.rawValue)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+
                 Text(route.timeframe.rawValue)
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .foregroundStyle(Color.accentColor)

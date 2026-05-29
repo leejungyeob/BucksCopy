@@ -38,6 +38,37 @@ final class SafetyTests: XCTestCase {
         XCTAssertTrue(try logStore.loadRecent(limit: 10).contains { $0.category == .liveOrder })
     }
 
+    func testLiveTradeExecutorCapsEntrySizeToAvailableBalanceBuffer() async throws {
+        let client = TestLiveOrderClient()
+        let logStore = InMemoryTradeEventLogStore()
+        let executor = LiveTradeExecutor(
+            orderPlacer: client,
+            leverageSetter: client,
+            protectionInstaller: ExchangeProtectionInstaller(
+                orderPlacer: client,
+                retryPolicy: ExchangeProtectionRetryPolicy(retryDelayNanoseconds: 0)
+            ),
+            logStore: logStore,
+            clock: FixedClock(now: Date(timeIntervalSince1970: 1))
+        )
+        let evaluator = TradingSignalEvaluator(
+            strategyRegistry: StrategyRegistry(strategies: []),
+            logStore: logStore,
+            clock: FixedClock(now: Date(timeIntervalSince1970: 1))
+        )
+        let candidate = liveTradeCandidate()
+
+        _ = try await executor.execute(
+            decision: .enter(candidate, reason: "fixture decision"),
+            accountEquity: 1_000,
+            accountAvailable: 100,
+            contractSpecs: [liveContractSpec(symbol: candidate.signal.symbol)],
+            signalEvaluator: evaluator
+        )
+
+        XCTAssertEqual(client.marketOrders.first?.size, Decimal(string: "1.9")!)
+    }
+
     func testLiveTradeExecutorFailClosesWhenProtectionInstallFails() async throws {
         let client = TestLiveOrderClient()
         let failingProtectionPlacer = FlakyProtectionOrderPlacer(failuresBeforeSuccess: 99)

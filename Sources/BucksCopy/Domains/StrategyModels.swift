@@ -18,6 +18,7 @@ struct StrategyConfig: Codable, Equatable {
     var parameters: [String: Decimal]
     var maximumRiskPerTradePercent: Decimal
     var maximumPositionMarginPercent: Decimal
+    var maximumHoldingCandles: Int?
     var signalConfirmation: SignalConfirmationConfig
 
     static let `default` = VWMATouchTrendStrategy().definition.defaultConfig
@@ -28,6 +29,7 @@ struct StrategyConfig: Codable, Equatable {
         parameters: [String: Decimal],
         maximumRiskPerTradePercent: Decimal = StrategyRiskPolicy.defaultMaximumRiskPerTradePercent,
         maximumPositionMarginPercent: Decimal = StrategyRiskPolicy.defaultMaximumPositionMarginPercent,
+        maximumHoldingCandles: Int? = nil,
         signalConfirmation: SignalConfirmationConfig = .optimizedDefault
     ) {
         self.strategyID = strategyID
@@ -35,6 +37,7 @@ struct StrategyConfig: Codable, Equatable {
         self.parameters = parameters
         self.maximumRiskPerTradePercent = maximumRiskPerTradePercent
         self.maximumPositionMarginPercent = maximumPositionMarginPercent
+        self.maximumHoldingCandles = maximumHoldingCandles
         self.signalConfirmation = signalConfirmation
     }
 }
@@ -144,9 +147,11 @@ struct StrategyRegistry {
             TimeSeriesMomentumStrategy(),
             VWMATouchTrendStrategy(),
             ETHOneHourMomentumBurstStrategy(),
+            ETHFifteenMinuteVacuumPulseStrategy(),
             XOneHourLongStrategy(),
             XOneHourShortStrategy(),
             BTCFifteenMinutePhaseVacuumReclaimStrategy(),
+            BTCFifteenMinuteVacuumPulseStrategy(),
             XFrequencyStrategy(),
             XStrategy()
         ]
@@ -164,7 +169,9 @@ enum StrategyTimeframeRouting {
             baseIDs = [
                 XStrategy.identifier,
                 XFrequencyStrategy.identifier,
-                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
+                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
+                BTCFifteenMinuteVacuumPulseStrategy.identifier,
+                ETHFifteenMinuteVacuumPulseStrategy.identifier
             ]
         case .oneHour:
             baseIDs = [
@@ -219,6 +226,41 @@ enum StrategyTimeframeRouting {
             strategyID: DonchianChannelBreakoutStrategy.identifier
         ),
         StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: XStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: XFrequencyStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .twelveHours,
+            strategyID: VWMATouchTrendStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .twelveHours,
+            strategyID: DonchianChannelBreakoutStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .twelveHours,
+            strategyID: TimeSeriesMomentumStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .oneDay,
+            strategyID: DonchianChannelBreakoutStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .oneDay,
+            strategyID: VWMATouchTrendStrategy.identifier
+        ),
+        StrategyRouteKey(
             symbol: FuturesSymbol("ETHUSDT"),
             timeframe: .fifteenMinutes,
             strategyID: XStrategy.identifier
@@ -227,6 +269,11 @@ enum StrategyTimeframeRouting {
             symbol: FuturesSymbol("ETHUSDT"),
             timeframe: .fifteenMinutes,
             strategyID: XFrequencyStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
         ),
         StrategyRouteKey(
             symbol: FuturesSymbol("ETHUSDT"),
@@ -245,8 +292,18 @@ enum StrategyTimeframeRouting {
         ),
         StrategyRouteKey(
             symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .twelveHours,
+            strategyID: TimeSeriesMomentumStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
             timeframe: .oneDay,
             strategyID: VWMATouchTrendStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .oneDay,
+            strategyID: DonchianChannelBreakoutStrategy.identifier
         )
     ]
 
@@ -255,6 +312,21 @@ enum StrategyTimeframeRouting {
             symbol: FuturesSymbol("BTCUSDT"),
             timeframe: .fifteenMinutes,
             strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: BTCFifteenMinuteVacuumPulseStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: ETHFifteenMinuteVacuumPulseStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .oneHour,
+            strategyID: ETHOneHourMomentumBurstStrategy.identifier
         )
     ]
 }
@@ -406,4 +478,18 @@ struct LiveOrderRecord: Codable, Equatable, Identifiable {
     let stopLoss: Decimal
     let takeProfit: Decimal
     let createdAt: Date
+}
+
+struct PositionHoldingPeriodExit: Equatable {
+    let position: PositionSnapshot
+    let strategyID: String
+    let timeframe: CandleTimeframe
+    let enteredAt: Date
+    let maximumHoldingCandles: Int
+    let elapsedCandles: Int
+    let reason: String
+
+    var maximumHoldingDuration: TimeInterval {
+        timeframe.duration * Double(maximumHoldingCandles)
+    }
 }

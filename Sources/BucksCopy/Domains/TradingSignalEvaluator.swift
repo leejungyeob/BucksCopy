@@ -192,4 +192,8 @@ final class TradingSignalEvaluator {
             message: message
         ))
     }
+
+    func recentLogs(limit: Int) throws -> [TradeEventLog] {
+        try logStore.loadRecent(limit: limit)
+    }
 }

@@ -7,6 +7,11 @@ struct LiveTradeExecutionResult: Equatable {
     let protectionReceipts: [ExchangeProtectionReceipt]
 }
 
+private enum LivePositionCloseLogContext {
+    case replacement
+    case holdingPeriod(PositionHoldingPeriodExit)
+}
+
 final class LiveTradeExecutor {
     private let orderPlacer: LiveOrderPlacing
     private let leverageSetter: LiveLeverageSetting
@@ -40,6 +45,7 @@ final class LiveTradeExecutor {
     func execute(
         decision: PortfolioSignalDecision,
         accountEquity: Decimal?,
+        accountAvailable: Decimal? = nil,
         contractSpecs: [ContractSpec],
         signalEvaluator: TradingSignalEvaluator
     ) async throws -> LiveTradeExecutionResult {
@@ -55,6 +61,7 @@ final class LiveTradeExecutor {
             let entry = try await enter(
                 candidate,
                 accountEquity: accountEquity,
+                accountAvailable: accountAvailable,
                 contractSpecs: contractSpecs,
                 portfolioDecisionReason: reason
             )
@@ -71,11 +78,12 @@ final class LiveTradeExecutor {
                 protectionReceipts: entry.protectionReceipts
             )
         case .replace(let existing, let candidate, let reason):
-            let closeReceipt = try await close(position: existing.position)
+            let closeReceipt = try await close(position: existing.position, context: .replacement)
             let replacementReason = "Live replacement policy. \(reason)"
             let entry = try await enter(
                 candidate,
                 accountEquity: accountEquity,
+                accountAvailable: accountAvailable,
                 contractSpecs: contractSpecs,
                 portfolioDecisionReason: replacementReason
             )
@@ -105,9 +113,23 @@ final class LiveTradeExecutor {
         }
     }
 
+    func closeHoldingPeriodExits(_ exits: [PositionHoldingPeriodExit]) async throws -> LiveTradeExecutionResult {
+        var receipts: [LiveClosePositionReceipt] = []
+        for exit in exits {
+            receipts.append(try await close(position: exit.position, context: .holdingPeriod(exit)))
+        }
+        return LiveTradeExecutionResult(
+            didSubmitOrder: receipts.isEmpty == false,
+            closedPositions: receipts,
+            entryReceipt: nil,
+            protectionReceipts: []
+        )
+    }
+
     private func enter(
         _ candidate: TradeCandidate,
         accountEquity: Decimal?,
+        accountAvailable: Decimal?,
         contractSpecs: [ContractSpec],
         portfolioDecisionReason: String
     ) async throws -> (receipt: LiveOrderReceipt, protectionReceipts: [ExchangeProtectionReceipt]) {
@@ -121,6 +143,7 @@ final class LiveTradeExecutor {
         let size = try LiveOrderSizing.size(
             for: candidate,
             accountEquity: accountEquity,
+            accountAvailable: accountAvailable,
             contractSpec: contractSpec
         )
         let orderID = UUID()
@@ -180,7 +203,7 @@ final class LiveTradeExecutor {
     }
 
     private func close(position: PortfolioOpenPositionAssessment) async throws -> LiveClosePositionReceipt {
-        try await close(position: position.position)
+        try await close(position: position.position, context: .replacement)
     }
 
     private func confirmOpenPositionIfPossible(
@@ -248,7 +271,10 @@ final class LiveTradeExecutor {
         }
     }
 
-    private func close(position: PositionSnapshot) async throws -> LiveClosePositionReceipt {
+    private func close(
+        position: PositionSnapshot,
+        context: LivePositionCloseLogContext
+    ) async throws -> LiveClosePositionReceipt {
         guard position.total > 0,
               position.side != .unknown || position.positionMode == .oneWay else {
             return LiveClosePositionReceipt(symbol: position.symbol, orderIDs: [])
@@ -259,40 +285,69 @@ final class LiveTradeExecutor {
         let orderText = receipt.orderIDs
             .map(TradeLogRedaction.identifier)
             .joined(separator: ",")
+        let logTitle: String
+        let logSubtitle: String
+        let closeReasonDetail: TradeLogDetail
+        var tags: [TradeLogTag] = [
+            TradeLogTag(label: "LIVE", tone: .success),
+            TradeLogTag(label: "청산", tone: .warning),
+            TradeLogTag(label: sideText.uppercased(), tone: .neutral),
+            TradeLogTag(
+                label: closeOutcomeText(for: position.unrealizedProfitLoss),
+                tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
+            )
+        ]
+        var extraDetails: [TradeLogDetail] = []
+        switch context {
+        case .replacement:
+            logTitle = "\(position.symbol.rawValue) 기존 포지션 정리"
+            logSubtitle = "새 신호 우선순위가 더 높아 기존 \(sideText) 포지션 시장가 정리를 요청했습니다."
+            closeReasonDetail = TradeLogDetail(label: "청산 근거", value: "새 신호 우선순위가 기존 포지션보다 높음", tone: .warning)
+        case .holdingPeriod(let exit):
+            logTitle = "\(position.symbol.rawValue) \(exit.timeframe.rawValue) 보유기간 종료"
+            logSubtitle = "\(exit.strategyID) 포지션이 최대 보유 기간 \(exit.maximumHoldingCandles)봉을 지나 시장가 정리를 요청했습니다."
+            closeReasonDetail = TradeLogDetail(label: "청산 근거", value: exit.reason, tone: .warning)
+            tags.append(contentsOf: [
+                TradeLogTag(label: exit.timeframe.rawValue, tone: .accent),
+                TradeLogTag(label: exit.strategyID, tone: .neutral),
+                TradeLogTag(label: "시간 종료", tone: .warning)
+            ])
+            extraDetails.append(contentsOf: [
+                TradeLogDetail(label: "매매전략", value: exit.strategyID, tone: .accent),
+                TradeLogDetail(label: "시간봉", value: exit.timeframe.rawValue, tone: .accent),
+                TradeLogDetail(label: "진입시각", value: "\(Int(exit.enteredAt.timeIntervalSince1970))"),
+                TradeLogDetail(label: "최대 보유", value: "\(exit.maximumHoldingCandles)봉"),
+                TradeLogDetail(label: "경과 봉수", value: "\(exit.elapsedCandles)봉", tone: .warning)
+            ])
+        }
+        let details = [
+            TradeLogDetail(label: "심볼", value: position.symbol.rawValue),
+            TradeLogDetail(label: "포지션 방향", value: sideText),
+            TradeLogDetail(label: "수량", value: DecimalText.string(position.total)),
+            TradeLogDetail(label: "마크가", value: DecimalText.string(position.markPrice)),
+            TradeLogDetail(
+                label: "청산 직전 PnL",
+                value: DecimalText.string(position.unrealizedProfitLoss),
+                tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
+            ),
+            TradeLogDetail(
+                label: "청산 판정",
+                value: closeOutcomeText(for: position.unrealizedProfitLoss),
+                tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
+            ),
+            closeReasonDetail,
+            TradeLogDetail(label: "주문 ID", value: orderText.isEmpty ? "-" : orderText)
+        ] + extraDetails
         try logStore.append(TradeEventLog(
             timestamp: clock.now,
             category: .liveOrder,
             symbol: position.symbol,
-            message: "Live position close submitted for \(position.symbol.rawValue) \(sideText). Orders: \(orderText)",
+            message: "Live position close submitted for \(position.symbol.rawValue) \(sideText). Reason: \(closeReasonDetail.value). Orders: \(orderText)",
             metadata: TradeLogMetadata(
-                title: "\(position.symbol.rawValue) 기존 포지션 정리",
-                subtitle: "새 신호 우선순위가 더 높아 기존 \(sideText) 포지션 시장가 정리를 요청했습니다.",
-                tags: [
-                    TradeLogTag(label: "LIVE", tone: .success),
-                    TradeLogTag(label: "청산", tone: .warning),
-                    TradeLogTag(label: sideText.uppercased(), tone: .neutral),
-                    TradeLogTag(
-                        label: closeOutcomeText(for: position.unrealizedProfitLoss),
-                        tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
-                    )
-                ],
-                details: [
-                    TradeLogDetail(label: "심볼", value: position.symbol.rawValue),
-                    TradeLogDetail(label: "포지션 방향", value: sideText),
-                    TradeLogDetail(label: "수량", value: DecimalText.string(position.total)),
-                    TradeLogDetail(label: "마크가", value: DecimalText.string(position.markPrice)),
-                    TradeLogDetail(
-                        label: "청산 직전 PnL",
-                        value: DecimalText.string(position.unrealizedProfitLoss),
-                        tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
-                    ),
-                    TradeLogDetail(
-                        label: "청산 판정",
-                        value: closeOutcomeText(for: position.unrealizedProfitLoss),
-                        tone: closeOutcomeTone(for: position.unrealizedProfitLoss)
-                    ),
-                    TradeLogDetail(label: "주문 ID", value: orderText.isEmpty ? "-" : orderText)
-                ]
+                title: logTitle,
+                subtitle: logSubtitle,
+                tags: tags,
+                details: details
             )
         ))
         return receipt
@@ -514,11 +569,16 @@ enum LiveOrderSizing {
     static func size(
         for candidate: TradeCandidate,
         accountEquity: Decimal,
+        accountAvailable: Decimal? = nil,
         contractSpec: ContractSpec
     ) throws -> Decimal {
-        let notional = accountEquity *
-            candidate.riskDecision.positionMarginRatio *
-            Decimal(candidate.leverage)
+        let plannedMargin = accountEquity * candidate.riskDecision.positionMarginRatio
+        let availableMargin = accountAvailable.flatMap { $0 > 0 ? $0 : nil } ?? accountEquity
+        let usableMargin = min(plannedMargin, availableMargin * Decimal(string: "0.95")!)
+        guard usableMargin > 0 else {
+            throw TradingDomainError.liveOrderSizeTooSmall(candidate.signal.symbol)
+        }
+        let notional = usableMargin * Decimal(candidate.leverage)
         let rawSize = notional / candidate.signal.entryPrice
         let roundedSize = floor(rawSize, step: contractSpec.sizeMultiplier)
 

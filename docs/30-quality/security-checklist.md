@@ -53,9 +53,12 @@
 - 자동매매 레버리지가 10x 이하로 제한되는가
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal이 차단되는가
 - 레버리지 반영 손절 위험이 설정된 1회 최대 손실률보다 큰 signal은 차단 대신 포지션 투입비율이 축소되는가
+- live entry size가 risk-sized planned margin과 USDT available balance 95% 버퍼 중 더 작은 쪽으로 제한되는가
 - 수수료 모델이 market/taker와 limit/maker 가정을 명시하고, maker 체결을 보장할 수 없는 주문을 maker로 과대평가하지 않는가
 - 진입 체결 후 TP1/TP2/SL 거래소-side 보호 주문이 모두 등록되기 전까지 protected 상태로 표시하지 않는가
 - Bitget position snapshot의 TP/SL 누락을 live entry log로 보강할 때, 표시와 portfolio scoring에만 사용하고 거래소 보호주문 체결/이동 상태를 과대 확정하지 않는가
+- 보유기간 만료 청산은 app-created live entry log로 symbol, side, strategy, timeframe을 매칭할 수 있는 포지션에만 적용되는가
+- 보유기간 만료 청산이 발생한 monitor cycle에서 신규 진입 평가를 건너뛰어 close와 entry가 같은 주기에 충돌하지 않는가
 - 진입 체결 응답 후 보호주문 설치 전에 position snapshot으로 실제 open position 존재를 확인하는가
 - TP1 체결 후 남은 물량의 SL이 profit-lock 가격으로 이동되기 전까지 remaining position을 protected로 과대 표시하지 않는가
 - TP/SL 보호 주문 등록 실패 시 실패한 주문별 최소 5회 재시도하고, 소진 시 fail-closed 정책으로 이어지는가
@@ -64,6 +67,7 @@
 - live order, rejected/fill-not-confirmed order, risk block이 구분되어 기록되는가
 - 보호주문 재시도 소진 로그가 원문 private response 없이 sanitized Bitget code/message를 보존하는가
 - 신호 변경으로 기존 포지션을 정리하는 close log가 raw order identifier 없이 redacted ID, 청산 직전 PnL, 승/패 판정만 남기는가
+- 보유기간 만료 close log가 raw order identifier 없이 redacted ID와 `청산 근거`, 매매전략, 시간봉, 경과 봉수만 남기는가
 - 잘못된 symbol/productType/timeframe 입력이 실패로 처리되는가
 - `POST /api/v2/mix/order/place-order` 호출 경로가 UI 동의와 risk policy를 우회할 수 없는가
 
