@@ -39,6 +39,7 @@
 - Live execution record와 민감 주문/account data가 구분되는가
 - local market history DB에 API key, secret, passphrase, signature, raw private response가 저장되지 않는가
 - local market history DB는 public candle/ticker/trade 기반 데이터와 최소 live audit metadata만 저장하는가
+- server private polling은 raw private response가 아니라 normalized account/position snapshot만 저장하는가
 
 ### Bitget REST / WebSocket
 

@@ -766,6 +766,7 @@ class PaperRunner:
         self.symbols = self.parse_symbols(os.environ.get("BUCKS_COPY_SYMBOLS", "BTCUSDT,ETHUSDT"))
         self.candle_limit = min(max(int(os.environ.get("BUCKS_COPY_CANDLE_LIMIT", "500")), 1), 1000)
         self.poll_seconds = max(int(os.environ.get("BUCKS_COPY_POLL_SECONDS", "30")), 5)
+        self.private_poll_seconds = max(int(os.environ.get("BUCKS_COPY_PRIVATE_POLL_SECONDS", "60")), 30)
         self.base_url = os.environ.get("BUCKS_COPY_BITGET_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
         self.run_once = parse_bool(os.environ.get("BUCKS_COPY_RUN_ONCE"))
         self.api_host = os.environ.get("BUCKS_COPY_API_HOST", DEFAULT_API_HOST)
@@ -969,16 +970,62 @@ class PaperRunner:
             pass
 
     def fetch_user_accounts(self, user_id: str) -> list[dict[str, Any]]:
-        return self.fetch_bitget_accounts(self.credential_for_user(user_id))
+        return self.refresh_user_private_snapshot(user_id)["accounts"]
 
     def fetch_user_positions(self, user_id: str) -> list[dict[str, Any]]:
-        return self.fetch_bitget_positions(self.credential_for_user(user_id))
+        return self.refresh_user_private_snapshot(user_id)["positions"]
 
     def credential_for_user(self, user_id: str) -> BitgetCredential:
         credential = self.bitget_credentials_by_user_id.get(user_id)
         if credential is None:
             raise BitgetLoginError("Bitget login is required for private account data.")
         return credential
+
+    def private_snapshot_path(self, user_id: str) -> Path:
+        return self.user_dir(user_id) / "private-snapshot.json"
+
+    def load_private_snapshot(self, user_id: str) -> dict[str, Any] | None:
+        path = self.private_snapshot_path(user_id)
+        if not path.exists():
+            return None
+        snapshot = read_json_file(path, {})
+        return snapshot if isinstance(snapshot, dict) else None
+
+    def refresh_user_private_snapshot(self, user_id: str) -> dict[str, Any]:
+        credential = self.credential_for_user(user_id)
+        accounts = self.fetch_bitget_accounts(credential)
+        positions = self.fetch_bitget_positions(credential)
+        updated_at = now_utc()
+        snapshot = {
+            "updatedAt": iso(updated_at),
+            "mode": "read-only",
+            "productType": PRODUCT_TYPE,
+            "accounts": accounts,
+            "positions": positions,
+            "accountCount": len(accounts),
+            "positionCount": len(positions),
+        }
+        self.atomic_write_json(self.private_snapshot_path(user_id), snapshot, pretty=True)
+        return snapshot
+
+    def maybe_refresh_user_private_snapshot(self, user_id: str, now: datetime) -> str | None:
+        if user_id not in self.bitget_credentials_by_user_id:
+            return None
+        snapshot = self.load_private_snapshot(user_id)
+        if snapshot is not None:
+            try:
+                updated_at = datetime.fromisoformat(str(snapshot["updatedAt"]).replace("Z", "+00:00"))
+                if (now - updated_at).total_seconds() < self.private_poll_seconds:
+                    return None
+            except (KeyError, ValueError):
+                pass
+        try:
+            self.refresh_user_private_snapshot(user_id)
+        except BitgetLoginError as error:
+            return f"private snapshot: {error}"
+        except Exception:
+            return "private snapshot refresh failed"
+        return None
 
     def bitget_signed_get(
         self,
@@ -1410,6 +1457,10 @@ class PaperRunner:
             skipped_evaluations = 0
             signals = 0
             failures = list(market_failures)
+            private_failure = self.maybe_refresh_user_private_snapshot(user_id, updated_at)
+            if private_failure is not None:
+                failures.append(private_failure)
+            private_snapshot = self.load_private_snapshot(user_id)
 
             for symbol, closed_candles in closed_candles_by_symbol.items():
                 latest_closed = closed_candles[-1]
@@ -1462,6 +1513,11 @@ class PaperRunner:
                 "storagePath": str(user_directory),
                 "marketStoragePath": str(self.data_dir),
                 "control": control,
+                "privateSnapshot": {
+                    "updatedAt": private_snapshot.get("updatedAt"),
+                    "accountCount": private_snapshot.get("accountCount", 0),
+                    "positionCount": private_snapshot.get("positionCount", 0),
+                } if isinstance(private_snapshot, dict) else None,
             }
             self.atomic_write_json(user_directory / "paper-runner-status.json", status, pretty=True)
             self.maybe_record_heartbeat(user_id, status, started_at, updated_at)

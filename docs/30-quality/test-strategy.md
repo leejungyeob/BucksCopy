@@ -16,7 +16,7 @@
 | dashboard 변경 | connect-only credential flow, auto-connect, 15m timeframe enforcement, position table, Live start/stop consent gate, log persistence |
 | symbol catalog / Watchlist 변경 | `symbolStatus=normal`, `supportMarginCoins` contains `USDT`, Watchlist-only subscription |
 | local market history 변경 | upsert idempotency, startup gap fill, closed-candle-only read, no secret persistence |
-| server paper runner 변경 | Python runner syntax check, local-only or bearer-auth status/control API, 15m public candle fetch, shared market candle persistence, user-scoped status/log/control/evaluation persistence, duplicate paper evaluation guard, no private Bitget/order path |
+| server paper runner 변경 | Python runner syntax check, local-only or bearer-auth status/control API, 15m public candle fetch, shared market candle persistence, user-scoped status/log/control/evaluation persistence, duplicate paper evaluation guard, private account/position snapshot은 normalized read-only 저장, no order path |
 | server HTTPS edge 변경 | Docker Compose config validation, Caddy route allowlist, `BUCKS_COPY_REQUIRE_AUTH=true` fail-closed check, 80/443-only public exposure docs, no raw `8787` public exposure |
 | credential storage 변경 | Security checklist + Keychain delete/read/write failure cases |
 | candle builder 변경 | 15m/1H/4H/12H/1D bucket, boundary timestamp, missing/out-of-order input |

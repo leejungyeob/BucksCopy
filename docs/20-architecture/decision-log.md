@@ -742,3 +742,22 @@
   - 서버 재시작 후에도 encrypted credential과 token이 남아 있으면 account/position read를 복원할 수 있습니다.
   - `.env` encryption key가 유출되면 encrypted credential 파일을 복호화할 수 있으므로 서버 파일 권한과 backup 경계가 중요해졌습니다.
   - live execution 전에는 여전히 account/position polling policy, explicit live consent, duplicate runner lock, exchange-side TP/SL protection, fail-closed close path가 필요합니다.
+
+## 0042. Server Polls Normalized Private Snapshots
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 서버가 encrypted credential을 복원할 수 있게 되면 Mac 앱이 꺼져 있어도 계정/포지션 상태를 서버가 주기적으로 갱신해야 합니다.
+  - 실거래 서버 runner 전환 전 private polling은 raw Bitget response, credential, signature를 저장하지 않아야 합니다.
+  - polling 빈도는 사용자 수 증가 시 rate-limit과 비용에 직접 영향을 주므로 기본값을 낮은 빈도로 둬야 합니다.
+- Decision:
+  - `BUCKS_COPY_PRIVATE_POLL_SECONDS`를 추가하고 기본값은 60초, 최소값은 30초로 둡니다.
+  - credential이 memory 또는 encrypted restore로 준비된 user만 background private snapshot refresh 대상입니다.
+  - 서버는 `users/{userID}/private-snapshot.json`에 normalized account/position snapshot만 저장합니다.
+  - `/users/me/account`, `/users/me/positions`는 manual refresh 경계로 동작하며 normalized snapshot도 갱신합니다.
+  - `paper-runner-status.json`에는 private snapshot의 updatedAt/accountCount/positionCount 요약만 포함합니다.
+- Consequences:
+  - 앱이 꺼져 있어도 서버는 최신 private read-only snapshot을 유지할 수 있습니다.
+  - raw private response와 secret은 저장하지 않으므로 live execution audit storage와 credential storage 경계가 분리됩니다.
+  - 다음 live execution 단계에서는 이 snapshot을 기반으로 duplicate runner lock, position reconciliation, fail-closed 조건을 설계해야 합니다.

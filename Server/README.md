@@ -204,6 +204,18 @@ curl https://api.example.com/users/me/positions \
   -H 'Authorization: Bearer <token>'
 ```
 
+The runner also refreshes normalized account/position snapshots in the
+background every `BUCKS_COPY_PRIVATE_POLL_SECONDS` seconds for users with a
+restored Bitget credential. The snapshot is stored as:
+
+```text
+users/{userID}/private-snapshot.json
+```
+
+This file contains only normalized account and position fields used by the app,
+not raw Bitget private responses, signatures, headers, API secret, or
+passphrase.
+
 To log out and revoke the current app session token:
 
 ```bash
@@ -233,6 +245,7 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 - `candles-{symbol}-15m.json`: normalized Bitget public OHLCV candles
 - `auth-users.json`: optional bearer-token user mapping, not committed
 - `users/{userID}/bitget-credential.enc.json`: optional AES-256-GCM encrypted Bitget credential, not committed
+- `users/{userID}/private-snapshot.json`: normalized read-only account/position snapshot
 - `users/{userID}/trade-event-logs.jsonl`: user paper signal and heartbeat records
 - `users/{userID}/paper-runner-status.json`: latest user paper runner status
 - `users/{userID}/paper-runner-evaluations.jsonl`: duplicate evaluation guard by `symbol/timeframe/strategy/openTime`
@@ -242,6 +255,7 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 
 - Private Bitget REST is limited to login validation plus read-only account and
   position snapshots for the authenticated user.
+- Server-side private polling stores normalized account/position snapshots only.
 - Bitget API key, secret, and passphrase are process-memory only unless
   `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` enables AES-256-GCM encrypted
   user-scoped credential storage.
