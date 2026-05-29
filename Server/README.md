@@ -4,7 +4,7 @@
 
 - 현재 서버 단계는 실거래가 아니라 `paper-runner`입니다.
 - runner는 Bitget public REST로 `15m` candle만 받아 공용 JSON 파일에 저장하고, 사용자별 paper 상태/control/log를 분리합니다.
-- Bitget API key, secret, passphrase는 `/auth/bitget/login` 검증 요청에서만 사용하고 저장하지 않습니다.
+- Bitget API key, secret, passphrase는 `/auth/bitget/login` 후 서버 메모리에만 두고, 디스크/env/log에는 저장하지 않습니다.
 
 ## Paper Runner
 
@@ -43,6 +43,8 @@ curl http://127.0.0.1:8787/health
 curl http://127.0.0.1:8787/users/me/status
 curl 'http://127.0.0.1:8787/users/me/logs?limit=20'
 curl 'http://127.0.0.1:8787/users/me/candles?symbol=BTCUSDT&limit=20'
+curl http://127.0.0.1:8787/users/me/account
+curl http://127.0.0.1:8787/users/me/positions
 curl -X POST http://127.0.0.1:8787/users/me/control \
   -H 'Content-Type: application/json' \
   -d '{"enabled":false}'
@@ -169,6 +171,21 @@ creates or reuses a user-scoped bearer token in `auth-users.json`, and returns
 that app session token. The Bitget secret and passphrase are not written to
 disk by this paper runner.
 
+After a successful login, the runner keeps the Bitget API key, secret, and
+passphrase in process memory only. While that container process is alive, the
+app can use the server session token to read:
+
+```bash
+curl https://api.example.com/users/me/account \
+  -H 'Authorization: Bearer <token>'
+curl https://api.example.com/users/me/positions \
+  -H 'Authorization: Bearer <token>'
+```
+
+If the container restarts, `auth-users.json` can still recognize the app session
+token, but the in-memory Bitget credential is gone. In that case private
+account/position reads return `409` and the app asks for Bitget login again.
+
 If the mounted data/log folders were created by an earlier container attempt
 with restrictive permissions, reset ownership once:
 
@@ -188,8 +205,11 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 
 ## Safety Boundary
 
-- Private Bitget REST is limited to login-time account validation.
+- Private Bitget REST is limited to login validation plus read-only account and
+  position snapshots for the authenticated user.
+- Bitget API key, secret, and passphrase are process-memory only and disappear
+  on container restart.
 - No WebSocket private login.
 - No order placement.
-- No Bitget API key/secret/passphrase storage.
+- No Bitget API key/secret/passphrase disk, env, or log storage.
 - No live execution until a separate explicit server-side consent and protection-order flow is implemented.

@@ -1246,6 +1246,16 @@ private final class TestCandleStreamService: CandleStreamService {
 
 private final class StubServerPaperRunnerService: ServerPaperRunnerService {
     var updatedEnabledValues: [Bool] = []
+    var accounts: [AccountSnapshot] = [
+        AccountSnapshot(
+            marginCoin: "USDT",
+            available: 1_000,
+            accountEquity: 1_000,
+            unrealizedProfitLoss: 0,
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+    ]
+    var positions: [PositionSnapshot] = []
     var loginSessions: [ServerRunnerLoginSession] = [
         ServerRunnerLoginSession(
             userID: "bitget-test",
@@ -1266,6 +1276,14 @@ private final class StubServerPaperRunnerService: ServerPaperRunnerService {
 
     func loginWithBitgetCredential(_ credential: APIKeyCredential) async throws -> ServerRunnerLoginSession {
         loginSessions.removeFirst()
+    }
+
+    func fetchAccounts() async throws -> [AccountSnapshot] {
+        accounts
+    }
+
+    func fetchPositions() async throws -> [PositionSnapshot] {
+        positions
     }
 
     func fetchStatus() async throws -> ServerPaperRunnerStatus {

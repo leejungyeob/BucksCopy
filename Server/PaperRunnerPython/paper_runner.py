@@ -168,6 +168,17 @@ class Candle:
 
 
 @dataclass(frozen=True)
+class BitgetCredential:
+    api_key: str
+    secret_key: str
+    passphrase: str
+
+    @property
+    def redacted_identifier(self) -> str:
+        return redacted_identifier(self.api_key)
+
+
+@dataclass(frozen=True)
 class Signal:
     strategy_id: str
     symbol: str
@@ -594,6 +605,18 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             candles = [candle.to_record() for candle in self.runner.load_candles(symbol)[-limit:]]
             self.write_json({"symbol": symbol, "timeframe": TIMEFRAME, "items": candles, "limit": limit})
             return
+        if action == "account":
+            try:
+                self.write_json({"items": self.runner.fetch_user_accounts(user_id)})
+            except BitgetLoginError as error:
+                self.write_json({"error": str(error)}, HTTPStatus.CONFLICT)
+            return
+        if action == "positions":
+            try:
+                self.write_json({"items": self.runner.fetch_user_positions(user_id)})
+            except BitgetLoginError as error:
+                self.write_json({"error": str(error)}, HTTPStatus.CONFLICT)
+            return
         self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
@@ -675,7 +698,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if not path.startswith(prefix):
             return None
         action = path[len(prefix) :]
-        if action in {"status", "control", "logs", "candles"}:
+        if action in {"status", "control", "logs", "candles", "account", "positions"}:
             return action
         return None
 
@@ -721,6 +744,7 @@ class PaperRunner:
         )
         self.require_auth = parse_bool(os.environ.get("BUCKS_COPY_REQUIRE_AUTH"), default=False)
         self.lock = threading.RLock()
+        self.bitget_credentials_by_user_id: dict[str, BitgetCredential] = {}
         self.auth_tokens_by_user_id = self.load_auth_users()
         self.auth_required = self.require_auth or bool(self.auth_tokens_by_user_id)
         self.user_ids = sorted(self.auth_tokens_by_user_id.keys()) if self.auth_tokens_by_user_id else [self.default_user_id]
@@ -784,11 +808,17 @@ class PaperRunner:
         return validate_user_id(f"bitget-{digest}")
 
     def login_with_bitget(self, api_key: str, secret_key: str, passphrase: str) -> dict[str, Any]:
-        accounts = self.validate_bitget_credentials(api_key, secret_key, passphrase)
+        credential = BitgetCredential(
+            api_key=api_key,
+            secret_key=secret_key,
+            passphrase=passphrase,
+        )
+        accounts = self.fetch_bitget_accounts(credential)
         user_id = self.user_id_for_api_key(api_key)
         with self.lock:
             token = self.auth_tokens_by_user_id.get(user_id) or secrets.token_urlsafe(48)
             self.auth_tokens_by_user_id[user_id] = token
+            self.bitget_credentials_by_user_id[user_id] = credential
             self.auth_required = self.require_auth or bool(self.auth_tokens_by_user_id)
             if user_id not in self.user_ids:
                 self.user_ids = sorted(set(self.user_ids + [user_id]))
@@ -798,28 +828,40 @@ class PaperRunner:
         return {
             "authToken": token,
             "mode": "paper",
-            "redactedIdentifier": redacted_identifier(api_key),
+            "credentialScope": "memory",
+            "redactedIdentifier": credential.redacted_identifier,
             "userID": user_id,
             "accounts": accounts,
             "updatedAt": iso(now_utc()),
         }
 
-    def validate_bitget_credentials(
+    def fetch_user_accounts(self, user_id: str) -> list[dict[str, Any]]:
+        return self.fetch_bitget_accounts(self.credential_for_user(user_id))
+
+    def fetch_user_positions(self, user_id: str) -> list[dict[str, Any]]:
+        return self.fetch_bitget_positions(self.credential_for_user(user_id))
+
+    def credential_for_user(self, user_id: str) -> BitgetCredential:
+        credential = self.bitget_credentials_by_user_id.get(user_id)
+        if credential is None:
+            raise BitgetLoginError("Bitget login is required for private account data.")
+        return credential
+
+    def bitget_signed_get(
         self,
-        api_key: str,
-        secret_key: str,
-        passphrase: str,
-    ) -> list[dict[str, Any]]:
-        path = "/api/v2/mix/account/accounts"
-        query_string = urlencode(sorted({"productType": PRODUCT_TYPE}.items()))
-        url = f"{self.base_url}{path}?{query_string}"
+        credential: BitgetCredential,
+        path: str,
+        params: dict[str, str],
+    ) -> Any:
+        query_string = urlencode(sorted(params.items()))
+        url = f"{self.base_url}{path}?{query_string}" if query_string else f"{self.base_url}{path}"
         timestamp = str(int(time.time() * 1000))
         request = Request(
             url,
             headers={
-                "ACCESS-KEY": api_key,
-                "ACCESS-SIGN": bitget_signature(timestamp, "GET", path, query_string, "", secret_key),
-                "ACCESS-PASSPHRASE": passphrase,
+                "ACCESS-KEY": credential.api_key,
+                "ACCESS-SIGN": bitget_signature(timestamp, "GET", path, query_string, "", credential.secret_key),
+                "ACCESS-PASSPHRASE": credential.passphrase,
                 "ACCESS-TIMESTAMP": timestamp,
                 "Content-Type": "application/json",
                 "locale": "en-US",
@@ -831,22 +873,38 @@ class PaperRunner:
             with urlopen(request, timeout=20, context=ssl_context()) as response:
                 body = response.read()
         except Exception as error:
-            raise BitgetLoginError("Bitget credential validation request failed") from error
+            raise BitgetLoginError("Bitget private request failed") from error
 
         try:
             decoded = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError as error:
-            raise BitgetLoginError("Bitget credential validation returned invalid JSON") from error
+            raise BitgetLoginError("Bitget private request returned invalid JSON") from error
 
         if decoded.get("code") != "00000":
             code = str(decoded.get("code") or "unknown")
-            message = str(decoded.get("msg") or "credential rejected")[:160]
+            message = str(decoded.get("msg") or "private request rejected")[:160]
             raise BitgetLoginError(f"Bitget API {code}: {message}")
+        return decoded.get("data", [])
 
-        data = decoded.get("data", [])
+    def fetch_bitget_accounts(self, credential: BitgetCredential) -> list[dict[str, Any]]:
+        data = self.bitget_signed_get(
+            credential,
+            "/api/v2/mix/account/accounts",
+            {"productType": PRODUCT_TYPE},
+        )
         if not isinstance(data, list):
-            raise BitgetLoginError("Bitget credential validation returned invalid account data")
+            raise BitgetLoginError("Bitget private request returned invalid account data")
         return [self.normalized_account(record) for record in data if isinstance(record, dict)]
+
+    def fetch_bitget_positions(self, credential: BitgetCredential) -> list[dict[str, Any]]:
+        data = self.bitget_signed_get(
+            credential,
+            "/api/v2/mix/position/all-position",
+            {"marginCoin": "USDT", "productType": PRODUCT_TYPE},
+        )
+        if not isinstance(data, list):
+            raise BitgetLoginError("Bitget private request returned invalid position data")
+        return [self.normalized_position(record) for record in data if isinstance(record, dict)]
 
     @staticmethod
     def normalized_account(record: dict[str, Any]) -> dict[str, Any]:
@@ -856,6 +914,27 @@ class PaperRunner:
             "accountEquity": str(record.get("accountEquity") or "0"),
             "unrealizedPL": str(record.get("unrealizedPL") or "0"),
             "updatedAt": iso(now_utc()),
+        }
+
+    @staticmethod
+    def normalized_position(record: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "symbol": str(record.get("symbol") or record.get("instId") or "").upper(),
+            "marginCoin": str(record.get("marginCoin") or "USDT"),
+            "holdSide": str(record.get("holdSide") or ""),
+            "available": str(record.get("available") or "0"),
+            "total": str(record.get("total") or "0"),
+            "leverage": str(record.get("leverage") or "0"),
+            "openPriceAvg": str(record.get("openPriceAvg") or "0"),
+            "marginMode": str(record.get("marginMode") or ""),
+            "posMode": str(record.get("posMode") or ""),
+            "unrealizedPL": str(record.get("unrealizedPL") or "0"),
+            "liquidationPrice": str(record.get("liquidationPrice") or ""),
+            "markPrice": str(record.get("markPrice") or "0"),
+            "takeProfit": str(record.get("takeProfit") or ""),
+            "stopLoss": str(record.get("stopLoss") or ""),
+            "cTime": str(record.get("cTime") or ""),
+            "uTime": str(record.get("uTime") or ""),
         }
 
     def user_id_for_token(self, token: str) -> str | None:

@@ -43,6 +43,16 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
         return try decoder.decode(StatusDTO.self, from: data).domain
     }
 
+    func fetchAccounts() async throws -> [AccountSnapshot] {
+        let data = try await request(path: "users/me/account")
+        return try decoder.decode(AccountsDTO.self, from: data).items.map(\.domain)
+    }
+
+    func fetchPositions() async throws -> [PositionSnapshot] {
+        let data = try await request(path: "users/me/positions")
+        return try decoder.decode(PositionsDTO.self, from: data).items.map(\.domain)
+    }
+
     func fetchLogs(limit: Int) async throws -> [TradeEventLog] {
         let data = try await request(path: "users/me/logs", queryItems: [
             URLQueryItem(name: "limit", value: String(max(1, min(limit, 500))))
@@ -113,7 +123,7 @@ private struct LoginResponseDTO: Decodable {
     let authToken: String
     let userID: String
     let redactedIdentifier: String
-    let accounts: [AccountDTO]?
+    let accounts: [ServerAccountDTO]?
     let updatedAt: String?
 
     var domain: ServerRunnerLoginSession {
@@ -127,7 +137,11 @@ private struct LoginResponseDTO: Decodable {
     }
 }
 
-private struct AccountDTO: Decodable {
+private struct AccountsDTO: Decodable {
+    let items: [ServerAccountDTO]
+}
+
+private struct ServerAccountDTO: Decodable {
     let marginCoin: String?
     let available: String?
     let accountEquity: String?
@@ -142,6 +156,52 @@ private struct AccountDTO: Decodable {
             unrealizedProfitLoss: DecimalText.parse(unrealizedPL),
             updatedAt: ServerRunnerDateParser.date(from: updatedAt) ?? Date()
         )
+    }
+}
+
+private struct PositionsDTO: Decodable {
+    let items: [ServerPositionDTO]
+}
+
+private struct ServerPositionDTO: Decodable {
+    let symbol: String?
+    let holdSide: String?
+    let available: String?
+    let total: String?
+    let leverage: String?
+    let openPriceAvg: String?
+    let marginMode: String?
+    let posMode: String?
+    let unrealizedPL: String?
+    let liquidationPrice: String?
+    let markPrice: String?
+    let takeProfit: String?
+    let stopLoss: String?
+    let cTime: String?
+    let uTime: String?
+
+    var domain: PositionSnapshot {
+        PositionSnapshot(
+            symbol: FuturesSymbol(symbol ?? ""),
+            side: PositionSide(rawValue: holdSide ?? "") ?? .unknown,
+            total: DecimalText.parse(total),
+            available: DecimalText.parse(available),
+            openPriceAverage: DecimalText.parse(openPriceAvg),
+            markPrice: DecimalText.parse(markPrice),
+            unrealizedProfitLoss: DecimalText.parse(unrealizedPL),
+            leverage: Int(leverage ?? "") ?? 0,
+            marginMode: marginMode ?? "",
+            positionMode: PositionMode(rawValue: posMode ?? "") ?? .unknown,
+            liquidationPrice: DecimalText.optional(liquidationPrice),
+            takeProfit: DecimalText.optional(takeProfit),
+            stopLoss: DecimalText.optional(stopLoss),
+            createdAt: Self.date(millisecondsText: cTime),
+            updatedAt: Self.date(millisecondsText: uTime)
+        )
+    }
+
+    private static func date(millisecondsText: String?) -> Date? {
+        millisecondsText.flatMap { Double($0) }.map { Date(timeIntervalSince1970: $0 / 1000) }
     }
 }
 

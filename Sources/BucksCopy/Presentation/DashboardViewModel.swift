@@ -160,6 +160,10 @@ final class DashboardViewModel: ObservableObject {
         state.accounts.first { $0.marginCoin.uppercased() == "USDT" }
     }
 
+    private var usesServerBitgetSession: Bool {
+        serverRunnerConfiguration?.redactedCredentialIdentifier != nil && serverPaperRunnerService != nil
+    }
+
     func strategyDefinitions(for timeframe: CandleTimeframe) -> [StrategyDefinition] {
         strategyRegistry.definitions(recommendedFor: timeframe, symbol: state.selectedSymbol)
     }
@@ -435,6 +439,24 @@ final class DashboardViewModel: ObservableObject {
 
     func refreshPositions(logSuccess: Bool = true) async {
         do {
+            if usesServerBitgetSession, let serverPaperRunnerService {
+                let previousOpenPositions = state.positions.filter(\.isOpenForManualCloseDetection)
+                let positions = try await serverPaperRunnerService.fetchPositions()
+                state.positions = positionsWithChartProtectionLevels(positions)
+                recordExternallyClosedPositions(
+                    previousOpenPositions: previousOpenPositions,
+                    currentOpenPositions: state.positions.filter(\.isOpenForManualCloseDetection)
+                )
+                if logSuccess {
+                    appendSessionLogOnce(key: "server.positions.loaded", .init(
+                        timestamp: clock.now,
+                        category: .position,
+                        message: "Loaded \(state.positions.count) server read-only position(s)."
+                    ))
+                }
+                return
+            }
+
             guard let positionRepository else { return }
             let previousOpenPositions = state.positions.filter(\.isOpenForManualCloseDetection)
             let positions = try await positionRepository.fetchPositions()
@@ -544,6 +566,12 @@ final class DashboardViewModel: ObservableObject {
     }
 
     private func refreshAccountSnapshot() async throws {
+        if usesServerBitgetSession, let serverPaperRunnerService {
+            state.accounts = try await serverPaperRunnerService.fetchAccounts()
+            updateLiveAutomationSessionFromAccount()
+            return
+        }
+
         guard let accountRepository else { return }
         state.accounts = try await accountRepository.fetchAccounts()
         updateLiveAutomationSessionFromAccount()
@@ -1688,6 +1716,7 @@ final class DashboardViewModel: ObservableObject {
                     redactedIdentifier: redactedIdentifier,
                     checkedAt: clock.now
                 )
+                await refreshServerPrivateSnapshots()
             }
             refreshVisibleLogs()
         } catch {
@@ -1696,6 +1725,20 @@ final class DashboardViewModel: ObservableObject {
                 clearServerAuthenticatedSession()
             }
             state.serverRunnerConnectionState = .failed(message: sanitizedError(error))
+        }
+    }
+
+    private func refreshServerPrivateSnapshots() async {
+        do {
+            try await refreshAccountSnapshot()
+            await refreshPositions(logSuccess: false)
+        } catch {
+            if let serverError = error as? ServerPaperRunnerClientError,
+               case .httpStatus(409) = serverError {
+                state.credentialStatus = .failed(message: "Bitget login is required again.")
+                return
+            }
+            appendPositionWarning(error)
         }
     }
 

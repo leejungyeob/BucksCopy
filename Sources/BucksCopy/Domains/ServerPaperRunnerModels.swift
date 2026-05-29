@@ -73,6 +73,8 @@ enum ServerRunnerConnectionState: Equatable {
 
 protocol ServerPaperRunnerService {
     func loginWithBitgetCredential(_ credential: APIKeyCredential) async throws -> ServerRunnerLoginSession
+    func fetchAccounts() async throws -> [AccountSnapshot]
+    func fetchPositions() async throws -> [PositionSnapshot]
     func fetchStatus() async throws -> ServerPaperRunnerStatus
     func fetchLogs(limit: Int) async throws -> [TradeEventLog]
     func updateControl(enabled: Bool) async throws -> ServerPaperRunnerControl

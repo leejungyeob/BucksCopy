@@ -685,3 +685,22 @@
   - 사용자는 수동 token 복사 없이 Bitget API credential로 앱 session을 만들 수 있습니다.
   - 사용자별 paper state/control/log는 발급된 userID로 분리됩니다.
   - 서버가 Mac 클라이언트 없이 실거래 주문을 실행하려면 encrypted credential storage, session revocation, account/position polling, exchange-side protection order flow를 별도 decision으로 추가해야 합니다.
+
+## 0039. Server Read-Only Private Snapshots Use Memory-Only Credential
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - Bitget server login 후 앱이 잔고/포지션을 계속 로컬 Keychain credential로 조회하면, 서버 로그인과 UI 상태 확인 흐름이 분리되어 사용자가 혼란스럽습니다.
+  - 사용자는 앱을 상태 확인/ON-OFF 클라이언트로 쓰고, 서버가 사용자별 상태를 읽어오는 방향을 원했습니다.
+  - 아직 server-side live trading consent, encrypted credential storage, protection order state machine은 구현 전이므로 서버에 Bitget credential을 영구 저장하면 보안 범위가 과도합니다.
+- Decision:
+  - `/auth/bitget/login` 성공 후 Bitget API key, secret, passphrase는 paper runner process memory에만 보관합니다.
+  - 서버는 authenticated user session에 대해 `/users/me/account`, `/users/me/positions` read-only endpoint를 제공합니다.
+  - account/position endpoint는 Bitget raw private response 전체가 아니라 UI에 필요한 normalized snapshot만 반환합니다.
+  - 컨테이너 재시작으로 memory credential이 사라지면 private snapshot endpoint는 `409`로 실패하고, macOS 앱은 Bitget login이 다시 필요하다고 표시합니다.
+  - 이 단계는 private account/position read-only까지이며 private WebSocket, live order, protection order, persistent credential storage는 포함하지 않습니다.
+- Consequences:
+  - 앱은 서버 로그인 이후 계정/포지션 표시를 같은 server session 경계로 조회할 수 있습니다.
+  - 서버 재시작 후에는 session token이 남아도 private snapshot 조회를 위해 사용자가 다시 Bitget login을 해야 합니다.
+  - 실거래 서버 전환 전에는 credential encryption/rotation/revocation, account/position polling policy, order consent, exchange-side TP/SL protection, fail-closed close path를 별도 결정으로 추가해야 합니다.
