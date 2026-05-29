@@ -49,6 +49,7 @@ curl http://127.0.0.1:8787/users/me/positions
 curl -X POST http://127.0.0.1:8787/users/me/control \
   -H 'Content-Type: application/json' \
   -d '{"enabled":false}'
+curl http://127.0.0.1:8787/users/me/live/status
 ```
 
 To point the macOS app at the server without exposing the API publicly, keep an
@@ -216,6 +217,24 @@ This file contains only normalized account and position fields used by the app,
 not raw Bitget private responses, signatures, headers, API secret, or
 passphrase.
 
+Server-side live trading has a separate safety gate. This gate does not place
+orders yet; it only records explicit consent and reports whether required
+preconditions are ready:
+
+```bash
+curl https://api.example.com/users/me/live/status \
+  -H 'Authorization: Bearer <token>'
+curl -X POST https://api.example.com/users/me/live/control \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled":true,"acknowledgedRisk":true}'
+```
+
+The live gate requires explicit consent, a loaded Bitget credential, a fresh
+private snapshot, and an available live runner lock. `orderExecutionEnabled`
+remains `false` until the separate order/protection/fail-closed engine is
+implemented.
+
 To log out and revoke the current app session token:
 
 ```bash
@@ -246,6 +265,8 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 - `auth-users.json`: optional bearer-token user mapping, not committed
 - `users/{userID}/bitget-credential.enc.json`: optional AES-256-GCM encrypted Bitget credential, not committed
 - `users/{userID}/private-snapshot.json`: normalized read-only account/position snapshot
+- `users/{userID}/server-live-control.json`: explicit server live consent state, default disabled
+- `users/{userID}/server-live-lock.json`: future live runner lock heartbeat
 - `users/{userID}/trade-event-logs.jsonl`: user paper signal and heartbeat records
 - `users/{userID}/paper-runner-status.json`: latest user paper runner status
 - `users/{userID}/paper-runner-evaluations.jsonl`: duplicate evaluation guard by `symbol/timeframe/strategy/openTime`
@@ -256,6 +277,8 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 - Private Bitget REST is limited to login validation plus read-only account and
   position snapshots for the authenticated user.
 - Server-side private polling stores normalized account/position snapshots only.
+- Server-side live gate records consent/readiness only; it does not call order
+  APIs.
 - Bitget API key, secret, and passphrase are process-memory only unless
   `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` enables AES-256-GCM encrypted
   user-scoped credential storage.

@@ -761,3 +761,21 @@
   - 앱이 꺼져 있어도 서버는 최신 private read-only snapshot을 유지할 수 있습니다.
   - raw private response와 secret은 저장하지 않으므로 live execution audit storage와 credential storage 경계가 분리됩니다.
   - 다음 live execution 단계에서는 이 snapshot을 기반으로 duplicate runner lock, position reconciliation, fail-closed 조건을 설계해야 합니다.
+
+## 0043. Server Live Gate Before Order Execution
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 서버가 credential과 private snapshot을 유지할 수 있게 되었지만, 실제 주문 API 연결 전에는 실거래 동의와 readiness 경계를 먼저 분리해야 합니다.
+  - 사용자는 앱을 꺼도 서버가 자동매매를 지속하는 것을 원하지만, 주문 실행은 explicit consent, fresh account/position snapshot, duplicate runner lock이 없으면 시작하면 안 됩니다.
+  - 이번 단계에서 주문 API를 같이 붙이면 보호주문/fail-closed 경계 없이 live 진입이 열릴 위험이 있습니다.
+- Decision:
+  - 서버는 `GET /users/me/live/status`와 `POST /users/me/live/control`을 추가합니다.
+  - live control은 기본 disabled이며, enabling에는 `acknowledgedRisk=true`를 요구합니다.
+  - readiness는 live consent, loaded Bitget credential, fresh private snapshot, live runner lock availability를 모두 확인합니다.
+  - `server-live-control.json`은 consent 상태만 저장하고, `server-live-lock.json`은 향후 live runner heartbeat/duplicate guard 경계로 예약합니다.
+  - 이번 단계의 `orderExecutionEnabled`는 항상 `false`이며 Bitget order API를 호출하지 않습니다.
+- Consequences:
+  - 실제 주문 API를 붙이기 전에 서버가 사용자의 live 가능 상태를 안전하게 판단할 수 있습니다.
+  - 다음 단계는 Bitget order adapter 연결이 아니라, live order state machine을 이 gate 뒤에 붙이고 TP1/TP2/SL 보호주문과 fail-closed 경로를 함께 구현하는 것입니다.

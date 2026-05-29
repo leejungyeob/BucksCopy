@@ -60,6 +60,8 @@
 - Server paper runner 반복 실행 -> 같은 `symbol/timeframe/strategy/candle openTime`은 `paper-runner-evaluations.jsonl`로 중복 평가하지 않음
 - Server paper runner signal 발생 -> `trade-event-logs.jsonl`에 `PAPER` signal을 남기고 live order API는 호출하지 않음
 - Server paper runner heartbeat -> `paper-runner-status.json`에 최신 상태를 저장하고 credential, signature, raw private response를 저장하지 않음
+- Server live gate enabled request without `acknowledgedRisk=true` -> 400 실패
+- Server live gate status -> consent, credential, fresh private snapshot, live lock readiness를 표시하되 order API를 호출하지 않음
 - Server paper runner multi-user -> `candles-{symbol}-15m.json`은 공용으로 1번 저장 -> 각 사용자의 `users/{userID}/paper-runner-control.json` ON/OFF와 logs/evaluations/status는 서로 분리됨
 - Server paper runner auth enabled -> bearer token 없는 `/users/me/status`는 401 -> 올바른 token은 자신의 user-scoped status만 조회 -> token 원문은 로그에 남지 않음
 - macOS server runner 설정 입력 -> endpoint와 bearer token 저장 -> token은 Keychain adapter에 저장되고 UI에는 redacted token만 표시 -> 다음 앱 실행 때 저장된 설정으로 `/users/me/*` API를 호출

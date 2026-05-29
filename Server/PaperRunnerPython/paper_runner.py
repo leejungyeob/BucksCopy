@@ -639,6 +639,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             except BitgetLoginError as error:
                 self.write_json({"error": str(error)}, HTTPStatus.CONFLICT)
             return
+        if action == "live/status":
+            self.write_json(self.runner.live_status(user_id))
+            return
         self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
@@ -647,7 +650,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             self.handle_bitget_login()
             return
 
-        if self.route_action(parsed.path) != "control":
+        action = self.route_action(parsed.path)
+        if action not in {"control", "live/control"}:
             self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
         user_id = self.authorize_user()
@@ -663,6 +667,21 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError:
             self.write_json({"error": "invalid json body"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        if action == "live/control":
+            if "enabled" not in payload or not isinstance(payload["enabled"], bool):
+                self.write_json({"error": "enabled boolean is required"}, HTTPStatus.BAD_REQUEST)
+                return
+            if payload["enabled"] and payload.get("acknowledgedRisk") is not True:
+                self.write_json({"error": "acknowledgedRisk true is required to enable live trading"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.write_json(self.runner.save_live_control(
+                user_id,
+                enabled=payload["enabled"],
+                acknowledged_risk=bool(payload.get("acknowledgedRisk", False)),
+                updated_by="api",
+            ))
             return
 
         if "enabled" not in payload or not isinstance(payload["enabled"], bool):
@@ -731,7 +750,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if not path.startswith(prefix):
             return None
         action = path[len(prefix) :]
-        if action in {"status", "control", "logs", "candles", "account", "positions"}:
+        if action in {"status", "control", "logs", "candles", "account", "positions", "live/status", "live/control"}:
             return action
         return None
 
@@ -1148,6 +1167,89 @@ class PaperRunner:
             if source.exists() and not destination.exists():
                 destination.write_bytes(source.read_bytes())
 
+    def load_live_control(self, user_id: str) -> dict[str, Any]:
+        control = read_json_file(self.user_dir(user_id) / "server-live-control.json", {})
+        return {
+            "enabled": bool(control.get("enabled", False)),
+            "acknowledgedRisk": bool(control.get("acknowledgedRisk", False)),
+            "mode": "server-live-gate",
+            "updatedAt": control.get("updatedAt"),
+            "updatedBy": control.get("updatedBy"),
+        }
+
+    def save_live_control(self, user_id: str, enabled: bool, acknowledged_risk: bool, updated_by: str) -> dict[str, Any]:
+        with self.lock:
+            control = {
+                "enabled": enabled,
+                "acknowledgedRisk": acknowledged_risk if enabled else False,
+                "mode": "server-live-gate",
+                "updatedAt": iso(now_utc()),
+                "updatedBy": updated_by,
+            }
+            self.user_dir(user_id).mkdir(parents=True, exist_ok=True)
+            self.atomic_write_json(self.user_dir(user_id) / "server-live-control.json", control, pretty=True)
+            return self.live_status(user_id)
+
+    def live_lock_path(self, user_id: str) -> Path:
+        return self.user_dir(user_id) / "server-live-lock.json"
+
+    def live_lock_available(self, user_id: str, checked_at: datetime) -> tuple[bool, str | None]:
+        path = self.live_lock_path(user_id)
+        if not path.exists():
+            return True, None
+        lock = read_json_file(path, {})
+        try:
+            updated_at = datetime.fromisoformat(str(lock["updatedAt"]).replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            return False, "live lock exists but has invalid timestamp"
+        stale_after = max(self.private_poll_seconds * 2, 120)
+        if (checked_at - updated_at).total_seconds() > stale_after:
+            return True, "stale live lock ignored"
+        return False, "another live runner lock is active"
+
+    def live_status(self, user_id: str) -> dict[str, Any]:
+        checked_at = now_utc()
+        control = self.load_live_control(user_id)
+        credential_available = user_id in self.bitget_credentials_by_user_id
+        encrypted_credential_stored = self.credential_record_path(user_id).exists()
+        snapshot = self.load_private_snapshot(user_id)
+        snapshot_fresh = False
+        snapshot_updated_at: str | None = None
+        if isinstance(snapshot, dict):
+            snapshot_updated_at = snapshot.get("updatedAt")
+            try:
+                updated_at = datetime.fromisoformat(str(snapshot_updated_at).replace("Z", "+00:00"))
+                snapshot_fresh = (checked_at - updated_at).total_seconds() <= max(self.private_poll_seconds * 2, 120)
+            except ValueError:
+                snapshot_fresh = False
+        lock_available, lock_note = self.live_lock_available(user_id, checked_at)
+        blockers: list[str] = []
+        if not control["enabled"]:
+            blockers.append("live consent is disabled")
+        if not credential_available:
+            blockers.append("Bitget credential is not loaded")
+        if not snapshot_fresh:
+            blockers.append("fresh account/position snapshot is required")
+        if not lock_available:
+            blockers.append(lock_note or "live runner lock is unavailable")
+        ready = not blockers
+        return {
+            "updatedAt": iso(checked_at),
+            "mode": "server-live-gate",
+            "ready": ready,
+            "orderExecutionEnabled": False,
+            "blockers": blockers,
+            "control": control,
+            "checks": {
+                "credentialAvailable": credential_available,
+                "encryptedCredentialStored": encrypted_credential_stored,
+                "privateSnapshotFresh": snapshot_fresh,
+                "privateSnapshotUpdatedAt": snapshot_updated_at,
+                "liveLockAvailable": lock_available,
+                "liveLockNote": lock_note,
+            },
+        }
+
     def fetch_candles(self, symbol: str) -> list[Candle]:
         params = {
             "granularity": TIMEFRAME,
@@ -1513,6 +1615,7 @@ class PaperRunner:
                 "storagePath": str(user_directory),
                 "marketStoragePath": str(self.data_dir),
                 "control": control,
+                "live": self.live_status(user_id),
                 "privateSnapshot": {
                     "updatedAt": private_snapshot.get("updatedAt"),
                     "accountCount": private_snapshot.get("accountCount", 0),
