@@ -616,11 +616,11 @@
   - 실거래 서버 전환은 credential 저장, 주문, 보호주문, fail-closed 책임을 옮기는 고위험 변경이므로 먼저 public market data와 paper signal만 검증해야 합니다.
 - Decision:
   - repo root에 Swift Package executable `BucksCopyPaperRunner`를 추가합니다.
-  - `BucksCopyPaperRunner`는 기존 Domain 전략 코드를 재사용하고, Bitget public REST `15m` candle만 받아 SQLite에 저장합니다.
+  - `BucksCopyPaperRunner`는 기존 Domain 전략 코드를 재사용하고, Bitget public REST `15m` candle만 받아 file-based JSON 저장소에 저장합니다.
   - runner는 closed 15m candle별 `symbol × timeframe × strategy × openTime` key를 저장해 같은 candle의 paper signal 중복 평가를 막습니다.
-  - runner는 `paper_runner_status`, `paper_runner_evaluations`, `trade_event_logs`에 상태와 paper signal을 남깁니다.
+  - runner는 `paper-runner-status.json`, `paper-runner-evaluations.jsonl`, `trade-event-logs.jsonl`에 상태와 paper signal을 남깁니다.
   - 이 단계는 private Bitget API, credential 저장, live order, protection order를 포함하지 않습니다.
 - Consequences:
   - Lightsail 서버에서 Docker Compose로 paper runner를 먼저 장시간 검증할 수 있습니다.
-  - macOS 앱을 서버 클라이언트로 바꾸기 전에 서버 DB/status/log contract를 확인할 수 있습니다.
+  - macOS 앱을 서버 클라이언트로 바꾸기 전에 서버 status/log contract를 확인할 수 있습니다.
   - 실거래 서버 전환은 별도 decision으로 분리하고, credential secret storage, API auth, duplicate runner lock, position reconciliation, exchange-side protection 검증을 요구합니다.

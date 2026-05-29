@@ -14,18 +14,8 @@ let package = Package(
         )
     ],
     targets: [
-        .systemLibrary(
-            name: "CSQLite",
-            path: "Server/CSQLite",
-            pkgConfig: "sqlite3",
-            providers: [
-                .apt(["libsqlite3-dev"]),
-                .brew(["sqlite3"])
-            ]
-        ),
         .executableTarget(
             name: "BucksCopyPaperRunner",
-            dependencies: ["CSQLite"],
             path: ".",
             exclude: [
                 ".codex",
@@ -59,17 +49,14 @@ let package = Package(
                 "Sources/BucksCopy/Data/BitgetTPSLOrderClient.swift",
                 "Sources/BucksCopy/Data/DemoDataSeeder.swift",
                 "Sources/BucksCopy/Data/InMemoryCredentialStore.swift",
-                "Sources/BucksCopy/Data/KeychainCredentialStore.swift"
+                "Sources/BucksCopy/Data/KeychainCredentialStore.swift",
+                "Sources/BucksCopy/Data/SQLiteCandleRepository.swift",
+                "Sources/BucksCopy/Data/SQLiteDatabase.swift",
+                "Sources/BucksCopy/Data/SQLiteTradeEventLogStore.swift"
             ],
             sources: [
                 "Sources/BucksCopy/Domains",
-                "Sources/BucksCopy/Data/SQLiteDatabase.swift",
-                "Sources/BucksCopy/Data/SQLiteCandleRepository.swift",
-                "Sources/BucksCopy/Data/SQLiteTradeEventLogStore.swift",
                 "Server/PaperRunner"
-            ],
-            linkerSettings: [
-                .linkedLibrary("sqlite3")
             ]
         )
     ]

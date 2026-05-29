@@ -90,14 +90,14 @@ enum PaperRunnerErrorText {
 
 final class PaperRunner {
     private let config: PaperRunnerConfig
-    private let candleRepository: SQLiteCandleRepository
-    private let logStore: SQLiteTradeEventLogStore
-    private let stateStore: PaperRunnerStateStore
+    private let candleRepository: FileCandleRepository
+    private let logStore: FileTradeEventLogStore
+    private let stateStore: PaperRunnerFileStateStore
     private let candleClient: BitgetPaperCandleClient
     private let evaluator: TradingSignalEvaluator
     private let strategyRegistry = StrategyRegistry()
     private let clock: Clock
-    private let databasePath: String
+    private let storagePath: String
 
     init(config: PaperRunnerConfig, clock: Clock = SystemClock()) throws {
         self.config = config
@@ -106,13 +106,12 @@ final class PaperRunner {
             at: config.dataDirectory,
             withIntermediateDirectories: true
         )
-        databasePath = config.dataDirectory
-            .appendingPathComponent("bucks-copy.sqlite")
-            .path
-        let database = try SQLiteDatabase(path: databasePath)
-        candleRepository = try SQLiteCandleRepository(database: database)
-        logStore = try SQLiteTradeEventLogStore(database: database)
-        stateStore = try PaperRunnerStateStore(database: database)
+        storagePath = config.dataDirectory.path
+        candleRepository = FileCandleRepository(directory: config.dataDirectory)
+        logStore = FileTradeEventLogStore(
+            fileURL: config.dataDirectory.appendingPathComponent("trade-event-logs.jsonl")
+        )
+        stateStore = try PaperRunnerFileStateStore(directory: config.dataDirectory)
         candleClient = BitgetPaperCandleClient(baseURL: config.baseURL)
         evaluator = TradingSignalEvaluator(
             strategyRegistry: strategyRegistry,
@@ -211,7 +210,7 @@ final class PaperRunner {
             evaluations: evaluations,
             signals: signals,
             failures: failures,
-            databasePath: databasePath
+            storagePath: storagePath
         )
         try stateStore.saveStatus(status)
         try logHeartbeatIfNeeded(status, startedAt: startedAt)
@@ -277,7 +276,7 @@ final class PaperRunner {
                     TradeLogDetail(label: "평가 수", value: "\(status.evaluations)"),
                     TradeLogDetail(label: "paper signal", value: "\(status.signals)"),
                     TradeLogDetail(label: "실패 수", value: "\(status.failures.count)", tone: status.failures.isEmpty ? .neutral : .warning),
-                    TradeLogDetail(label: "DB", value: status.databasePath)
+                    TradeLogDetail(label: "저장소", value: status.storagePath)
                 ]
             )
         ))
@@ -287,6 +286,117 @@ final class PaperRunner {
     private func maxDate(_ lhs: Date?, _ rhs: Date) -> Date {
         guard let lhs else { return rhs }
         return max(lhs, rhs)
+    }
+}
+
+final class FileCandleRepository: CandleRepository {
+    private let directory: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    init(directory: URL) {
+        self.directory = directory
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    }
+
+    func loadCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe,
+        limit: Int
+    ) throws -> [Candle] {
+        let candles = try loadAllCandles(symbol: symbol, timeframe: timeframe)
+        return Array(candles.suffix(max(limit, 0)))
+    }
+
+    func loadAllCandles(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) throws -> [Candle] {
+        let fileURL = candlesURL(symbol: symbol, timeframe: timeframe)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return []
+        }
+        let data = try Data(contentsOf: fileURL)
+        return try decoder.decode([Candle].self, from: data)
+            .sorted { $0.openTime < $1.openTime }
+    }
+
+    func loadOldestCandleOpenTime(
+        symbol: FuturesSymbol,
+        timeframe: CandleTimeframe
+    ) throws -> Date? {
+        try loadAllCandles(symbol: symbol, timeframe: timeframe).first?.openTime
+    }
+
+    func upsertCandles(_ candles: [Candle]) throws {
+        let grouped = Dictionary(grouping: candles) { candle in
+            "\(candle.symbol.rawValue)-\(candle.timeframe.rawValue)"
+        }
+
+        for (_, candlesForRoute) in grouped {
+            guard let sample = candlesForRoute.first else { continue }
+            let existing = try loadAllCandles(
+                symbol: sample.symbol,
+                timeframe: sample.timeframe
+            )
+            var merged = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+            for candle in candlesForRoute {
+                merged[candle.id] = candle
+            }
+
+            let sorted = merged.values.sorted { $0.openTime < $1.openTime }
+            let data = try encoder.encode(sorted)
+            try data.write(
+                to: candlesURL(symbol: sample.symbol, timeframe: sample.timeframe),
+                options: [.atomic]
+            )
+        }
+    }
+
+    private func candlesURL(symbol: FuturesSymbol, timeframe: CandleTimeframe) -> URL {
+        directory.appendingPathComponent("candles-\(symbol.rawValue)-\(timeframe.rawValue).json")
+    }
+}
+
+final class FileTradeEventLogStore: TradeEventLogStore {
+    private let fileURL: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+        encoder.outputFormatting = [.sortedKeys]
+    }
+
+    func append(_ log: TradeEventLog) throws {
+        let data = try encoder.encode(log) + Data("\n".utf8)
+        try append(data, to: fileURL)
+    }
+
+    func loadRecent(limit: Int) throws -> [TradeEventLog] {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return []
+        }
+
+        let text = try String(contentsOf: fileURL, encoding: .utf8)
+        let logs = text
+            .split(separator: "\n")
+            .compactMap { line -> TradeEventLog? in
+                guard let data = line.data(using: .utf8) else { return nil }
+                return try? decoder.decode(TradeEventLog.self, from: data)
+            }
+            .sorted { $0.timestamp < $1.timestamp }
+        return Array(logs.suffix(max(limit, 0)))
+    }
+
+    private func append(_ data: Data, to fileURL: URL) throws {
+        if FileManager.default.fileExists(atPath: fileURL.path) == false {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        }
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
     }
 }
 
@@ -406,7 +516,7 @@ struct PaperRunnerEvaluationKey: Equatable {
     }
 }
 
-struct PaperRunnerStatus: Equatable {
+struct PaperRunnerStatus: Codable, Equatable {
     let updatedAt: Date
     let mode: String
     let symbols: [String]
@@ -415,7 +525,7 @@ struct PaperRunnerStatus: Equatable {
     let evaluations: Int
     let signals: Int
     let failures: [String]
-    let databasePath: String
+    let storagePath: String
 
     var consoleSummary: String {
         let latestText = latestClosedCandleOpenTime.map { String(Int($0.timeIntervalSince1970)) } ?? "-"
@@ -433,25 +543,26 @@ struct PaperRunnerStatus: Equatable {
     }
 }
 
-final class PaperRunnerStateStore {
-    private let database: SQLiteDatabase
+final class PaperRunnerFileStateStore {
+    private let directory: URL
+    private let statusURL: URL
+    private let evaluationsURL: URL
+    private let heartbeatURL: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    private var evaluatedKeys: Set<String>
 
-    init(database: SQLiteDatabase) throws {
-        self.database = database
-        try createTablesIfNeeded()
+    init(directory: URL) throws {
+        self.directory = directory
+        statusURL = directory.appendingPathComponent("paper-runner-status.json")
+        evaluationsURL = directory.appendingPathComponent("paper-runner-evaluations.jsonl")
+        heartbeatURL = directory.appendingPathComponent("paper-runner-heartbeat.json")
+        encoder.outputFormatting = [.sortedKeys]
+        evaluatedKeys = try Self.loadEvaluatedKeys(from: evaluationsURL)
     }
 
     func hasEvaluated(_ key: PaperRunnerEvaluationKey) throws -> Bool {
-        let statement = try database.prepare(
-            """
-            SELECT evaluation_key
-            FROM paper_runner_evaluations
-            WHERE evaluation_key = ?
-            LIMIT 1;
-            """
-        )
-        try statement.bind(key.rawValue, at: 1)
-        return try statement.step()
+        evaluatedKeys.contains(key.rawValue)
     }
 
     func markEvaluated(
@@ -459,105 +570,78 @@ final class PaperRunnerStateStore {
         producedSignal: Bool,
         evaluatedAt: Date
     ) throws {
-        let statement = try database.prepare(
-            """
-            INSERT OR REPLACE INTO paper_runner_evaluations
-            (evaluation_key, symbol, timeframe, strategy_id, candle_open_time, produced_signal, evaluated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
-            """
+        guard evaluatedKeys.insert(key.rawValue).inserted else {
+            return
+        }
+        let record = PaperRunnerEvaluationRecord(
+            evaluationKey: key.rawValue,
+            symbol: key.symbol.rawValue,
+            timeframe: key.timeframe.rawValue,
+            strategyID: key.strategyID,
+            candleOpenTime: key.candleOpenTime,
+            producedSignal: producedSignal,
+            evaluatedAt: evaluatedAt
         )
-        try statement.bind(key.rawValue, at: 1)
-        try statement.bind(key.symbol.rawValue, at: 2)
-        try statement.bind(key.timeframe.rawValue, at: 3)
-        try statement.bind(key.strategyID, at: 4)
-        try statement.bind(key.candleOpenTime.timeIntervalSince1970, at: 5)
-        try statement.bind(producedSignal ? 1 : 0, at: 6)
-        try statement.bind(evaluatedAt.timeIntervalSince1970, at: 7)
-        _ = try statement.step()
+        let data = try encoder.encode(record) + Data("\n".utf8)
+        try append(data, to: evaluationsURL)
     }
 
     func saveStatus(_ status: PaperRunnerStatus) throws {
-        let failureText = status.failures.joined(separator: "\n")
-        let statement = try database.prepare(
-            """
-            INSERT OR REPLACE INTO paper_runner_status
-            (id, updated_at, mode, symbols, latest_closed_candle_open_time, saved_candles, evaluations, signals, failures, database_path)
-            VALUES ('current', ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """
-        )
-        try statement.bind(status.updatedAt.timeIntervalSince1970, at: 1)
-        try statement.bind(status.mode, at: 2)
-        try statement.bind(status.symbols.joined(separator: ","), at: 3)
-        try statement.bind(status.latestClosedCandleOpenTime?.timeIntervalSince1970 ?? 0, at: 4)
-        try statement.bind(status.savedCandles, at: 5)
-        try statement.bind(status.evaluations, at: 6)
-        try statement.bind(status.signals, at: 7)
-        try statement.bind(failureText, at: 8)
-        try statement.bind(status.databasePath, at: 9)
-        _ = try statement.step()
+        let data = try encoder.encode(status)
+        try data.write(to: statusURL, options: [.atomic])
     }
 
     func shouldLogHeartbeat(now: Date, minimumInterval: TimeInterval = 15 * 60) throws -> Bool {
-        let statement = try database.prepare(
-            """
-            SELECT logged_at
-            FROM paper_runner_heartbeat
-            WHERE id = 'last'
-            LIMIT 1;
-            """
-        )
-        guard try statement.step() else {
+        guard FileManager.default.fileExists(atPath: heartbeatURL.path) else {
             return true
         }
-        let latest = Date(timeIntervalSince1970: statement.double(at: 0))
+        let data = try Data(contentsOf: heartbeatURL)
+        let latest = try decoder.decode(PaperRunnerHeartbeat.self, from: data).loggedAt
         return now.timeIntervalSince(latest) >= minimumInterval
     }
 
     func saveHeartbeatLogTime(_ loggedAt: Date) throws {
-        let statement = try database.prepare(
-            """
-            INSERT OR REPLACE INTO paper_runner_heartbeat
-            (id, logged_at)
-            VALUES ('last', ?);
-            """
-        )
-        try statement.bind(loggedAt.timeIntervalSince1970, at: 1)
-        _ = try statement.step()
+        let data = try encoder.encode(PaperRunnerHeartbeat(loggedAt: loggedAt))
+        try data.write(to: heartbeatURL, options: [.atomic])
     }
 
-    private func createTablesIfNeeded() throws {
-        try database.execute(
-            """
-            CREATE TABLE IF NOT EXISTS paper_runner_evaluations (
-                evaluation_key TEXT PRIMARY KEY NOT NULL,
-                symbol TEXT NOT NULL,
-                timeframe TEXT NOT NULL,
-                strategy_id TEXT NOT NULL,
-                candle_open_time REAL NOT NULL,
-                produced_signal INTEGER NOT NULL,
-                evaluated_at REAL NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_paper_runner_evaluations_symbol_time
-            ON paper_runner_evaluations(symbol, timeframe, candle_open_time DESC);
+    private static func loadEvaluatedKeys(from fileURL: URL) throws -> Set<String> {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return []
+        }
 
-            CREATE TABLE IF NOT EXISTS paper_runner_status (
-                id TEXT PRIMARY KEY NOT NULL,
-                updated_at REAL NOT NULL,
-                mode TEXT NOT NULL,
-                symbols TEXT NOT NULL,
-                latest_closed_candle_open_time REAL NOT NULL,
-                saved_candles INTEGER NOT NULL,
-                evaluations INTEGER NOT NULL,
-                signals INTEGER NOT NULL,
-                failures TEXT NOT NULL,
-                database_path TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS paper_runner_heartbeat (
-                id TEXT PRIMARY KEY NOT NULL,
-                logged_at REAL NOT NULL
-            );
-            """
-        )
+        let text = try String(contentsOf: fileURL, encoding: .utf8)
+        let decoder = JSONDecoder()
+        return Set(text.split(separator: "\n").compactMap { line in
+            guard let data = line.data(using: .utf8),
+                  let record = try? decoder.decode(PaperRunnerEvaluationRecord.self, from: data) else {
+                return nil
+            }
+            return record.evaluationKey
+        })
     }
+
+    private func append(_ data: Data, to fileURL: URL) throws {
+        if FileManager.default.fileExists(atPath: fileURL.path) == false {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        }
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
+    }
+}
+
+private struct PaperRunnerEvaluationRecord: Codable {
+    let evaluationKey: String
+    let symbol: String
+    let timeframe: String
+    let strategyID: String
+    let candleOpenTime: Date
+    let producedSignal: Bool
+    let evaluatedAt: Date
+}
+
+private struct PaperRunnerHeartbeat: Codable {
+    let loggedAt: Date
 }

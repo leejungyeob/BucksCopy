@@ -3,7 +3,7 @@
 ## 한글 요약
 
 - 현재 서버 단계는 실거래가 아니라 `paper-runner`입니다.
-- runner는 Bitget public REST로 `15m` candle만 받아 SQLite에 저장하고, closed candle 기준으로 전략을 평가합니다.
+- runner는 Bitget public REST로 `15m` candle만 받아 JSON 파일에 저장하고, closed candle 기준으로 전략을 평가합니다.
 - Bitget API key, secret, passphrase는 아직 이 서버 배포에 넣지 않습니다.
 
 ## Paper Runner
@@ -34,12 +34,12 @@ docker compose -f Server/docker-compose.paper.yml up -d --build
 docker compose -f Server/docker-compose.paper.yml logs -f
 ```
 
-The runner writes:
+The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 
-- `candles`: normalized Bitget public OHLCV candles
-- `trade_event_logs`: paper signal and heartbeat records
-- `paper_runner_status`: latest runner status for the future API/UI
-- `paper_runner_evaluations`: duplicate evaluation guard by `symbol/timeframe/strategy/openTime`
+- `candles-{symbol}-15m.json`: normalized Bitget public OHLCV candles
+- `trade-event-logs.jsonl`: paper signal and heartbeat records
+- `paper-runner-status.json`: latest runner status for the future API/UI
+- `paper-runner-evaluations.jsonl`: duplicate evaluation guard by `symbol/timeframe/strategy/openTime`
 
 ## Safety Boundary
 

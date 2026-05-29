@@ -16,7 +16,7 @@
 | dashboard 변경 | connect-only credential flow, auto-connect, 15m timeframe enforcement, position table, Live start/stop consent gate, log persistence |
 | symbol catalog / Watchlist 변경 | `symbolStatus=normal`, `supportMarginCoins` contains `USDT`, Watchlist-only subscription |
 | local market history 변경 | upsert idempotency, startup gap fill, closed-candle-only read, no secret persistence |
-| server paper runner 변경 | Swift Package build, 15m public candle fetch, SQLite status/log persistence, duplicate paper evaluation guard, no private Bitget/order path |
+| server paper runner 변경 | Swift Package build, 15m public candle fetch, file-based status/log persistence, duplicate paper evaluation guard, no private Bitget/order path |
 | credential storage 변경 | Security checklist + Keychain delete/read/write failure cases |
 | candle builder 변경 | 15m/1H/4H/12H/1D bucket, boundary timestamp, missing/out-of-order input |
 | strategy 변경 | built-in registry coverage, signal generation, no duplicate order intent, backtest/live closed-candle 기준 |
@@ -55,10 +55,10 @@
 - Live monitor 시작 -> Watchlist의 `15m` 최신 completed candle만 평가 -> 추천 전략 신호가 있으면 Live 로그에 15m가 기록
 - Live monitor 실행 -> 기본 3초 주기로 REST/local 최신 completed 15m candle을 재확인 -> 진행 중 candle 신호는 후보로 올리지 않음
 - Live monitor 시작 -> 현재 최신 completed 15m candle key를 먼저 priming -> Start Live 전에 이미 닫힌 candle 신호는 실주문으로 쓰지 않음 -> 다음 completed 15m candle 신호부터 주문 후보 허용
-- Server paper runner 시작 -> Bitget public REST에서 Watchlist `15m` candle만 가져옴 -> SQLite `candles`에 upsert -> closed candle만 전략 평가에 사용
-- Server paper runner 반복 실행 -> 같은 `symbol/timeframe/strategy/candle openTime`은 `paper_runner_evaluations`로 중복 평가하지 않음
-- Server paper runner signal 발생 -> `trade_event_logs`에 `PAPER` signal을 남기고 live order API는 호출하지 않음
-- Server paper runner heartbeat -> `paper_runner_status`에 최신 상태를 저장하고 credential, signature, raw private response를 저장하지 않음
+- Server paper runner 시작 -> Bitget public REST에서 Watchlist `15m` candle만 가져옴 -> file-based candle store에 upsert -> closed candle만 전략 평가에 사용
+- Server paper runner 반복 실행 -> 같은 `symbol/timeframe/strategy/candle openTime`은 `paper-runner-evaluations.jsonl`로 중복 평가하지 않음
+- Server paper runner signal 발생 -> `trade-event-logs.jsonl`에 `PAPER` signal을 남기고 live order API는 호출하지 않음
+- Server paper runner heartbeat -> `paper-runner-status.json`에 최신 상태를 저장하고 credential, signature, raw private response를 저장하지 않음
 - Live 진입 로그에 TP1/TP2/손절가가 기록되고 Bitget position snapshot의 TP/SL이 비어 있음 -> 차트와 포지션 패널은 같은 symbol/side의 최근 live entry log 값으로 ENTRY/TP1/TP2/SL을 함께 표시
 - Live 진입 로그에 TP1/TP2/손절가가 있고 position snapshot의 TP/SL이 비어 있음 -> Live monitor portfolio arbitration은 log 보강값으로 기존 포지션의 남은 손익비를 계산
 - Live monitor 시작 -> 현재 USDT account equity를 자동매매 시작 기록으로 영구 저장 -> 하단 자동매매 기록 패널이 새 시작마다 리셋되지 않고 누적 시드, 현재 equity, 추정 순수익, 누적 기간, 진입/청산 로그 수, 확정 승패/승률, 리스크 이벤트를 표시

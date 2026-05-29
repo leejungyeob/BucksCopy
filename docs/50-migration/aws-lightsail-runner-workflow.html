@@ -526,7 +526,7 @@ docker compose -f Server/docker-compose.paper.yml up -d --build</pre>
             <h3>2. Runner 상태 확인</h3>
             <ol>
               <li>Docker 로그에서 15m candle 저장과 paper 평가 summary를 확인합니다.</li>
-              <li>SQLite 파일이 <code>/home/ubuntu/bucks-copy-server/data</code> 아래 생성되는지 봅니다.</li>
+              <li>JSON/JSONL 상태 파일이 <code>/home/ubuntu/bucks-copy-server/data</code> 아래 생성되는지 봅니다.</li>
               <li>24시간 동안 heartbeat와 candle update가 끊기지 않는지 검증합니다.</li>
             </ol>
             <pre>docker compose -f Server/docker-compose.paper.yml logs -f
