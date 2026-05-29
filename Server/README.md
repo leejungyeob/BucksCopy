@@ -34,6 +34,15 @@ docker compose -f Server/docker-compose.paper.yml up -d --build
 docker compose -f Server/docker-compose.paper.yml logs -f
 ```
 
+On a normal Lightsail Ubuntu instance, `ubuntu` is UID/GID `1000`.
+If the mounted data/log folders are owned by a different user, set
+`BUCKS_COPY_RUNNER_UID` and `BUCKS_COPY_RUNNER_GID` in `.env` to the output of:
+
+```bash
+id -u
+id -g
+```
+
 The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 
 - `candles-{symbol}-15m.json`: normalized Bitget public OHLCV candles

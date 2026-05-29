@@ -83,7 +83,8 @@ enum PaperRunnerErrorText {
         case let publicError as PublicTradingErrorDescribing:
             return publicError.tradingLogDescription
         default:
-            return String(describing: type(of: error))
+            let nsError = error as NSError
+            return "\(nsError.domain) \(nsError.code): \(nsError.localizedDescription)"
         }
     }
 }
