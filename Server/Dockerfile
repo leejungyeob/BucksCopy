@@ -6,7 +6,7 @@ COPY Sources ./Sources
 COPY Server ./Server
 RUN swift build -c release --product BucksCopyPaperRunner
 
-FROM ubuntu:24.04
+FROM swift:6.0-noble
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata \
