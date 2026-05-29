@@ -14,7 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, getcontext
+from decimal import Decimal, ROUND_DOWN, getcontext
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -75,6 +75,15 @@ def clamp_int(value: str | None, default: int, minimum: int, maximum: int) -> in
     except ValueError:
         parsed = default
     return min(max(parsed, minimum), maximum)
+
+
+def parse_decimal_env(value: str | None, default: Decimal = Decimal("0")) -> Decimal:
+    if value is None or not value.strip():
+        return default
+    try:
+        return Decimal(value.strip())
+    except Exception:
+        return default
 
 
 def validate_user_id(value: str) -> str:
@@ -575,6 +584,10 @@ class BitgetLoginError(Exception):
     pass
 
 
+class LiveExecutionError(Exception):
+    pass
+
+
 class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     runner: "PaperRunner"
 
@@ -787,6 +800,27 @@ class PaperRunner:
         self.poll_seconds = max(int(os.environ.get("BUCKS_COPY_POLL_SECONDS", "30")), 5)
         self.private_poll_seconds = max(int(os.environ.get("BUCKS_COPY_PRIVATE_POLL_SECONDS", "60")), 30)
         self.base_url = os.environ.get("BUCKS_COPY_BITGET_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+        self.live_order_execution_enabled = parse_bool(os.environ.get("BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED"))
+        self.live_order_margin_usdt = max(
+            parse_decimal_env(os.environ.get("BUCKS_COPY_LIVE_ORDER_MARGIN_USDT")),
+            dec(0),
+        )
+        self.live_margin_mode = os.environ.get("BUCKS_COPY_LIVE_MARGIN_MODE", "isolated").strip().lower() or "isolated"
+        self.live_position_mode = os.environ.get("BUCKS_COPY_LIVE_POSITION_MODE", "hedge").strip().lower() or "hedge"
+        self.live_confirmation_attempts = clamp_int(
+            os.environ.get("BUCKS_COPY_LIVE_CONFIRMATION_ATTEMPTS"),
+            default=8,
+            minimum=1,
+            maximum=20,
+        )
+        self.live_confirmation_delay_seconds = max(
+            parse_decimal_env(os.environ.get("BUCKS_COPY_LIVE_CONFIRMATION_DELAY_SECONDS"), Decimal("0.35")),
+            dec(0),
+        )
+        self.live_protection_retry_attempts = max(
+            clamp_int(os.environ.get("BUCKS_COPY_LIVE_PROTECTION_RETRY_ATTEMPTS"), default=5, minimum=5, maximum=12),
+            5,
+        )
         self.run_once = parse_bool(os.environ.get("BUCKS_COPY_RUN_ONCE"))
         self.api_host = os.environ.get("BUCKS_COPY_API_HOST", DEFAULT_API_HOST)
         self.api_port = clamp_int(os.environ.get("BUCKS_COPY_API_PORT"), DEFAULT_API_PORT, 1, 65535)
@@ -1085,6 +1119,46 @@ class PaperRunner:
             raise BitgetLoginError(f"Bitget API {code}: {message}")
         return decoded.get("data", [])
 
+    def bitget_signed_post(
+        self,
+        credential: BitgetCredential,
+        path: str,
+        payload: dict[str, Any],
+    ) -> Any:
+        body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        url = f"{self.base_url}{path}"
+        timestamp = str(int(time.time() * 1000))
+        request = Request(
+            url,
+            data=body.encode("utf-8"),
+            headers={
+                "ACCESS-KEY": credential.api_key,
+                "ACCESS-SIGN": bitget_signature(timestamp, "POST", path, "", body, credential.secret_key),
+                "ACCESS-PASSPHRASE": credential.passphrase,
+                "ACCESS-TIMESTAMP": timestamp,
+                "Content-Type": "application/json",
+                "locale": "en-US",
+                "User-Agent": "BucksCopyPaperRunner/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=20, context=ssl_context()) as response:
+                raw_body = response.read()
+        except Exception as error:
+            raise LiveExecutionError("Bitget private order request failed") from error
+
+        try:
+            decoded = json.loads(raw_body.decode("utf-8"))
+        except json.JSONDecodeError as error:
+            raise LiveExecutionError("Bitget private order request returned invalid JSON") from error
+
+        if decoded.get("code") != "00000":
+            code = str(decoded.get("code") or "unknown")
+            message = str(decoded.get("msg") or "order request rejected")[:160]
+            raise LiveExecutionError(f"Bitget API {code}: {message}")
+        return decoded.get("data", {})
+
     def fetch_bitget_accounts(self, credential: BitgetCredential) -> list[dict[str, Any]]:
         data = self.bitget_signed_get(
             credential,
@@ -1104,6 +1178,65 @@ class PaperRunner:
         if not isinstance(data, list):
             raise BitgetLoginError("Bitget private request returned invalid position data")
         return [self.normalized_position(record) for record in data if isinstance(record, dict)]
+
+    def fetch_contract_specs(self, symbol: str) -> dict[str, Any]:
+        params = {"productType": PRODUCT_TYPE, "symbol": symbol}
+        url = f"{self.base_url}/api/v2/mix/market/contracts?{urlencode(sorted(params.items()))}"
+        request = Request(
+            url,
+            headers={
+                "Content-Type": "application/json",
+                "locale": "en-US",
+                "User-Agent": "BucksCopyPaperRunner/1.0",
+            },
+            method="GET",
+        )
+        with urlopen(request, timeout=20, context=ssl_context()) as response:
+            body = response.read()
+        decoded = json.loads(body.decode("utf-8"))
+        if decoded.get("code") != "00000":
+            raise LiveExecutionError(f"Bitget API {decoded.get('code')}: contract config rejected")
+        data = decoded.get("data", [])
+        if not isinstance(data, list):
+            raise LiveExecutionError("Bitget contract config returned invalid data")
+        for record in data:
+            if isinstance(record, dict) and str(record.get("symbol") or "").upper() == symbol.upper():
+                support_margin_coins = record.get("supportMarginCoins") or []
+                if str(record.get("symbolStatus") or "").lower() != "normal" or "USDT" not in support_margin_coins:
+                    raise LiveExecutionError(f"{symbol} is not a normal USDT-M Futures symbol")
+                return {
+                    "symbol": symbol.upper(),
+                    "minTradeNum": dec(record.get("minTradeNum") or "0"),
+                    "minTradeUSDT": dec(record.get("minTradeUSDT") or "0"),
+                    "sizeMultiplier": dec(record.get("sizeMultiplier") or "0"),
+                    "volumePlace": int(record.get("volumePlace") or "8"),
+                    "maxLeverage": int(record.get("maxLever") or "1"),
+                }
+        raise LiveExecutionError(f"{symbol} contract config was not found")
+
+    @staticmethod
+    def rounded_order_size(raw_size: Decimal, contract_spec: dict[str, Any]) -> Decimal:
+        multiplier = contract_spec.get("sizeMultiplier")
+        if not isinstance(multiplier, Decimal) or multiplier <= 0:
+            volume_place = int(contract_spec.get("volumePlace") or 8)
+            multiplier = dec(1) / (dec(10) ** volume_place)
+        units = (raw_size / multiplier).to_integral_value(rounding=ROUND_DOWN)
+        return units * multiplier
+
+    def order_size_for_signal(self, signal: Signal, account_available: Decimal, contract_spec: dict[str, Any]) -> Decimal:
+        if self.live_order_margin_usdt <= 0:
+            raise LiveExecutionError("live order margin is not configured")
+        leverage = min(signal.leverage, int(contract_spec.get("maxLeverage") or signal.leverage))
+        planned_margin = min(self.live_order_margin_usdt, account_available * dec("0.95"))
+        if planned_margin <= 0:
+            raise LiveExecutionError("USDT available balance is not enough for live order")
+        notional = planned_margin * dec(leverage)
+        if notional < contract_spec.get("minTradeUSDT", dec(0)):
+            raise LiveExecutionError("planned notional is below Bitget minimum trade USDT")
+        size = self.rounded_order_size(notional / signal.entry, contract_spec)
+        if size <= 0 or size < contract_spec.get("minTradeNum", dec(0)):
+            raise LiveExecutionError("calculated order size is below Bitget minimum trade size")
+        return size
 
     @staticmethod
     def normalized_account(record: dict[str, Any]) -> dict[str, Any]:
@@ -1135,6 +1268,331 @@ class PaperRunner:
             "cTime": str(record.get("cTime") or ""),
             "uTime": str(record.get("uTime") or ""),
         }
+
+    def account_available_usdt(self, snapshot: dict[str, Any] | None) -> Decimal:
+        if not isinstance(snapshot, dict):
+            return dec(0)
+        accounts = snapshot.get("accounts", [])
+        if not isinstance(accounts, list):
+            return dec(0)
+        for account in accounts:
+            if isinstance(account, dict) and str(account.get("marginCoin") or "").upper() == "USDT":
+                return dec(account.get("available") or "0")
+        return dec(0)
+
+    @staticmethod
+    def hold_side_for_signal(signal: Signal) -> str:
+        return "long" if signal.side == "buy" else "short"
+
+    def acquire_live_lock(self, user_id: str, reason: str) -> None:
+        path = self.live_lock_path(user_id)
+        checked_at = now_utc()
+        available, note = self.live_lock_available(user_id, checked_at)
+        if not available:
+            raise LiveExecutionError(note or "live runner lock is unavailable")
+        self.atomic_write_json(
+            path,
+            {
+                "updatedAt": iso(checked_at),
+                "reason": reason,
+            },
+            pretty=True,
+        )
+
+    def release_live_lock(self, user_id: str) -> None:
+        try:
+            self.live_lock_path(user_id).unlink()
+        except FileNotFoundError:
+            pass
+
+    def record_live_event(
+        self,
+        user_id: str,
+        signal: Signal,
+        severity: str,
+        message: str,
+        details: dict[str, str],
+    ) -> None:
+        tags = ["LIVE", TIMEFRAME, signal.side.upper(), signal.strategy_id]
+        self.append_jsonl(
+            self.user_dir(user_id) / "trade-event-logs.jsonl",
+            {
+                "id": str(uuid.uuid4()),
+                "timestamp": iso(now_utc()),
+                "category": "liveOrder" if severity == "info" else "risk",
+                "severity": severity,
+                "symbol": signal.symbol,
+                "message": message,
+                "metadata": {
+                    "title": f"{signal.symbol} server live execution",
+                    "subtitle": "서버 runner가 실거래 주문 경로를 처리했습니다.",
+                    "tags": tags,
+                    "details": details,
+                },
+            },
+        )
+
+    def set_bitget_leverage(self, credential: BitgetCredential, signal: Signal) -> None:
+        self.bitget_signed_post(
+            credential,
+            "/api/v2/mix/account/set-leverage",
+            {
+                "symbol": signal.symbol,
+                "productType": PRODUCT_TYPE,
+                "marginCoin": "USDT",
+                "leverage": str(signal.leverage),
+            },
+        )
+
+    def place_market_order(self, credential: BitgetCredential, signal: Signal, size: Decimal, client_oid: str) -> dict[str, Any]:
+        data = self.bitget_signed_post(
+            credential,
+            "/api/v2/mix/order/place-order",
+            {
+                "symbol": signal.symbol,
+                "productType": PRODUCT_TYPE,
+                "marginMode": self.live_margin_mode,
+                "marginCoin": "USDT",
+                "size": decimal_text(size),
+                "side": signal.side,
+                "tradeSide": "open",
+                "orderType": "market",
+                "clientOid": client_oid,
+                "reduceOnly": "NO",
+            },
+        )
+        return data if isinstance(data, dict) else {}
+
+    def fetch_order_detail(
+        self,
+        credential: BitgetCredential,
+        signal: Signal,
+        order_id: str | None,
+        client_oid: str,
+    ) -> dict[str, Any]:
+        params = {
+            "clientOid": client_oid,
+            "productType": PRODUCT_TYPE,
+            "symbol": signal.symbol,
+        }
+        if order_id:
+            params["orderId"] = order_id
+        data = self.bitget_signed_get(credential, "/api/v2/mix/order/detail", params)
+        return data if isinstance(data, dict) else {}
+
+    def confirm_filled_order(
+        self,
+        credential: BitgetCredential,
+        signal: Signal,
+        order_id: str | None,
+        client_oid: str,
+    ) -> dict[str, Any]:
+        latest: dict[str, Any] = {}
+        for attempt in range(self.live_confirmation_attempts):
+            if attempt > 0 and self.live_confirmation_delay_seconds > 0:
+                time.sleep(float(self.live_confirmation_delay_seconds))
+            latest = self.fetch_order_detail(credential, signal, order_id, client_oid)
+            state = str(latest.get("state") or latest.get("status") or "").lower()
+            if state in {"filled", "full-fill", "full_filled"}:
+                return latest
+        raise LiveExecutionError(f"entry fill was not confirmed for {redacted_identifier(client_oid)}")
+
+    def find_open_position(self, positions: list[dict[str, Any]], signal: Signal) -> dict[str, Any] | None:
+        hold_side = self.hold_side_for_signal(signal)
+        for position in positions:
+            if not isinstance(position, dict):
+                continue
+            if str(position.get("symbol") or "").upper() != signal.symbol:
+                continue
+            total = dec(position.get("total") or "0")
+            available = dec(position.get("available") or "0")
+            if max(total, available) <= 0:
+                continue
+            position_side = str(position.get("holdSide") or "").lower()
+            if position_side in {hold_side, "", "net"}:
+                return position
+        return None
+
+    def place_tpsl_order(
+        self,
+        credential: BitgetCredential,
+        signal: Signal,
+        kind: str,
+        trigger_price: Decimal,
+        execute_price: Decimal,
+        size: Decimal,
+        client_oid: str,
+    ) -> dict[str, Any]:
+        data = self.bitget_signed_post(
+            credential,
+            "/api/v2/mix/order/place-tpsl-order",
+            {
+                "marginCoin": "USDT",
+                "productType": PRODUCT_TYPE,
+                "symbol": signal.symbol,
+                "planType": "profit_plan" if kind == "takeProfit" else "loss_plan",
+                "triggerPrice": decimal_text(trigger_price),
+                "triggerType": "mark_price",
+                "executePrice": decimal_text(execute_price),
+                "holdSide": self.hold_side_for_signal(signal) if self.live_position_mode != "one-way" else signal.side,
+                "size": decimal_text(size),
+                "rangeRate": "",
+                "clientOid": client_oid,
+            },
+        )
+        return data if isinstance(data, dict) else {}
+
+    def install_protection_orders(
+        self,
+        credential: BitgetCredential,
+        signal: Signal,
+        size: Decimal,
+        contract_spec: dict[str, Any],
+        parent_client_oid: str,
+    ) -> list[dict[str, Any]]:
+        half_size = self.rounded_order_size(size / dec(2), contract_spec)
+        final_size = size - half_size
+        if half_size <= 0 or final_size <= 0:
+            raise LiveExecutionError("calculated protection order size is invalid")
+        orders = [
+            ("takeProfit", signal.partial_take_profit, signal.partial_take_profit, half_size, "tp1"),
+            ("takeProfit", signal.take_profit, signal.take_profit, final_size, "tp2"),
+            ("stopLoss", signal.stop, dec(0), size, "sl"),
+        ]
+        receipts: list[dict[str, Any]] = []
+        for kind, trigger_price, execute_price, order_size, suffix in orders:
+            last_error: Exception | None = None
+            for attempt in range(1, self.live_protection_retry_attempts + 2):
+                client_oid = f"{parent_client_oid}-{suffix}-{attempt}"
+                try:
+                    receipt = self.place_tpsl_order(
+                        credential,
+                        signal,
+                        kind,
+                        trigger_price,
+                        execute_price,
+                        order_size,
+                        client_oid,
+                    )
+                    receipts.append(
+                        {
+                            "kind": kind,
+                            "clientOid": redacted_identifier(client_oid),
+                            "attempts": attempt,
+                            "size": decimal_text(order_size),
+                        }
+                    )
+                    break
+                except Exception as error:
+                    last_error = error
+                    if attempt <= self.live_protection_retry_attempts:
+                        time.sleep(0.4)
+            else:
+                raise LiveExecutionError(
+                    f"{kind} protection order retry exhausted: {last_error}"
+                )
+        return receipts
+
+    def close_position_fail_closed(self, credential: BitgetCredential, signal: Signal) -> None:
+        self.bitget_signed_post(
+            credential,
+            "/api/v2/mix/order/close-positions",
+            {
+                "symbol": signal.symbol,
+                "productType": PRODUCT_TYPE,
+                "holdSide": self.hold_side_for_signal(signal),
+            },
+        )
+
+    def maybe_execute_live_signal(
+        self,
+        user_id: str,
+        signal: Signal,
+        candle_open_time: int,
+        generated_at: datetime,
+        private_snapshot: dict[str, Any] | None,
+    ) -> bool:
+        live = self.live_status(user_id)
+        if not live["ready"] or not live["orderExecutionEnabled"]:
+            return False
+        credential = self.credential_for_user(user_id)
+        parent_client_oid = (
+            f"bc-{signal.symbol.lower()}-{TIMEFRAME}-{signal.strategy_id[:16]}-"
+            f"{candle_open_time}-{uuid.uuid4().hex[:10]}"
+        )
+        self.acquire_live_lock(user_id, parent_client_oid)
+        entry_confirmed = False
+        try:
+            contract_spec = self.fetch_contract_specs(signal.symbol)
+            available = self.account_available_usdt(private_snapshot)
+            size = self.order_size_for_signal(signal, available, contract_spec)
+            self.set_bitget_leverage(credential, signal)
+            order = self.place_market_order(credential, signal, size, parent_client_oid)
+            order_id = str(order.get("orderId") or "") or None
+            detail = self.confirm_filled_order(credential, signal, order_id, parent_client_oid)
+            entry_confirmed = True
+            snapshot = self.refresh_user_private_snapshot(user_id)
+            position = self.find_open_position(snapshot["positions"], signal)
+            if position is None:
+                raise LiveExecutionError("entry was filled but fresh position snapshot did not confirm an open position")
+            receipts = self.install_protection_orders(
+                credential,
+                signal,
+                size,
+                contract_spec,
+                parent_client_oid,
+            )
+            self.record_live_event(
+                user_id,
+                signal,
+                "info",
+                (
+                    f"Server live entry protected. Side {signal.side}, size {decimal_text(size)}, "
+                    f"entry {decimal_text(signal.entry)}, TP1 {decimal_text(signal.partial_take_profit)}, "
+                    f"TP2 {decimal_text(signal.take_profit)}, SL {decimal_text(signal.stop)}."
+                ),
+                {
+                    "mode": "server-live",
+                    "clientOid": redacted_identifier(parent_client_oid),
+                    "filledSize": str(detail.get("baseVolume") or detail.get("size") or decimal_text(size)),
+                    "averagePrice": str(detail.get("priceAvg") or "-"),
+                    "entry": decimal_text(signal.entry),
+                    "size": decimal_text(size),
+                    "marginUSDT": decimal_text(self.live_order_margin_usdt),
+                    "leverage": f"{signal.leverage}x",
+                    "tp1": decimal_text(signal.partial_take_profit),
+                    "tp2": decimal_text(signal.take_profit),
+                    "stopLoss": decimal_text(signal.stop),
+                    "protectionOrders": str(len(receipts)),
+                },
+            )
+            return True
+        except Exception as error:
+            if entry_confirmed:
+                try:
+                    snapshot = self.refresh_user_private_snapshot(user_id)
+                    if self.find_open_position(snapshot["positions"], signal) is not None:
+                        self.close_position_fail_closed(credential, signal)
+                except Exception:
+                    pass
+            self.record_live_event(
+                user_id,
+                signal,
+                "error",
+                f"Server live execution failed: {error}",
+                {
+                    "mode": "server-live",
+                    "clientOid": redacted_identifier(parent_client_oid),
+                    "failClosedAttempted": str(entry_confirmed).lower(),
+                    "entry": decimal_text(signal.entry),
+                    "tp1": decimal_text(signal.partial_take_profit),
+                    "tp2": decimal_text(signal.take_profit),
+                    "stopLoss": decimal_text(signal.stop),
+                },
+            )
+            raise
+        finally:
+            self.release_live_lock(user_id)
 
     def user_id_for_token(self, token: str) -> str | None:
         for user_id, expected in self.auth_tokens_by_user_id.items():
@@ -1233,13 +1691,25 @@ class PaperRunner:
         if not lock_available:
             blockers.append(lock_note or "live runner lock is unavailable")
         ready = not blockers
+        order_blockers: list[str] = []
+        if not self.live_order_execution_enabled:
+            order_blockers.append("live order execution env switch is disabled")
+        if self.live_order_margin_usdt <= 0:
+            order_blockers.append("live order margin USDT is not configured")
+        order_execution_enabled = ready and not order_blockers
         return {
             "updatedAt": iso(checked_at),
             "mode": "server-live-gate",
             "ready": ready,
-            "orderExecutionEnabled": False,
+            "orderExecutionEnabled": order_execution_enabled,
             "blockers": blockers,
+            "orderBlockers": order_blockers,
             "control": control,
+            "executionConfig": {
+                "marginUSDT": decimal_text(self.live_order_margin_usdt),
+                "marginMode": self.live_margin_mode,
+                "positionMode": self.live_position_mode,
+            },
             "checks": {
                 "credentialAvailable": credential_available,
                 "encryptedCredentialStored": encrypted_credential_stored,
@@ -1451,11 +1921,11 @@ class PaperRunner:
                     f"Side {signal.side}, entry {decimal_text(signal.entry)}, "
                     f"stop {decimal_text(signal.stop)}, TP1 {decimal_text(signal.partial_take_profit)}, "
                     f"TP2 {decimal_text(signal.take_profit)}. Reason: {signal.reason}. "
-                    "No live order was submitted."
+                    "Server live execution is handled by the separate live gate."
                 ),
                 "metadata": {
                     "title": f"{signal.symbol} {TIMEFRAME} paper signal",
-                    "subtitle": f"{signal.strategy_id} 전략이 closed 15m candle 기준 paper 후보를 만들었습니다. 실주문은 전송하지 않았습니다.",
+                    "subtitle": f"{signal.strategy_id} 전략이 closed 15m candle 기준 paper 후보를 만들었습니다.",
                     "tags": ["PAPER", TIMEFRAME, signal.side.upper(), signal.strategy_id],
                     "details": {
                         "strategyID": signal.strategy_id,
@@ -1490,6 +1960,11 @@ class PaperRunner:
                 pass
 
         elapsed = max((updated_at - started_at).total_seconds(), 0)
+        live_text = (
+            "Live order env switch enabled."
+            if self.live_order_execution_enabled and self.live_order_margin_usdt > 0
+            else "Live order env switch disabled."
+        )
         self.append_jsonl(
             user_directory / "trade-event-logs.jsonl",
             {
@@ -1502,7 +1977,7 @@ class PaperRunner:
                     f"Paper runner heartbeat. Symbols {','.join(status['symbols'])}, "
                     f"saved candles {status['savedCandles']}, evaluations {status['evaluations']}, "
                     f"skipped {status.get('skippedEvaluations', 0)}, signals {status['signals']}, failures {len(status['failures'])}, "
-                    f"elapsed {elapsed:.2f}s. No live orders enabled."
+                    f"elapsed {elapsed:.2f}s. {live_text}"
                 ),
                 "metadata": {
                     "title": "Paper runner heartbeat",
@@ -1563,6 +2038,7 @@ class PaperRunner:
             if private_failure is not None:
                 failures.append(private_failure)
             private_snapshot = self.load_private_snapshot(user_id)
+            live_candidates: list[tuple[Signal, int, datetime, str]] = []
 
             for symbol, closed_candles in closed_candles_by_symbol.items():
                 latest_closed = closed_candles[-1]
@@ -1591,9 +2067,27 @@ class PaperRunner:
                         if signal:
                             signals += 1
                             self.record_signal(user_id, signal, latest_closed.open_time, evaluated_at)
+                            live_candidates.append((signal, latest_closed.open_time, evaluated_at, strategy_id))
                         self.mark_evaluated(user_id, key, symbol, strategy_id, latest_closed.open_time, signal is not None, evaluated_at)
                     except Exception as error:
                         failures.append(f"{symbol} {strategy_id}: {error}")
+
+            if live_candidates:
+                live_candidates.sort(
+                    key=lambda item: item[0].reward_risk_ratio or dec(0),
+                    reverse=True,
+                )
+                signal, candle_open_time, evaluated_at, strategy_id = live_candidates[0]
+                try:
+                    self.maybe_execute_live_signal(
+                        user_id,
+                        signal,
+                        candle_open_time,
+                        evaluated_at,
+                        private_snapshot,
+                    )
+                except Exception:
+                    failures.append(f"{signal.symbol} {strategy_id}: live execution failed")
 
             total_evaluations += evaluations
             total_skipped_evaluations += skipped_evaluations

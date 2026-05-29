@@ -55,8 +55,9 @@
 ### Trading Safety
 
 - live order path가 credential 연결 + UI 실거래 동의 + Start Live 전에는 비활성화되어 있는가
-- server-side live gate가 explicit consent, loaded credential, fresh private snapshot, duplicate runner lock readiness를 모두 확인하며 아직 order API를 호출하지 않는가
-- server paper runner는 login/account/position read-only 외 private REST, private WebSocket, live order, protection order client를 포함하지 않는가
+- server-side live gate가 explicit consent, loaded credential, fresh private snapshot, duplicate runner lock readiness를 모두 확인하는가
+- server paper runner의 order path가 `BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED=true`와 양수 `BUCKS_COPY_LIVE_ORDER_MARGIN_USDT` 없이는 비활성화되는가
+- server paper runner는 private WebSocket을 포함하지 않고, live order/protection client가 gate 뒤에서만 호출되는가
 - public server runner edge가 `/health`, `/auth/bitget/login`, `/users/me/*` 외 legacy local routes를 proxy하지 않는가
 - strategy가 order API를 직접 호출하지 않는가
 - Watchlist에 없는 심볼로 order intent가 만들어지지 않는가

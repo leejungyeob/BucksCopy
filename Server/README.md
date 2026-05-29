@@ -217,9 +217,10 @@ This file contains only normalized account and position fields used by the app,
 not raw Bitget private responses, signatures, headers, API secret, or
 passphrase.
 
-Server-side live trading has a separate safety gate. This gate does not place
-orders yet; it only records explicit consent and reports whether required
-preconditions are ready:
+Server-side live trading has a separate safety gate. The runner can now attach
+the Bitget order path behind that gate, but order submission remains disabled
+unless the deployment explicitly sets both the live execution switch and a
+positive per-entry margin:
 
 ```bash
 curl https://api.example.com/users/me/live/status \
@@ -232,8 +233,27 @@ curl -X POST https://api.example.com/users/me/live/control \
 
 The live gate requires explicit consent, a loaded Bitget credential, a fresh
 private snapshot, and an available live runner lock. `orderExecutionEnabled`
-remains `false` until the separate order/protection/fail-closed engine is
-implemented.
+is still `false` while either `BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED=false`
+or `BUCKS_COPY_LIVE_ORDER_MARGIN_USDT=0`.
+
+When enabled, a server signal uses this sequence:
+
+1. Set leverage for the signal symbol.
+2. Submit a Bitget USDT-M Futures market entry.
+3. Confirm the entry fill through order detail.
+4. Refresh positions and verify that the open position exists.
+5. Register TP1, TP2, and SL through Bitget TPSL plan orders.
+6. If protection registration is exhausted after retries, refresh positions and
+   call `close-positions` only if the position is still open.
+
+The deployment variables are:
+
+```text
+BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED=false
+BUCKS_COPY_LIVE_ORDER_MARGIN_USDT=0
+BUCKS_COPY_LIVE_MARGIN_MODE=isolated
+BUCKS_COPY_LIVE_POSITION_MODE=hedge
+```
 
 To log out and revoke the current app session token:
 
@@ -277,14 +297,18 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 - Private Bitget REST is limited to login validation plus read-only account and
   position snapshots for the authenticated user.
 - Server-side private polling stores normalized account/position snapshots only.
-- Server-side live gate records consent/readiness only; it does not call order
-  APIs.
+- Server-side live order APIs are behind live consent, loaded credential, fresh
+  private snapshot, duplicate runner lock, environment execution switch, and
+  positive per-entry margin checks.
 - Bitget API key, secret, and passphrase are process-memory only unless
   `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` enables AES-256-GCM encrypted
   user-scoped credential storage.
 - `DELETE /users/me/session` revokes the app bearer token and clears the
   process-memory and encrypted Bitget credential for that user.
 - No WebSocket private login.
-- No order placement.
+- No order placement by default. Production `.env` must explicitly opt in with
+  `BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED=true` and a positive
+  `BUCKS_COPY_LIVE_ORDER_MARGIN_USDT`.
 - No Bitget API key/secret/passphrase disk, env, or log storage.
-- No live execution until a separate explicit server-side consent and protection-order flow is implemented.
+- No unprotected live execution: entry fill must be followed by TP1/TP2/SL
+  protection or fail-closed close handling.

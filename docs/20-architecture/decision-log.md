@@ -779,3 +779,24 @@
 - Consequences:
   - 실제 주문 API를 붙이기 전에 서버가 사용자의 live 가능 상태를 안전하게 판단할 수 있습니다.
   - 다음 단계는 Bitget order adapter 연결이 아니라, live order state machine을 이 gate 뒤에 붙이고 TP1/TP2/SL 보호주문과 fail-closed 경로를 함께 구현하는 것입니다.
+
+## 0044. Server Live Order Execution Is Opt-In Behind Gate And Margin
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 서버 runner의 목적은 Mac 앱이 꺼져 있어도 자동매매를 지속하는 것이므로, 최종적으로 서버가 Bitget live order를 호출해야 합니다.
+  - 하지만 배포나 재시작만으로 주문이 나가면 안 되며, 진입 체결 후 보호주문 없이 방치되는 경로도 금지해야 합니다.
+  - Bitget USDT-M Futures live sequence는 set leverage, market entry, order detail fill confirmation, position snapshot verification, TP1/TP2/SL TPSL registration, fail-closed close-position 순서가 필요합니다.
+- Decision:
+  - 서버 live order path는 기존 live gate readiness 뒤에 붙입니다.
+  - 추가로 `BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED=true`와 양수 `BUCKS_COPY_LIVE_ORDER_MARGIN_USDT`가 있어야 `orderExecutionEnabled=true`가 됩니다.
+  - 기본 배포값은 execution disabled, margin `0`입니다.
+  - live size는 설정 margin과 USDT available 95% buffer 중 작은 값을 기준으로 산정하고, Bitget contract config의 minimum/multiplier에 맞춰 내림 처리합니다.
+  - 진입 체결 후 fresh position snapshot에서 실제 open position이 확인되어야 TP1/TP2/SL 보호주문을 등록합니다.
+  - 보호주문 등록 실패는 주문별 최소 5회 재시도하고, 재시도 소진 후에는 fresh position snapshot에서 포지션이 남아 있을 때만 `close-positions`를 호출합니다.
+  - 서버 live audit log는 redacted clientOid, size, entry/TP/SL 요약만 저장하고 raw private response와 raw order identifier는 저장하지 않습니다.
+- Consequences:
+  - 서버에는 live order adapter가 들어가지만 운영 `.env`가 opt-in하지 않으면 실제 주문 API를 호출하지 않습니다.
+  - live entry가 성공했지만 보호주문이 실패한 경우 fail-closed 청산을 시도합니다.
+  - 이후 단계에는 서버 live 상태를 macOS UI에 노출하고, pending protection/order reconciliation 및 TP1 이후 SL 이동 상태 전이를 추가해야 합니다.
