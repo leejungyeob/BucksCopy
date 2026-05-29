@@ -5,22 +5,34 @@ struct DashboardView: View {
     @State private var didBootstrap = false
 
     var body: some View {
-        HSplitView {
-            leftColumn
-                .frame(minWidth: 248, idealWidth: 292, maxWidth: 350)
-                .padding(.trailing, 6)
+        VStack(spacing: 12) {
+            HSplitView {
+                leftColumn
+                    .frame(minWidth: 248, idealWidth: 292, maxWidth: 350)
+                    .padding(.trailing, 6)
 
-            centerColumn
-                .frame(minWidth: 500, idealWidth: 760)
-                .padding(.horizontal, 6)
+                centerColumn
+                    .frame(minWidth: 500, idealWidth: 760)
+                    .padding(.horizontal, 6)
 
-            rightColumn
-                .frame(minWidth: 340, idealWidth: 460, maxWidth: 640)
-                .padding(.leading, 6)
+                rightColumn
+                    .frame(minWidth: 340, idealWidth: 460, maxWidth: 640)
+                    .padding(.leading, 6)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            AutoTradingPerformancePanel(
+                session: viewModel.state.liveAutomationSession,
+                account: dashboardAccount,
+                positions: displayPositions,
+                logs: viewModel.state.automationLogs,
+                runState: viewModel.state.runState
+            )
+            .frame(minHeight: 150, idealHeight: 170, maxHeight: 210)
         }
         .padding(14)
         .padding(.top, 20)
-        .frame(minWidth: 1100, minHeight: 680)
+        .frame(minWidth: 1100, minHeight: 760)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             guard !didBootstrap else { return }
@@ -46,8 +58,8 @@ struct DashboardView: View {
             onMaximumRiskPerTradeChange: viewModel.updateMaximumRiskPerTrade,
             onMaximumPositionMarginChange: viewModel.updateMaximumPositionMargin,
             onSignalConfirmationModeChange: viewModel.updateSignalConfirmationMode,
-            onStartPaper: viewModel.startPaperBot,
-            onStopPaper: viewModel.stopPaperBot
+            onStartLive: viewModel.startLiveBot,
+            onStopLive: viewModel.stopLiveBot
         )
         .equatable()
     }
@@ -89,6 +101,7 @@ struct DashboardView: View {
                 CandleChartView(
                     candles: viewModel.state.candles,
                     positions: chartPositions,
+                    partialTakeProfitByPositionID: chartPartialTakeProfitByPositionID,
                     onNeedsOlderCandles: viewModel.loadMoreLocalCandles
                 )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -99,7 +112,9 @@ struct DashboardView: View {
     private var rightColumn: some View {
         VSplitView {
             PositionPanel(
-                positions: viewModel.state.positions,
+                positions: displayPositions,
+                partialTakeProfitByPositionID: positionPartialTakeProfitByPositionID,
+                strategyContextByPositionID: positionStrategyContextByPositionID,
                 onRefresh: {
                     Task { await viewModel.refreshPositions() }
                 }
@@ -116,14 +131,279 @@ struct DashboardView: View {
     }
 
     private var chartPositions: [PositionSnapshot] {
-        viewModel.state.positions.filter { $0.symbol == viewModel.state.selectedSymbol }
+        displayPositions
+            .filter { $0.symbol == viewModel.state.selectedSymbol }
+    }
+
+    private var chartPartialTakeProfitByPositionID: [String: Decimal] {
+        Dictionary(uniqueKeysWithValues: displayPositions
+            .filter { $0.symbol == viewModel.state.selectedSymbol }
+            .compactMap { position in
+                guard let partialTakeProfit = position.partialTakeProfit ??
+                    position.chartProtectionLevels(
+                        from: viewModel.state.automationLogs
+                    )?.partialTakeProfit else {
+                    return nil
+                }
+                return (position.id, partialTakeProfit)
+            })
+    }
+
+    private var displayPositions: [PositionSnapshot] {
+        viewModel.state.positions
+            .map { $0.withChartProtectionLevels(from: viewModel.state.automationLogs) }
+    }
+
+    private var positionPartialTakeProfitByPositionID: [String: Decimal] {
+        Dictionary(uniqueKeysWithValues: displayPositions.compactMap { position in
+            guard let partialTakeProfit = position.partialTakeProfit ??
+                position.chartProtectionLevels(
+                    from: viewModel.state.automationLogs
+                )?.partialTakeProfit else {
+                return nil
+            }
+            return (position.id, partialTakeProfit)
+        })
+    }
+
+    private var positionStrategyContextByPositionID: [String: PositionStrategyContext] {
+        Dictionary(uniqueKeysWithValues: displayPositions.compactMap { position in
+            guard let context = position.strategyContext(from: viewModel.state.automationLogs) else {
+                return nil
+            }
+            return (position.id, context)
+        })
+    }
+
+    private var dashboardAccount: AccountSnapshot? {
+        viewModel.state.accounts.first { $0.marginCoin.uppercased() == "USDT" } ??
+            viewModel.state.accounts.first
     }
 
     private var activeStrategyRoutes: [ActiveStrategyRoute] {
-        CandleTimeframe.allCases.flatMap { timeframe in
-            viewModel.strategyDefinitions(for: timeframe).map {
-                ActiveStrategyRoute(timeframe: timeframe, definition: $0)
+        viewModel.state.watchlist.flatMap { symbol in
+            CandleTimeframe.allCases.flatMap { timeframe in
+                viewModel.strategyDefinitions(for: timeframe, symbol: symbol).map {
+                    ActiveStrategyRoute(symbol: symbol, timeframe: timeframe, definition: $0)
+                }
             }
+        }
+    }
+}
+
+struct ChartProtectionLevels {
+    let symbol: FuturesSymbol
+    let side: PositionSide
+    let partialTakeProfit: Decimal?
+    let takeProfit: Decimal?
+    let stopLoss: Decimal?
+    let createdAt: Date
+    let timeframe: CandleTimeframe?
+    let strategyID: String?
+
+    init(
+        symbol: FuturesSymbol,
+        side: PositionSide,
+        partialTakeProfit: Decimal?,
+        takeProfit: Decimal?,
+        stopLoss: Decimal?,
+        createdAt: Date,
+        timeframe: CandleTimeframe? = nil,
+        strategyID: String? = nil
+    ) {
+        self.symbol = symbol
+        self.side = side
+        self.partialTakeProfit = partialTakeProfit
+        self.takeProfit = takeProfit
+        self.stopLoss = stopLoss
+        self.createdAt = createdAt
+        self.timeframe = timeframe
+        self.strategyID = strategyID
+    }
+
+    init?(
+        position: PositionSnapshot,
+        protectionOrders: [PositionProtectionOrderSnapshot],
+        createdAt: Date
+    ) {
+        let matchingOrders = protectionOrders.filter { order in
+            guard order.symbol == position.symbol else { return false }
+            if order.side == position.side { return true }
+            return order.side == .unknown || position.positionMode == .oneWay
+        }
+        guard matchingOrders.isEmpty == false else { return nil }
+
+        let takeProfitPrices = matchingOrders
+            .filter { $0.kind == .takeProfit }
+            .map(\.triggerPrice)
+            .sortedByDistance(from: position.openPriceAverage)
+        let stopLoss = matchingOrders
+            .filter { $0.kind == .stopLoss }
+            .sorted {
+                ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast)
+            }
+            .first?
+            .triggerPrice
+        let partialTakeProfit = takeProfitPrices.count > 1 ? takeProfitPrices.first : nil
+        let takeProfit = takeProfitPrices.last
+
+        guard partialTakeProfit != nil || takeProfit != nil || stopLoss != nil else {
+            return nil
+        }
+
+        self.init(
+            symbol: position.symbol,
+            side: position.side,
+            partialTakeProfit: partialTakeProfit,
+            takeProfit: takeProfit,
+            stopLoss: stopLoss,
+            createdAt: createdAt
+        )
+    }
+}
+
+struct PositionStrategyContext {
+    let timeframe: CandleTimeframe?
+    let strategyID: String?
+}
+
+extension PositionSnapshot {
+    func withChartProtectionLevels(from logs: [TradeEventLog]) -> PositionSnapshot {
+        guard partialTakeProfit == nil || takeProfit == nil || stopLoss == nil else { return self }
+        guard let levels = chartProtectionLevels(from: logs) else {
+            return self
+        }
+        return withChartProtectionLevels(from: levels)
+    }
+
+    func withChartProtectionLevels(from levels: ChartProtectionLevels?) -> PositionSnapshot {
+        guard partialTakeProfit == nil || takeProfit == nil || stopLoss == nil,
+              let levels else {
+            return self
+        }
+        return PositionSnapshot(
+            symbol: symbol,
+            side: side,
+            total: total,
+            available: available,
+            openPriceAverage: openPriceAverage,
+            markPrice: markPrice,
+            unrealizedProfitLoss: unrealizedProfitLoss,
+            leverage: leverage,
+            marginMode: marginMode,
+            positionMode: positionMode,
+            liquidationPrice: liquidationPrice,
+            partialTakeProfit: partialTakeProfit ?? levels.partialTakeProfit,
+            takeProfit: takeProfit ?? levels.takeProfit,
+            stopLoss: stopLoss ?? levels.stopLoss,
+            createdAt: createdAt ?? levels.createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    func chartProtectionLevels(from logs: [TradeEventLog]) -> ChartProtectionLevels? {
+        logs.reversed().compactMap(\.chartProtectionLevels).first(where: { levels in
+            guard levels.symbol == symbol, levels.side == side else { return false }
+            if let createdAt {
+                return levels.createdAt >= createdAt.addingTimeInterval(-300)
+            }
+            return true
+        })
+    }
+
+    func strategyContext(from logs: [TradeEventLog]) -> PositionStrategyContext? {
+        guard let levels = chartProtectionLevels(from: logs),
+              levels.timeframe != nil || levels.strategyID != nil else {
+            return nil
+        }
+        return PositionStrategyContext(
+            timeframe: levels.timeframe,
+            strategyID: levels.strategyID
+        )
+    }
+}
+
+extension TradeEventLog {
+    var chartProtectionLevels: ChartProtectionLevels? {
+        guard category == .liveOrder,
+              let symbol,
+              let metadata,
+              metadata.title.contains("진입"),
+              let side = liveEntryPositionSide else {
+            return nil
+        }
+
+        let partialTakeProfit = metadata.detailValue(for: "TP1")?.chartDecimal
+
+        guard let takeProfit = metadata.detailValue(for: "TP2")?.chartDecimal ??
+            metadata.detailValue(for: "익절가")?.chartDecimal,
+            let stopLoss = metadata.detailValue(for: "손절가")?.chartDecimal else {
+            return nil
+        }
+
+        return ChartProtectionLevels(
+            symbol: symbol,
+            side: side,
+            partialTakeProfit: partialTakeProfit,
+            takeProfit: takeProfit,
+            stopLoss: stopLoss,
+            createdAt: timestamp,
+            timeframe: metadata.timeframe,
+            strategyID: metadata.strategyID
+        )
+    }
+
+    var liveEntryPositionSide: PositionSide? {
+        if message.contains("Live buy order") || metadata?.title.contains("매수") == true {
+            return .long
+        }
+        if message.contains("Live sell order") || metadata?.title.contains("매도") == true {
+            return .short
+        }
+        return nil
+    }
+}
+
+extension TradeLogMetadata {
+    func detailValue(for label: String) -> String? {
+        details.first { $0.label == label }?.value
+    }
+
+    var timeframe: CandleTimeframe? {
+        if let value = detailValue(for: "시간봉"),
+           let timeframe = CandleTimeframe(rawValue: value) {
+            return timeframe
+        }
+        return tags.compactMap { CandleTimeframe(rawValue: $0.label) }.first
+    }
+
+    var strategyID: String? {
+        if let value = detailValue(for: "매매전략"), !value.isEmpty {
+            return value
+        }
+        let excludedTags = Set(
+            ["LIVE", "START", "STOP", "매수", "매도", "LONG", "SHORT"] +
+                CandleTimeframe.allCases.map(\.rawValue)
+        )
+        return tags.map(\.label).first { label in
+            !excludedTags.contains(label) && !label.hasSuffix("x")
+        }
+    }
+}
+
+extension String {
+    var chartDecimal: Decimal? {
+        let token = split { character in
+            character == " " || character == "/" || character == "%"
+        }.first
+        return token.flatMap { DecimalText.optional(String($0)) }
+    }
+}
+
+private extension Array where Element == Decimal {
+    func sortedByDistance(from base: Decimal) -> [Decimal] {
+        sorted {
+            absoluteDecimal($0 - base) < absoluteDecimal($1 - base)
         }
     }
 }
@@ -212,8 +492,8 @@ private struct DashboardLeftColumn: View, Equatable {
     let onMaximumRiskPerTradeChange: (Decimal) -> Void
     let onMaximumPositionMarginChange: (Decimal) -> Void
     let onSignalConfirmationModeChange: (SignalConfirmationMode) -> Void
-    let onStartPaper: () -> Void
-    let onStopPaper: () -> Void
+    let onStartLive: () -> Void
+    let onStopLive: () -> Void
 
     static func == (lhs: DashboardLeftColumn, rhs: DashboardLeftColumn) -> Bool {
         lhs.snapshot == rhs.snapshot
@@ -250,8 +530,9 @@ private struct DashboardLeftColumn: View, Equatable {
                 )
                 BotControlPanel(
                     runState: snapshot.runState,
-                    onStart: onStartPaper,
-                    onStop: onStopPaper
+                    isConnected: snapshot.isConnected,
+                    onStart: onStartLive,
+                    onStop: onStopLive
                 )
                 ActiveStrategyPortfolioPanel(routes: snapshot.activeStrategyRoutes)
             }
@@ -262,11 +543,12 @@ private struct DashboardLeftColumn: View, Equatable {
 }
 
 private struct ActiveStrategyRoute: Equatable, Identifiable {
+    let symbol: FuturesSymbol
     let timeframe: CandleTimeframe
     let definition: StrategyDefinition
 
     var id: String {
-        "\(timeframe.rawValue):\(definition.id)"
+        "\(symbol.rawValue):\(timeframe.rawValue):\(definition.id)"
     }
 }
 
@@ -312,6 +594,13 @@ private struct ActiveStrategyRouteRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
+                Text(route.symbol.rawValue)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+
                 Text(route.timeframe.rawValue)
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .foregroundStyle(Color.accentColor)

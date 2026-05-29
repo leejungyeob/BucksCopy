@@ -139,7 +139,19 @@ final class SQLiteStoresTests: XCTestCase {
             timestamp: Date(timeIntervalSince1970: 100),
             category: .bot,
             symbol: FuturesSymbol("ETHUSDT"),
-            message: "Paper bot evaluated with no signal."
+            message: "Live bot evaluated with no signal.",
+            metadata: TradeLogMetadata(
+                title: "ETHUSDT 15m 매수 진입",
+                subtitle: "fixture",
+                tags: [
+                    TradeLogTag(label: "LIVE", tone: .success),
+                    TradeLogTag(label: "15m", tone: .accent)
+                ],
+                details: [
+                    TradeLogDetail(label: "진입가", value: "100", tone: .accent),
+                    TradeLogDetail(label: "손절가", value: "95", tone: .danger)
+                ]
+            )
         )
 
         try firstStore.append(log)
@@ -148,6 +160,33 @@ final class SQLiteStoresTests: XCTestCase {
         let logs = try reopenedStore.loadRecent(limit: 10)
 
         XCTAssertEqual(logs, [log])
+    }
+
+    func testTradeLogStoreMigratesLegacyRowsWithoutMetadataColumn() throws {
+        let path = try temporaryDatabasePath()
+        let database = try SQLiteDatabase(path: path)
+        try database.execute(
+            """
+            CREATE TABLE trade_event_logs (
+                id TEXT PRIMARY KEY NOT NULL,
+                timestamp REAL NOT NULL,
+                category TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                symbol TEXT,
+                message TEXT NOT NULL
+            );
+            INSERT INTO trade_event_logs
+            (id, timestamp, category, severity, symbol, message)
+            VALUES ('00000000-0000-0000-0000-000000000123', 100, 'bot', 'info', 'BTCUSDT', 'legacy');
+            """
+        )
+
+        let store = try SQLiteTradeEventLogStore(path: path)
+        let logs = try store.loadRecent(limit: 10)
+
+        XCTAssertEqual(logs.count, 1)
+        XCTAssertEqual(logs.first?.message, "legacy")
+        XCTAssertNil(logs.first?.metadata)
     }
 
     func testTradeLogStoreSerializesConcurrentAppendAndLoad() throws {

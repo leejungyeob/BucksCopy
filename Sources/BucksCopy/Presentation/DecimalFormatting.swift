@@ -6,6 +6,11 @@ extension Decimal {
         return Self.dashboardFormatter.string(from: number) ?? description
     }
 
+    var signedDashboardText: String {
+        let sign = self > 0 ? "+" : ""
+        return "\(sign)\(dashboardText)"
+    }
+
     var percentText: String {
         let sign = self > 0 ? "+" : self < 0 ? "-" : ""
         let absolute = self < 0 ? -self : self
@@ -43,6 +48,10 @@ extension Date {
         Self.dashboardDateTimeFormatter.string(from: self)
     }
 
+    var dashboardLogDateTime: String {
+        Self.dashboardLogDateTimeFormatter.string(from: self)
+    }
+
     private static let shortDashboardTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
@@ -52,6 +61,12 @@ extension Date {
     private static let dashboardDateTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MM-dd HH:mm"
+        return formatter
+    }()
+
+    private static let dashboardLogDateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm:ss"
         return formatter
     }()
 }

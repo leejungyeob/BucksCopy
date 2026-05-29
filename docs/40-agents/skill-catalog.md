@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | [bucks-copy-macos-structure](../../.codex/skills/bucks-copy-macos-structure/SKILL.md) | macOS 앱 구조와 파일 배치 | App/Presentation/Domains/Data 위치 판단 |
 | [bucks-copy-bitget-integration](../../.codex/skills/bucks-copy-bitget-integration/SKILL.md) | Bitget REST/WS 연동 | endpoint, signature, WebSocket, DTO, rate-limit, reconnect |
-| [bucks-copy-trading-engine](../../.codex/skills/bucks-copy-trading-engine/SKILL.md) | 자동매매 엔진 경계 | candle aggregation, strategy, paper execution, live safety |
+| [bucks-copy-trading-engine](../../.codex/skills/bucks-copy-trading-engine/SKILL.md) | 자동매매 엔진 경계 | candle aggregation, strategy, live execution safety |
 | [bucks-copy-strategy-validation](../../.codex/skills/bucks-copy-strategy-validation/SKILL.md) | 전략 검증과 백테스트 리포트 | 전략 추가/변경 후 전체 로컬 캔들 기준 실전 후보 판단 |
 
 ## Agent-backed Skills

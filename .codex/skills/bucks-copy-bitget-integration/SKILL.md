@@ -36,6 +36,6 @@ description: >
 - REST signature and WebSocket login signature are not mixed.
 - Public and private WebSocket channel requirements are separated.
 - Product scope defaults to USDT-M Futures / `USDT-FUTURES`.
-- Watchlist membership gates subscription, strategy, and paper order intent.
+- Watchlist membership gates subscription, strategy, and live order eligibility.
 - REST candle backfill is idempotent with local history by symbol/granularity/open time.
 - Failure paths preserve redacted errors and retry/backoff state.

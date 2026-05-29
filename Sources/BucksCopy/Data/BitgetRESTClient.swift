@@ -8,6 +8,23 @@ enum BitgetClientError: Error, Equatable {
     case emptyData
 }
 
+extension BitgetClientError: PublicTradingErrorDescribing {
+    var tradingLogDescription: String {
+        switch self {
+        case .missingCredential:
+            return "Bitget credential missing"
+        case .invalidURL:
+            return "Bitget request URL invalid"
+        case .httpStatus(let status):
+            return "Bitget HTTP \(status)"
+        case .apiError(let code, let message):
+            return "Bitget API \(code): \(message)"
+        case .emptyData:
+            return "Bitget empty response"
+        }
+    }
+}
+
 final class BitgetRESTClient {
     private let baseURL: URL
     private let session: URLSession
@@ -65,6 +82,9 @@ final class BitgetRESTClient {
         let (data, response) = try await session.data(for: request)
         if let httpResponse = response as? HTTPURLResponse,
            !(200..<300).contains(httpResponse.statusCode) {
+            if let apiError = Self.apiError(from: data) {
+                throw apiError
+            }
             throw BitgetClientError.httpStatus(httpResponse.statusCode)
         }
         guard !data.isEmpty else {
@@ -116,6 +136,9 @@ final class BitgetRESTClient {
         let (data, response) = try await session.data(for: request)
         if let httpResponse = response as? HTTPURLResponse,
            !(200..<300).contains(httpResponse.statusCode) {
+            if let apiError = Self.apiError(from: data) {
+                throw apiError
+            }
             throw BitgetClientError.httpStatus(httpResponse.statusCode)
         }
         guard !data.isEmpty else {
@@ -146,6 +169,9 @@ final class BitgetRESTClient {
         let (data, response) = try await session.data(for: request)
         if let httpResponse = response as? HTTPURLResponse,
            !(200..<300).contains(httpResponse.statusCode) {
+            if let apiError = Self.apiError(from: data) {
+                throw apiError
+            }
             throw BitgetClientError.httpStatus(httpResponse.statusCode)
         }
         guard !data.isEmpty else {
@@ -176,10 +202,26 @@ final class BitgetRESTClient {
         components?.queryItems = queryItems
         return components?.url
     }
+
+    private static func apiError(from data: Data) -> BitgetClientError? {
+        guard !data.isEmpty,
+              let decoded = try? JSONDecoder().decode(BitgetErrorResponse.self, from: data),
+              let code = decoded.code,
+              code != "00000" else {
+            return nil
+        }
+
+        return .apiError(code: code, message: decoded.msg ?? "HTTP error")
+    }
 }
 
 private struct BitgetResponse<DataPayload: Decodable>: Decodable {
     let code: String
     let msg: String
     let data: DataPayload
+}
+
+private struct BitgetErrorResponse: Decodable {
+    let code: String?
+    let msg: String?
 }

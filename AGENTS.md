@@ -2,9 +2,9 @@
 
 ## 한글 요약
 
-- 기본값: `최소 변경`, `보안 우선`, `비밀정보 출력 금지`, `Paper trading 우선`, `실거래 기본 차단`
+- 기본값: `최소 변경`, `보안 우선`, `비밀정보 출력 금지`, `명시 동의 기반 실거래`, `보호주문 fail-closed`
 - Bitget API key, secret, passphrase는 코드/문서/로그에 절대 남기지 않습니다.
-- 자동매매 기능은 먼저 재현 가능한 candle/strategy/paper execution 검증을 통과해야 합니다.
+- 자동매매 기능은 재현 가능한 candle/strategy/backtest 검증과 live execution 안전 검증을 통과해야 합니다.
 - 복합 작업은 L1/L2/L3 라우팅을 사용하고, 작은 작업은 direct-handle을 우선합니다.
 - 적용 범위: 저장소 전체
 
@@ -30,9 +30,9 @@
 | --- | --- |
 | 추측 | 근거 없으면 `확인 필요`와 확인 경로를 제시 |
 | 변경 범위 | 요청 없으면 좁은 diff 우선 |
-| 실거래 | v1 기본값은 Paper trading이며 live order는 명시 정책 전까지 구현/활성화 금지 |
-| 거래소 보호주문 | live 진입 기능을 활성화하기 전에도 진입 체결 후 TP/SL 거래소-side 예약 주문을 등록하는 경계를 먼저 구현하며, 보호주문 등록 실패 시 최소 5회 재시도해야 함 |
-| 보호 실패 처리 | 진입 체결 후 TP/SL 등록이 끝나기 전 포지션은 unprotected 상태로 간주하고, 재시도 소진 시 즉시 경고 및 fail-closed 청산 정책을 검토해야 함 |
+| 실거래 | v1 자동매매는 Bitget credential 연결 + UI 실거래 동의 + Start Live 이후에만 live order를 호출 |
+| 거래소 보호주문 | live 진입 체결 후 TP1/TP2/SL 거래소-side 보호주문을 등록해야 하며, 보호주문 등록 실패 시 최소 5회 재시도해야 함 |
+| 보호 실패 처리 | 진입 체결 후 TP/SL 등록이 끝나기 전 포지션은 unprotected 상태로 간주하고, 재시도 소진 시 즉시 경고 후 fail-closed 시장가 청산을 시도해야 함 |
 | 수수료 모델 | 기본 모델은 진입 시장가=taker, 익절 예약 limit=maker 가능, 손절 trigger market=taker로 분리하되 maker 체결 보장은 별도 검증 전 과대평가 금지 |
 | 거래 범위 | Bitget USDT-M Futures만 대상으로 하며 API 값은 `productType=USDT-FUTURES`로 고정 |
 | Watchlist | 전체 USDT-M Futures catalog를 불러오되 구독/자동매매는 사용자가 선택한 Watchlist 심볼만 대상 |
@@ -54,7 +54,7 @@
 | --- | --- |
 | 단순 질의응답, 짧은 문서 수정, 1~3파일 저위험 수정 | 메인 에이전트 direct-handle |
 | 여러 레이어/단계 동시 변경 | L1 기준 오케스트레이션 |
-| Bitget REST/WS, auth, Keychain, order, storage, live/paper policy 포함 | Architect, Security, TDD Guide 포함 |
+| Bitget REST/WS, auth, Keychain, order, storage, live execution policy 포함 | Architect, Security, TDD Guide 포함 |
 | candle aggregation, strategy engine, trading execution 변경 | Architect, TDD Guide, Code Reviewer 포함 |
 | build/generate/target wiring 복구 | Build Fixer 포함 |
 | canonical 문서/스킬 변경 | Doc Writer 포함 |

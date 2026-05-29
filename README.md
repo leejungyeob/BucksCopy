@@ -10,12 +10,12 @@ macOS native crypto auto-trading app foundation for Bitget USDT-M Futures.
 | Project harness | Tuist + Xcode |
 | Exchange | Bitget |
 | Initial market | Bitget USDT-M Futures (`productType=USDT-FUTURES`) |
-| Trading mode | Paper trading first; live order execution is blocked until a future explicit policy switch |
+| Trading mode | Live auto-trading with explicit Connect + consent + Start Live gate |
 | Data | Bitget REST and WebSocket v2 |
 | Local market history | SQLite-backed candle cache for Watchlist symbols |
 | Candle timeframes | 15m, 1H, 4H, 12H, 1D |
 | Symbol activation | Load the full USDT-M Futures catalog, then trade only user-selected Watchlist symbols |
-| Dashboard v1 | Connect-only API credential panel, account summary, Watchlist, interactive Bitget-backed SwiftUI Canvas candles, read-only real positions, Paper bot log |
+| Dashboard v1 | Connect-only API credential panel, account summary, Watchlist, interactive Bitget-backed SwiftUI Canvas candles, real positions, Live bot log |
 
 ## Codex Skill / Docs
 
@@ -23,7 +23,7 @@ macOS native crypto auto-trading app foundation for Bitget USDT-M Futures.
 | --- | --- | --- |
 | [bucks-copy-macos-structure](./.codex/skills/bucks-copy-macos-structure/SKILL.md) | macOS structure and placement rules | none |
 | [bucks-copy-bitget-integration](./.codex/skills/bucks-copy-bitget-integration/SKILL.md) | Bitget REST/WS auth, DTO, reconnect, rate-limit safety | none |
-| [bucks-copy-trading-engine](./.codex/skills/bucks-copy-trading-engine/SKILL.md) | candle aggregation, strategy boundaries, paper/live safety | none |
+| [bucks-copy-trading-engine](./.codex/skills/bucks-copy-trading-engine/SKILL.md) | candle aggregation, strategy boundaries, live execution safety | none |
 | [bucks-copy-l1-planner-orchestrator](./.codex/skills/bucks-copy-l1-planner-orchestrator/SKILL.md) | route complex work and prepare handoff | [toml](./.codex/agents/bucks-copy-l1-planner-orchestrator.toml) |
 | [bucks-copy-l2-architect](./.codex/skills/bucks-copy-l2-architect/SKILL.md) | layer and boundary review | [toml](./.codex/agents/bucks-copy-l2-architect.toml) |
 | [bucks-copy-l2-security](./.codex/skills/bucks-copy-l2-security/SKILL.md) | secrets, keychain, auth, logging, trust-boundary review | [toml](./.codex/agents/bucks-copy-l2-security.toml) |
@@ -57,6 +57,8 @@ macOS native crypto auto-trading app foundation for Bitget USDT-M Futures.
 - [Futures Historical Candle Data](https://www.bitget.com/api-doc/contract/market/Get-History-Candle-Data)
 - [Futures Candlestick WebSocket](https://www.bitget.com/api-doc/classic/contract/websocket/public/Candlesticks-Channel)
 - [Futures Place Order](https://www.bitget.com/api-doc/contract/trade/Place-Order)
+- [Futures Flash Close Position](https://www.bitget.com/api-doc/contract/trade/Flash-Close-Position)
+- [Futures Stop-profit and Stop-loss Plan Orders](https://www.bitget.com/api-doc/contract/plan/Place-Tpsl-Order)
 
 ## Bitget v1 Scope
 
@@ -71,7 +73,8 @@ macOS native crypto auto-trading app foundation for Bitget USDT-M Futures.
 - One WebSocket connection should keep subscriptions at or below 50 channels; larger Watchlists must be split or rejected by validation.
 - Closed Watchlist candles are persisted locally so restart/warmup does not depend only on the exchange's current queryable range.
 - The candle chart shows one price pane with a right-side price axis, latest-price line, continuous candle-width zoom, and drag panning.
-- `POST /api/v2/mix/order/place-order` stays disabled until live trading policy is explicitly accepted.
+- `POST /api/v2/mix/order/place-order` is used only after credential connection, explicit live consent, risk policy acceptance, and portfolio arbitration.
+- Live entry sequence is set leverage -> market entry -> fill confirmation -> TP1/TP2/SL exchange-side protection; protection retry exhaustion triggers fail-closed close-position.
 
 ## App Commands
 

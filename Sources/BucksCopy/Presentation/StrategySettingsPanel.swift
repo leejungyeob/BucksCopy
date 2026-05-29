@@ -87,14 +87,27 @@ struct StrategySettingsPanel: View {
                         Text("전략 기준")
                     }
                     GridRow {
+                        Text("최대 보유")
+                            .foregroundStyle(.secondary)
+                        Text(maximumHoldingText)
+                    }
+                    GridRow {
                         Text("모드")
                             .foregroundStyle(.secondary)
-                        Text("Paper")
+                        Text("Live")
                     }
                 }
                 .font(.callout)
             }
         }
+    }
+
+    private var maximumHoldingText: String {
+        guard let maximumHoldingCandles = config.maximumHoldingCandles,
+              maximumHoldingCandles > 0 else {
+            return "제한 없음"
+        }
+        return "\(maximumHoldingCandles)봉 후 시간 종료"
     }
 }
 

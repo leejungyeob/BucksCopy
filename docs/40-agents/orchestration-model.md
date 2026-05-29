@@ -37,7 +37,7 @@
 ## 오케스트레이션 활성화 조건
 
 - Bitget REST/WS, auth, credential, Keychain, order, storage, logging을 건드림
-- candle aggregation, strategy, trading engine, paper/live execution을 건드림
+- candle aggregation, strategy, trading engine, live execution을 건드림
 - 여러 레이어가 동시에 바뀜
 - build/generate/target wiring 복구가 필요함
 - canonical docs, skill, agent, CI harness가 바뀜

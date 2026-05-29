@@ -333,3 +333,254 @@
   - 같은 closed candle 주기에서 여러 전략이 동시에 신호를 내도 Paper order는 하나만 생성됩니다.
   - TP/SL 정보가 없는 기존 포지션은 남은 손익비를 증명할 수 없으므로 최저 비교 우선순위로 취급합니다.
   - 실제 시장가 청산 및 신규 live 진입은 여전히 비활성화입니다. live 전환 전에는 보호주문 해제/재등록, 부분체결, 수량 반올림, 실패 시 fail-closed 절차가 추가 검증되어야 합니다.
+
+## 0020. Explicit-Consent Live Auto Trading
+
+- Status: accepted
+- Date: 2026-05-14
+- Context:
+  - 사용자가 Paper 경로를 제거하고 실제 Bitget API 연결 기반 자동매매 구현을 요청했습니다.
+  - 이전 결정(0002, 0005, 0019)은 live execution 승인 전까지 Paper-only를 기본값으로 두었지만, 이제 실거래 전환 정책을 명시적으로 수락해야 합니다.
+  - live 전환은 credential, 주문 API, 보호주문, 포지션 청산, 로컬 로그 보안에 직접 영향을 줍니다.
+- Decision:
+  - Dashboard 자동매매 실행 상태는 `runningLive`로 전환합니다.
+  - UI는 Bitget credential 연결 상태와 `실거래 동의` 체크박스가 모두 충족될 때만 `Start Live`를 허용합니다.
+  - Live monitor는 Watchlist의 모든 추천 `strategy × timeframe × symbol` 후보를 모은 뒤 포트폴리오 중재 정책으로 단일 후보만 선택합니다.
+  - 신규 진입 순서는 `set-leverage -> place-order market -> order detail fill confirmation -> TP1/TP2/SL TPSL registration`입니다.
+  - 진행 중 포지션보다 새 후보가 우위이면 `close-positions`로 기존 포지션을 먼저 정리한 뒤 신규 진입을 시도합니다.
+  - 보호주문 등록은 실패한 주문별 최소 5회 재시도하며, 진입 체결 후 보호주문 설치가 끝나지 않으면 unprotected로 간주합니다.
+  - 보호주문 재시도 소진 시 high-severity risk log를 남기고 `close-positions`로 fail-closed 청산을 시도합니다.
+  - 로컬 로그에는 raw credential, raw private response, raw order ID/clientOid를 남기지 않고 주문 식별자는 마스킹합니다.
+- Consequences:
+  - `POST /api/v2/mix/order/place-order`, `GET /api/v2/mix/order/detail`, `POST /api/v2/mix/account/set-leverage`, `POST /api/v2/mix/order/close-positions`, `POST /api/v2/mix/order/place-tpsl-order`가 active live path에 포함됩니다.
+  - Paper-only decision과 Paper monitor 문구는 현행 정책이 아니며, historical decision으로만 유지됩니다.
+  - TP1 체결 후 기존 SL을 profit-lock 가격으로 이동하는 주문 상태 머신은 다음 live-hardening 단계의 잔여 리스크입니다.
+  - 실제 운용 전에는 소액/테스트 credential로 endpoint 권한, position mode, minimum size rounding, protection order 체결/취소 흐름을 별도 스모크해야 합니다.
+
+## 0021. Verify Position Before Protection And Fail-Closed Close
+
+- Status: accepted
+- Date: 2026-05-15
+- Context:
+  - 실거래 로그에서 TP/SL 보호주문 실패 후 실제로 닫을 포지션이 확인되지 않았는데도 fail-closed 시장가 청산 요청이 이어지는 흐름이 발견됐습니다.
+  - Bitget `place-order`/`order detail` 응답만으로는 현재 계정에 닫을 포지션이 존재한다고 단정하면 안 됩니다.
+- Decision:
+  - Live entry는 market order fill receipt 이후 `GET /api/v2/mix/position/all-position`으로 같은 symbol/side의 실제 open position을 확인한 뒤 보호주문을 설치합니다.
+  - fill receipt는 있지만 현재 포지션이 확인되지 않으면 보호주문과 fail-closed 청산을 모두 생략하고 warning risk log를 남깁니다.
+  - 보호주문 재시도 소진 후에도 `close-positions` 호출 직전에 포지션을 다시 확인하고, 포지션이 없으면 시장가 청산을 보내지 않습니다.
+  - TPSL 주문은 position mode에 맞춰 hedge mode에서는 `long/short`, one-way mode에서는 `buy/sell` holdSide를 사용하고 contract precision에 맞춰 가격/수량을 정규화합니다.
+  - 보호주문 실패 로그는 raw private response를 저장하지 않고 sanitized Bitget code/message를 원인 필드에 보존합니다.
+- Consequences:
+  - “던질 포지션이 없는데 시장가 청산”하는 오작동을 차단합니다.
+  - 포지션 조회 API가 일시 실패하면 자동 청산을 보내지 않고 수동 확인 로그를 우선 남깁니다.
+  - live smoke test는 fill receipt, position snapshot, TPSL registration, fail-closed skip/close 경로를 함께 확인해야 합니다.
+
+## 0022. Arm Live Monitor Before First Entry
+
+- Status: accepted
+- Date: 2026-05-15
+- Context:
+  - Start Live 직후 이미 저장되어 있던 최신 closed candle 신호가 즉시 실주문으로 이어질 수 있는 흐름이 확인됐습니다.
+  - 사용자는 실시간 자동매매 시작 후 새로 확정되는 신호만 진입 대상으로 삼는지 확인을 요구했습니다.
+- Decision:
+  - Live monitor 시작 시 Watchlist의 각 `symbol × timeframe × recommended strategy` 최신 completed candle key를 먼저 priming 처리합니다.
+  - Priming된 completed candle은 이미 평가된 것으로 간주하므로 첫 실행에서 주문 후보로 쓰지 않습니다.
+  - 실주문 후보는 Start Live 이후 현재 forming candle 또는 새 completed candle에서 발생한 strategy signal만 허용합니다.
+  - Live log에는 priming 완료 route 수와 현재 forming candle부터 신규 진입 가능 상태를 남깁니다.
+- Consequences:
+  - 앱 시작/Live 시작 직후 과거 신호로 즉시 포지션을 잡는 오작동을 차단합니다.
+  - 0023 이후 Live monitor는 현재 forming candle을 후보로 평가할 수 있지만, 이 priming 정책은 이미 completed된 과거 candle 신호를 막는 용도로 유지합니다.
+  - Live monitor 테스트는 startup priming과 forming/completed candle 진입을 분리해 검증해야 합니다.
+
+## 0023. Live Forming Candle Signal Evaluation
+
+- Status: accepted
+- Date: 2026-05-15
+- Context:
+  - 사용자는 실시간 자동매매에서 현재 진행 중인 candle도 가격 조건이 충족되면 진입 후보로 봐야 한다고 판단했습니다.
+  - Closed-candle-only 정책은 재현성이 높지만, 15m/4H/12H 신호가 확정될 때까지 기다려 초기 진입이 늦어지는 문제가 있습니다.
+  - 진행 중 candle은 이후 가격 변동으로 신호가 사라질 수 있으므로 live path에서만 명시적으로 모델링해야 합니다.
+- Decision:
+  - Backtest engine은 계속 closed candle만 소비합니다.
+  - Live monitor는 `openTime <= now < openTime + timeframe.duration`인 forming candle을 최신 후보 candle로 포함합니다.
+  - Start Live priming은 최신 completed candle만 평가완료 처리하고, 현재 forming candle은 priming하지 않습니다.
+  - Forming candle에서 `no signal`이 나온 경우 해당 candle key를 평가완료로 잠그지 않습니다. 같은 candle이 업데이트되어 나중에 signal이 생기면 다시 평가합니다.
+  - Forming candle에서 risk/confirmation을 통과한 signal이 한 번 후보가 되면 같은 `symbol/timeframe/strategy/openTime` key는 중복 주문 방지를 위해 평가완료 처리합니다.
+- Consequences:
+  - Live entry는 더 빨라질 수 있지만, closed candle backtest와 live 진입 타점은 의도적으로 달라질 수 있습니다.
+  - 진행 중 candle의 high/low/close가 변하면서 생기는 false positive는 portfolio arbitration, risk policy, protection order로 제한합니다.
+  - Live monitor 테스트는 forming candle signal, forming no-signal re-evaluation, completed candle duplicate prevention을 함께 검증해야 합니다.
+
+## 0024. Three-Second Live Monitor Cadence And Chart Protection Levels
+
+- Status: accepted
+- Date: 2026-05-15
+- Context:
+  - 사용자는 진행 중 candle 조건이 짧게 나타났다 사라질 수 있으므로 30초 감시 주기가 너무 느릴 수 있다고 판단했습니다.
+  - 1초 단위 즉시 평가/주문은 계산, REST refresh, 포지션 조회, 보호주문 처리 시간이 겹칠 수 있어 우선 3초 주기가 더 안전한 절충안으로 선택됐습니다.
+  - Bitget position snapshot이 exchange-side TPSL 가격을 항상 `takeProfit`/`stopLoss` 필드로 반환하지 않아 차트에 진입선만 보이고 보호 가격선이 누락될 수 있습니다.
+- Decision:
+  - Dashboard Live monitor 기본 감시 주기는 3초로 둡니다.
+  - 30초 주기는 더 이상 기본 live signal cadence가 아니며, 향후 15m WebSocket event-driven 평가로 전환하기 전까지 3초 monitor loop가 live 후보 평가 기준입니다.
+  - 차트 포지션 라인은 position snapshot의 TP2/SL을 우선 사용하되, 값이 비어 있으면 최근 persistent live entry log의 `TP1`, `TP2`, `손절가` 값을 보강해 표시합니다.
+- Consequences:
+  - 진행 중 candle 신호 반응성이 개선되지만, Bitget REST refresh/포지션 조회 호출 빈도도 증가하므로 timeout/fallback 경로를 계속 유지해야 합니다.
+  - 차트 TP1/TP2/SL 보강은 표시 목적이며, 실제 보호주문 상태의 진실 공급원은 Bitget TPSL 주문/포지션 조회와 live execution 로그입니다.
+
+## 0025. Position Protection Display And Portfolio Scoring Enrichment
+
+- Status: accepted
+- Date: 2026-05-16
+- Context:
+  - Bitget position snapshot이 실제 TPSL 보호주문이 존재해도 `takeProfit`/`stopLoss` 필드를 비워 반환하는 사례가 확인됐습니다.
+  - 이 경우 포지션 패널은 TP/SL을 `-`로 표시하고, portfolio arbitration은 기존 포지션의 남은 손익비를 `0:1`로 평가해 새 신호에 과도하게 교체될 수 있습니다.
+  - Live log의 선정 로직 설명이 길면 중간에서 잘려 실제 교체 근거를 검토하기 어렵습니다.
+- Decision:
+  - Dashboard는 같은 symbol/side의 최근 persistent live entry log에서 `TP1`, `TP2`, `손절가`를 복구해 차트와 포지션 패널에 표시합니다.
+  - Live monitor에 전달하는 open position도 동일한 보강값으로 enrich하여, Bitget position snapshot의 TP/SL 누락만으로 기존 포지션이 최저 점수가 되지 않게 합니다.
+  - Forming candle에서 신호가 한번 accepted되면 기존 `(symbol,timeframe,strategy,openTime)` key로 중복 주문을 막고, no-signal 상태는 계속 재평가합니다.
+  - 자동매매 로그 detail cell은 긴 `선정 로직` 값을 줄이지 않고 전체 표시합니다.
+  - 신호 변경으로 기존 포지션을 정리하는 close log는 redacted order ID와 함께 `청산 직전 PnL`, `청산 판정`을 기록하고, 하단 누적 기록 패널은 해당 값을 승패/승률에 반영합니다.
+- Consequences:
+  - 보호주문이 있는데도 화면과 선정 로직에서 기존 포지션을 무보호/무가치로 보는 오판을 줄입니다.
+  - close log의 승패는 실제 체결 후 정산된 realized PnL이 아니라 시장가 정리 직전 position snapshot 기준입니다. 정확한 확정 손익은 향후 order-history/position-history 연동으로 대체해야 합니다.
+  - 주문 원문 응답과 raw order identifier는 계속 로그에 저장하지 않습니다.
+
+## 0026. Hedge-Side Position Slots And Manual Refresh Reconciliation
+
+- Status: accepted
+- Date: 2026-05-16
+- Context:
+  - 사용자는 Bitget hedge mode에서 같은 symbol의 long/short를 동시에 보유할 수 있으므로 short 포지션이 있다고 long 신호까지 막지 않기를 원했습니다.
+  - 반대로 이미 ETHUSDT short 포지션이 열려 있으면 새 ETHUSDT short 신호로 같은 방향을 재진입하거나 교체하지 않기를 원했습니다.
+  - 사용자가 Bitget UI에서 TP/SL을 수동 수정한 뒤 앱 Refresh를 누르면 앱의 포지션/보호가격 표시와 선정 로직이 현재 거래소 상태를 따라가야 합니다.
+- Decision:
+  - Portfolio arbitration은 open position을 `symbol + side` 슬롯으로 취급합니다.
+  - 같은 `symbol + side`가 이미 열려 있으면 해당 방향의 새 후보는 position close 전까지 hold 처리합니다.
+  - 반대 방향은 별도 슬롯으로 취급하므로 hedge mode에서는 long/short 동시 보유 후보를 허용합니다.
+  - Position Refresh는 Bitget `orders-plan-pending?planType=profit_loss&productType=USDT-FUTURES`를 함께 조회해 현재 pending TP/SL 주문을 우선 반영합니다.
+  - pending TP/SL 조회가 성공하면 오래된 live entry log 값보다 거래소의 현재 보호주문 snapshot을 우선합니다. 조회가 실패하면 마지막 성공 snapshot 또는 live entry log로 표시를 보강합니다.
+- Consequences:
+  - 같은 방향 중복 진입/교체 churn을 줄이면서 반대 방향 hedge 진입은 허용됩니다.
+  - 계정이 one-way mode이면 long/short 동시 보유는 거래소 정책상 의도대로 동작하지 않을 수 있으므로 live smoke에서 position mode 확인이 필요합니다.
+  - 사용자가 수동으로 보호주문을 변경/삭제한 경우 Refresh 후 차트와 포지션 패널의 TP1/TP2/SL도 현재 거래소 pending plan 상태를 따릅니다.
+
+## 0027. Prune Weak Symbol-Scoped Strategy Routes
+
+- Status: accepted
+- Date: 2026-05-21
+- Context:
+  - 현재 추천 라우팅을 `10x` leverage / `5%` per-trade account-risk 조건으로 재검증한 뒤, 사용자는 낮은 수익률 또는 높은 MDD 대비 효율이 약한 특정 조합을 제거하기로 했습니다.
+  - 제거 대상은 전략 구현 전체가 아니라 `symbol × timeframe × strategy` route 단위입니다.
+- Decision:
+  - `BTCUSDT 15m X`를 추천 라우팅에서 제외합니다.
+  - `BTCUSDT 12H Time-Series momentum`을 추천 라우팅에서 제외합니다.
+  - `BTCUSDT 1D Donchian channel breakout`과 `BTCUSDT 1D VWMA100 touch trend`를 추천 라우팅에서 제외합니다.
+  - `ETHUSDT 1D Donchian channel breakout`을 추천 라우팅에서 제외합니다.
+  - 전략 구현체는 백테스트 재현성과 향후 명시적 재활성화를 위해 유지하고, active app route만 `blockedLiveRoutes`로 차단합니다.
+- Consequences:
+  - BTCUSDT 추천 route는 `15m X-Frequency`, `15m BTC 15m Phase Vacuum Reclaim`, `12H VWMA100 touch trend`, `12H Donchian channel breakout`만 남습니다.
+  - ETHUSDT 추천 route는 `1H ETH 1H Momentum Burst`, `12H Time-Series momentum`만 남습니다.
+  - Generic timeframe routing은 전략 카탈로그 성격으로 남아 있지만, Watchlist symbol이 주어지는 live/backtest 추천 경로에서는 symbol-scoped block list가 우선 적용됩니다.
+
+## 0028. Further Prune Routed Strategy Portfolio
+
+- Status: accepted
+- Date: 2026-05-21
+- Context:
+  - 0027 적용 직후 사용자는 추가로 세 개의 active route를 더 제외하기로 했습니다.
+  - 제거 대상은 계속 전략 구현 전체가 아니라 `symbol × timeframe × strategy` route 단위입니다.
+- Decision:
+  - `BTCUSDT 15m X-Frequency`를 추천 라우팅에서 제외합니다.
+  - `BTCUSDT 12H Donchian channel breakout`을 추천 라우팅에서 제외합니다.
+  - `ETHUSDT 12H Time-Series momentum`을 추천 라우팅에서 제외합니다.
+  - 전략 구현체와 generic timeframe catalog는 유지하고, symbol-scoped active route만 `blockedLiveRoutes`로 차단합니다.
+- Consequences:
+  - BTCUSDT 추천 route는 `15m BTC 15m Phase Vacuum Reclaim`, `12H VWMA100 touch trend`만 남습니다.
+  - ETHUSDT 추천 route는 `1H ETH 1H Momentum Burst`만 남습니다.
+  - 재활성화가 필요하면 route 단위로 block list에서 되돌리고 같은 조건의 백테스트를 다시 실행해야 합니다.
+
+## 0029. Route One Vacuum Pulse Strategy Per BTC/ETH Symbol
+
+- Status: accepted
+- Date: 2026-05-21
+- Context:
+  - 사용자는 `10x` leverage / `5%` per-trade account-risk 조건에서 최근 4년 15m candle 기준으로 BTCUSDT와 ETHUSDT 각각 하나의 공격형 전략을 원했습니다.
+  - 후보 탐색은 기존 Phase Vacuum/Reclaim/Momentum 계열을 기준으로 하되, 라우팅은 BTC/ETH 각각 하나의 active route만 남기는 방향으로 정리했습니다.
+- Decision:
+  - `BTC 15m Vacuum Pulse`를 새 BTCUSDT 15m active route로 추가합니다.
+  - `ETH 15m Vacuum Pulse`를 새 ETHUSDT 15m active route로 추가합니다.
+  - `BTCUSDT 15m BTC Phase Vacuum Reclaim`, `BTCUSDT 12H VWMA100 touch trend`, `ETHUSDT 1H ETH 1H Momentum Burst`는 구현체를 유지하되 active app route에서는 제외합니다.
+  - 두 Vacuum Pulse 전략의 default config는 `10x` leverage, `5%` per-trade account-risk, `100%` max margin, split TP/SL model 기준입니다.
+- Consequences:
+  - 현재 BTCUSDT/ETHUSDT active 추천 라우트는 각각 `15m Vacuum Pulse` 하나씩입니다.
+  - 최신 로컬 4년 검증 결과는 `BTCUSDT 15m Vacuum Pulse`: `$100 -> $808.643489`, `+708.64%`, annualized `68.69%`, `156` trades, annual trades `39.03`, MDD `33.77%`, PF `1.59`입니다.
+  - 최신 로컬 4년 검증 결과는 `ETHUSDT 15m Vacuum Pulse`: `$100 -> $637.452288`, `+537.45%`, annualized `58.95%`, `118` trades, annual trades `29.52`, MDD `22.00%`, PF `1.47`입니다.
+  - 사용자의 이상 목표인 annual trades 약 `100`회와 annualized return `300%`에는 못 미치므로, 이 결과는 live-ready 보장이 아니라 현재 로컬 데이터와 수수료/TP-SL 모델에서의 최선 후보로 관리합니다.
+
+## 0030. Reactivate Five Requested Symbol Routes
+
+- Status: accepted
+- Date: 2026-05-22
+- Context:
+  - 사용자는 Vacuum Pulse 2개만 남긴 상태가 아니라 기존 우수 후보 3개와 신규 Vacuum Pulse 2개를 함께 active route로 사용하길 원했습니다.
+  - 요청한 active set은 `BTCUSDT 15m BTC 15m Phase Vacuum Reclaim`, `BTCUSDT 12H VWMA100 touch trend`, `ETHUSDT 1H ETH 1H Momentum Burst`, `BTCUSDT 15m BTC 15m Vacuum Pulse`, `ETHUSDT 15m ETH 15m Vacuum Pulse`입니다.
+- Decision:
+  - 위 다섯 개 `symbol × timeframe × strategy` 조합을 `symbolScopedLiveRoutes`에 명시합니다.
+  - 기존 제외 대상 중 `BTCUSDT 15m Phase Vacuum Reclaim`, `BTCUSDT 12H VWMA100 touch trend`, `ETHUSDT 1H ETH 1H Momentum Burst`만 다시 활성화합니다.
+  - `BTCUSDT 15m X`, `BTCUSDT 15m X-Frequency`, `BTCUSDT 12H Donchian`, `BTCUSDT 12H Time-Series`, `BTCUSDT 1D Donchian/VWMA`, `ETHUSDT 12H Time-Series`, `ETHUSDT 1D Donchian` 등 사용자가 제거한 나머지 route는 계속 제외합니다.
+- Consequences:
+  - 0030 적용 당시 active 추천 route는 BTCUSDT 3개, ETHUSDT 2개였습니다.
+  - Live monitor는 동일 symbol/side 중복 포지션을 기존 portfolio policy로 걸러내며, 동시에 후보가 여러 개 나오면 reward/risk와 기대수익 기준으로 하나를 고릅니다.
+
+## 0031. Strategy Holding-Period Exit Rationale
+
+- Status: accepted
+- Date: 2026-05-22
+- Context:
+  - 사용자는 전략별로 포지션을 며칠까지 보유할지 정하고, 그 기간 안에 결과가 나오지 않으면 자동 종료하는 조건을 원했습니다.
+  - 단순 시간 만료가 아니라 해당 포지션을 왜 닫는지에 대한 근거도 로그와 백테스트 결과에 남아야 합니다.
+  - 실거래 경로에서는 수동/외부 포지션까지 앱이 임의 청산하면 전략 근거와 사용자 의도를 증명할 수 없습니다.
+- Decision:
+  - `StrategyConfig.maximumHoldingCandles`를 추가해 전략별 최대 보유 candle 수를 설정합니다.
+  - 적용 당시 active route 기본값은 `15m` 전략 `96`봉(약 24시간), `ETH 1H Momentum Burst` `72`봉(약 3일), `BTC 12H VWMA100` `14`봉(약 7일)이었습니다.
+  - 백테스트는 TP2/SL이 최대 보유기간 안에 확정되지 않으면 해당 candle 종가에서 시간 종료를 만들고, 잔여 물량은 시장가/taker 수수료로 보수적으로 계산합니다.
+  - Live monitor는 새 진입 평가 전에 app-created live entry log와 매칭되는 open position만 보유기간 만료 대상으로 봅니다.
+  - 보유기간 종료 close log에는 `청산 근거`, `매매전략`, `시간봉`, `진입시각`, `최대 보유`, `경과 봉수`를 남깁니다.
+- Consequences:
+  - 자동매매는 신호가 오래 지연되는 포지션의 시간을 강제로 리셋할 수 있고, 종료 사유도 감사 로그에서 확인할 수 있습니다.
+  - 보유기간 만료 청산이 발생한 평가 주기에는 새 진입을 만들지 않아 close와 entry가 같은 cycle에서 겹치지 않습니다.
+  - 수동/외부 포지션은 자동 시간 종료 대상에서 제외됩니다. 앱이 만든 진입 로그가 없으면 전략/timeframe 근거가 없기 때문입니다.
+  - TP1 체결 이후 남은 50%가 시간 종료되는 경우도 가능하며, 이 경우 백테스트 reason에는 TP1 이후 잔여 물량 종료라는 근거가 포함됩니다.
+
+## 0032. Remove BTCUSDT 12H VWMA100 Active Route
+
+- Status: accepted
+- Date: 2026-05-23
+- Context:
+  - 사용자가 `BTC 12H VWMA100 터치 추세`를 앱 적용 전략에서 삭제하라고 요청했습니다.
+  - 전략 구현체는 과거 백테스트 재현성과 명시적 재활성화 가능성을 위해 유지할 수 있습니다.
+- Decision:
+  - `BTCUSDT 12H VWMA100 touch trend`를 symbol-scoped active route에서 제거합니다.
+  - 12H generic catalog에는 VWMA100이 남아 있으므로, `BTCUSDT 12H VWMA100`을 `blockedLiveRoutes`에도 명시해 앱/Live 추천 경로에서 다시 살아나지 않게 합니다.
+- Consequences:
+  - 현재 active 추천 route는 BTCUSDT 15m 2개, ETHUSDT 15m 1개, ETHUSDT 1H 1개입니다.
+  - BTCUSDT 12H는 현재 추천 route가 없습니다.
+  - VWMA100 터치 추세 구현체와 기본 `14`봉 최대 보유 설정은 registry에 남지만, BTCUSDT active Live route에는 적용되지 않습니다.
+
+## 0033. Cap Live Entry Size By Available Balance
+
+- Status: accepted
+- Date: 2026-05-25
+- Context:
+  - Live monitor가 신호를 만들었지만 Bitget이 `40762 The order amount exceeds the balance`로 주문을 거절했습니다.
+  - 기존 리스크 정책은 `10x` leverage와 `5%` account-risk를 적용해 포지션 투입비율을 계산했지만, 실제 주문 수량 산출은 USDT `accountEquity`만 기준으로 삼았습니다.
+  - Bitget 주문 가능 금액은 열린 포지션, 예약 주문, 수수료 여유분 때문에 `accountEquity`보다 작은 `available` 기준으로 제한될 수 있습니다.
+- Decision:
+  - Dashboard Live monitor는 USDT `accountEquity`와 함께 `available`을 Live executor에 전달합니다.
+  - Live order sizing은 기존 risk-sized planned margin을 유지하되, 주문 직전 사용 증거금을 `available × 95%` 이하로 한 번 더 제한합니다.
+  - 제한 후 주문 수량이 Bitget 최소 주문 조건보다 작으면 live order size too small로 차단하고 주문을 제출하지 않습니다.
+- Consequences:
+  - `10x`와 `5%` 리스크 정책은 계속 적용됩니다. 다만 실제 available balance가 부족하면 주문 크기가 더 작아져 계좌 손실위험도 5%보다 낮아질 수 있습니다.
+  - 신규 주문이 현재 운용 가능한 금액을 초과해 거래소에서 거절될 가능성을 줄입니다.
+  - available balance가 너무 낮으면 신호가 있어도 주문이 차단될 수 있으며, 이는 잔고 초과 주문보다 안전한 실패입니다.

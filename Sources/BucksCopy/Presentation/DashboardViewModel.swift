@@ -10,6 +10,7 @@ final class DashboardViewModel: ObservableObject {
     private let credentialStore: CredentialStore
     private let accountRepository: BitgetAccountRepository?
     private let positionRepository: PositionRepository?
+    private let positionProtectionRepository: PositionProtectionRepository?
     private let positionStreamService: PositionStreamService?
     private let symbolCatalogRepository: SymbolCatalogRepository?
     private let candleRepository: CandleRepository
@@ -17,9 +18,9 @@ final class DashboardViewModel: ObservableObject {
     private let candleBackfillRepository: CandleBackfillRepository?
     private let candleStreamService: CandleStreamService?
     private let logStore: TradeEventLogStore
-    private let paperRunner: PaperTradingRunner
-    private let paperMonitor: MultiTimeframePaperTradingMonitor
-    private let paperMonitorIntervalNanoseconds: UInt64
+    private let signalEvaluator: TradingSignalEvaluator
+    private let liveMonitor: MultiTimeframeLiveTradingMonitor
+    private let liveMonitorIntervalNanoseconds: UInt64
     private let backtestEngine: BacktestEngine
     private let clock: Clock
     private let historyBackfillPolicy: CandleHistoryBackfillPolicy
@@ -32,18 +33,20 @@ final class DashboardViewModel: ObservableObject {
     private var positionStreamTask: Task<Void, Never>?
     private var positionPollingTask: Task<Void, Never>?
     private var backtestTask: Task<Void, Never>?
-    private var paperMonitorTask: Task<Void, Never>?
+    private var liveMonitorTask: Task<Void, Never>?
     private let initialCandleDisplayLimit = 1_200
     private var candleDisplayLimit = 1_200
     private let maxCandleDisplayLimit = 50_000
     private var sessionLogs: [TradeEventLog] = []
     private var emittedSessionLogKeys: Set<String> = []
+    private var latestExchangeProtectionLevelsByPositionID: [String: ChartProtectionLevels]?
 
     init(
         state: DashboardState = DashboardState(),
         credentialStore: CredentialStore,
         accountRepository: BitgetAccountRepository?,
         positionRepository: PositionRepository?,
+        positionProtectionRepository: PositionProtectionRepository? = nil,
         positionStreamService: PositionStreamService? = nil,
         symbolCatalogRepository: SymbolCatalogRepository? = nil,
         candleRepository: CandleRepository,
@@ -51,17 +54,19 @@ final class DashboardViewModel: ObservableObject {
         candleBackfillRepository: CandleBackfillRepository?,
         candleStreamService: CandleStreamService? = nil,
         logStore: TradeEventLogStore,
-        paperRunner: PaperTradingRunner,
+        signalEvaluator: TradingSignalEvaluator,
+        liveExecutor: LiveTradeExecutor? = nil,
         backtestEngine: BacktestEngine? = nil,
         strategyRegistry: StrategyRegistry,
         clock: Clock = SystemClock(),
         historyBackfillPolicy: CandleHistoryBackfillPolicy = .live,
-        paperMonitorIntervalNanoseconds: UInt64 = 30_000_000_000
+        liveMonitorIntervalNanoseconds: UInt64 = 3_000_000_000
     ) {
         self.state = state
         self.credentialStore = credentialStore
         self.accountRepository = accountRepository
         self.positionRepository = positionRepository
+        self.positionProtectionRepository = positionProtectionRepository
         self.positionStreamService = positionStreamService
         self.symbolCatalogRepository = symbolCatalogRepository
         self.candleRepository = candleRepository
@@ -69,14 +74,28 @@ final class DashboardViewModel: ObservableObject {
         self.candleBackfillRepository = candleBackfillRepository
         self.candleStreamService = candleStreamService
         self.logStore = logStore
-        self.paperRunner = paperRunner
-        self.paperMonitor = MultiTimeframePaperTradingMonitor(
+        let resolvedLiveExecutor: LiveTradeExecutor
+        if let liveExecutor {
+            resolvedLiveExecutor = liveExecutor
+        } else {
+            let unavailableLiveOrderClient = UnavailableLiveOrderClient()
+            resolvedLiveExecutor = LiveTradeExecutor(
+                orderPlacer: unavailableLiveOrderClient,
+                leverageSetter: unavailableLiveOrderClient,
+                protectionInstaller: ExchangeProtectionInstaller(orderPlacer: unavailableLiveOrderClient),
+                logStore: logStore,
+                clock: clock
+            )
+        }
+        self.signalEvaluator = signalEvaluator
+        self.liveMonitor = MultiTimeframeLiveTradingMonitor(
             candleRepository: candleRepository,
             candleBackfillRepository: candleBackfillRepository,
-            paperRunner: paperRunner,
+            signalEvaluator: signalEvaluator,
+            liveExecutor: resolvedLiveExecutor,
             strategyRegistry: strategyRegistry
         )
-        self.paperMonitorIntervalNanoseconds = paperMonitorIntervalNanoseconds
+        self.liveMonitorIntervalNanoseconds = liveMonitorIntervalNanoseconds
         self.backtestEngine = backtestEngine ?? BacktestEngine(strategyRegistry: strategyRegistry)
         self.strategyRegistry = strategyRegistry
         self.clock = clock
@@ -92,15 +111,23 @@ final class DashboardViewModel: ObservableObject {
         positionStreamTask?.cancel()
         positionPollingTask?.cancel()
         backtestTask?.cancel()
-        paperMonitorTask?.cancel()
+        liveMonitorTask?.cancel()
     }
 
     var strategyDefinitions: [StrategyDefinition] {
         strategyRegistry.definitions
     }
 
+    private var usdtAccount: AccountSnapshot? {
+        state.accounts.first { $0.marginCoin.uppercased() == "USDT" }
+    }
+
     func strategyDefinitions(for timeframe: CandleTimeframe) -> [StrategyDefinition] {
-        strategyRegistry.definitions(recommendedFor: timeframe)
+        strategyRegistry.definitions(recommendedFor: timeframe, symbol: state.selectedSymbol)
+    }
+
+    func strategyDefinitions(for timeframe: CandleTimeframe, symbol: FuturesSymbol) -> [StrategyDefinition] {
+        strategyRegistry.definitions(recommendedFor: timeframe, symbol: symbol)
     }
 
     func bootstrap() {
@@ -145,8 +172,10 @@ final class DashboardViewModel: ObservableObject {
     func deleteCredential() {
         do {
             try credentialStore.delete()
+            stopLiveBot()
             state.accounts = []
             state.positions = []
+            state.liveAutomationSession = nil
             state.credentialStatus = .disconnected
             stopPositionUpdates()
             appendSessionLog(.init(
@@ -197,7 +226,19 @@ final class DashboardViewModel: ObservableObject {
     func refreshPositions(logSuccess: Bool = true) async {
         do {
             guard let positionRepository else { return }
-            state.positions = try await positionRepository.fetchPositions()
+            let previousOpenPositions = state.positions.filter(\.isOpenForManualCloseDetection)
+            let positions = try await positionRepository.fetchPositions()
+            let exchangeProtectionLevels = await fetchExchangeProtectionLevelsByPositionID(
+                positions: positions
+            )
+            state.positions = positionsWithChartProtectionLevels(
+                positions,
+                exchangeProtectionLevelsByPositionID: exchangeProtectionLevels
+            )
+            recordExternallyClosedPositions(
+                previousOpenPositions: previousOpenPositions,
+                currentOpenPositions: state.positions.filter(\.isOpenForManualCloseDetection)
+            )
             if logSuccess {
                 appendSessionLogOnce(key: "positions.loaded", .init(
                     timestamp: clock.now,
@@ -215,9 +256,97 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
+    private func recordExternallyClosedPositions(
+        previousOpenPositions: [PositionSnapshot],
+        currentOpenPositions: [PositionSnapshot]
+    ) {
+        guard previousOpenPositions.isEmpty == false else { return }
+
+        let currentIDs = Set(currentOpenPositions.map(\.id))
+        let closedPositions = previousOpenPositions.filter { currentIDs.contains($0.id) == false }
+        for position in closedPositions where !hasRecentAppCloseLog(for: position) {
+            appendAutomationLog(externallyClosedPositionLog(for: position))
+        }
+    }
+
+    private func hasRecentAppCloseLog(for position: PositionSnapshot) -> Bool {
+        let recentWindow = clock.now.addingTimeInterval(-120)
+        let logs = state.automationLogs.filter {
+            $0.timestamp >= recentWindow &&
+                $0.category == .liveOrder &&
+                $0.symbol == position.symbol
+        }
+        return logs.contains { log in
+            let text = "\(log.metadata?.title ?? "") \(log.metadata?.subtitle ?? "") \(log.message)"
+            return text.contains("Live position close submitted") ||
+                text.contains("Fail-closed live position close submitted") ||
+                text.contains("기존 포지션 정리") ||
+                text.contains("시장가 정리")
+        }
+    }
+
+    private func externallyClosedPositionLog(for position: PositionSnapshot) -> TradeEventLog {
+        let sideText = position.side == .unknown ? position.positionMode.rawValue : position.side.rawValue
+        let outcomeText = closeOutcomeText(for: position.unrealizedProfitLoss)
+        let outcomeTone = closeOutcomeTone(for: position.unrealizedProfitLoss)
+
+        return TradeEventLog(
+            timestamp: clock.now,
+            category: .liveOrder,
+            symbol: position.symbol,
+            message: "External/manual close detected for \(position.symbol.rawValue) \(sideText).",
+            metadata: TradeLogMetadata(
+                title: "\(position.symbol.rawValue) 수동 청산 감지",
+                subtitle: "Refresh 결과 이전에 열려 있던 \(sideText) 포지션이 거래소에서 사라져 마지막 확인 PnL 기준으로 확정 승패에 반영했습니다.",
+                tags: [
+                    TradeLogTag(label: "LIVE", tone: .success),
+                    TradeLogTag(label: "수동청산", tone: .warning),
+                    TradeLogTag(label: sideText.uppercased(), tone: .neutral),
+                    TradeLogTag(label: outcomeText, tone: outcomeTone)
+                ],
+                details: [
+                    TradeLogDetail(label: "심볼", value: position.symbol.rawValue),
+                    TradeLogDetail(label: "포지션 방향", value: sideText),
+                    TradeLogDetail(label: "마지막 수량", value: DecimalText.string(position.total)),
+                    TradeLogDetail(label: "마지막 마크가", value: DecimalText.string(position.markPrice)),
+                    TradeLogDetail(
+                        label: "청산 직전 PnL",
+                        value: DecimalText.string(position.unrealizedProfitLoss),
+                        tone: outcomeTone
+                    ),
+                    TradeLogDetail(label: "청산 판정", value: outcomeText, tone: outcomeTone),
+                    TradeLogDetail(label: "처리", value: "Refresh 감지")
+                ]
+            )
+        )
+    }
+
+    private func closeOutcomeText(for profitLoss: Decimal) -> String {
+        if profitLoss > 0 { return "승" }
+        if profitLoss < 0 { return "패" }
+        return "본전"
+    }
+
+    private func closeOutcomeTone(for profitLoss: Decimal) -> TradeLogTone {
+        if profitLoss > 0 { return .success }
+        if profitLoss < 0 { return .danger }
+        return .neutral
+    }
+
     private func refreshAccountSnapshot() async throws {
         guard let accountRepository else { return }
         state.accounts = try await accountRepository.fetchAccounts()
+        updateLiveAutomationSessionFromAccount()
+    }
+
+    private func updateLiveAutomationSessionFromAccount() {
+        guard var session = state.liveAutomationSession,
+              let account = usdtAccount else { return }
+        session.latestEquity = account.accountEquity
+        session.latestAvailable = account.available
+        session.latestUnrealizedProfitLoss = account.unrealizedProfitLoss
+        session.lastUpdatedAt = account.updatedAt
+        state.liveAutomationSession = session
     }
 
     func refreshSymbolCatalog() {
@@ -297,7 +426,11 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func updateStrategy(_ strategyID: String) {
-        guard StrategyTimeframeRouting.isRecommended(strategyID: strategyID, for: state.selectedTimeframe),
+        guard StrategyTimeframeRouting.isRecommended(
+            strategyID: strategyID,
+            for: state.selectedTimeframe,
+            symbol: state.selectedSymbol
+        ),
               let definition = strategyRegistry.definition(id: strategyID) else { return }
         var nextConfig = state.strategyConfig
         nextConfig.strategyID = definition.id
@@ -349,7 +482,8 @@ final class DashboardViewModel: ObservableObject {
     func updateBacktestStrategy(_ strategyID: String) {
         guard StrategyTimeframeRouting.isRecommended(
             strategyID: strategyID,
-            for: state.backtestConfiguration.timeframe
+            for: state.backtestConfiguration.timeframe,
+            symbol: state.backtestConfiguration.symbol
         ), let definition = strategyRegistry.definition(id: strategyID) else { return }
         var nextConfiguration = state.backtestConfiguration
         nextConfiguration.strategyConfig.strategyID = definition.id
@@ -403,27 +537,74 @@ final class DashboardViewModel: ObservableObject {
         state.logLanguage = language
     }
 
-    func startPaperBot() {
-        paperMonitorTask?.cancel()
+    func startLiveBot() {
+        liveMonitorTask?.cancel()
 
-        state.runState = .runningPaper(startedAt: clock.now)
+        let startedAt = clock.now
+        let account = usdtAccount
+        state.liveAutomationSession = LiveAutomationSession(
+            startedAt: startedAt,
+            stoppedAt: nil,
+            seedEquity: account?.accountEquity,
+            seedAvailable: account?.available,
+            latestEquity: account?.accountEquity,
+            latestAvailable: account?.available,
+            latestUnrealizedProfitLoss: account?.unrealizedProfitLoss,
+            lastUpdatedAt: account?.updatedAt ?? startedAt
+        )
+        state.runState = .runningLive(startedAt: startedAt)
+        appendAutomationLog(automationSessionLog(
+            title: "자동매매 세션 시작",
+            subtitle: "이번 세션의 시작 시드를 저장했고, 하단 기록 패널은 이전 세션까지 포함한 전체 자동매매 장부를 누적 표시합니다.",
+            timestamp: startedAt,
+            message: "Live automation session started.",
+            account: account,
+            tags: [
+                TradeLogTag(label: "LIVE", tone: .success),
+                TradeLogTag(label: "START", tone: .accent),
+                TradeLogTag(label: "누적 장부", tone: .neutral)
+            ]
+        ))
         appendSessionLog(.init(
-            timestamp: clock.now,
+            timestamp: startedAt,
             category: .bot,
-            message: "Paper monitor started for Watchlist across all timeframes."
+            message: "Live auto trading started for Watchlist across all timeframes."
         ))
 
-        paperMonitorTask = Task { [weak self] in
+        liveMonitorTask = Task { [weak self] in
+            guard let self else { return }
+            await self.primeLiveMonitorAtStart()
             while !Task.isCancelled {
-                guard let self else { return }
-                await self.runPaperMonitorOnce()
+                await self.runLiveMonitorOnce()
 
                 do {
-                    try await Task.sleep(nanoseconds: self.paperMonitorIntervalNanoseconds)
+                    try await Task.sleep(nanoseconds: self.liveMonitorIntervalNanoseconds)
                 } catch {
                     return
                 }
             }
+        }
+    }
+
+    private func primeLiveMonitorAtStart() async {
+        let watchlist = state.watchlist
+        guard !watchlist.isEmpty, state.isConnected else { return }
+
+        let result = await liveMonitor.primeLatestClosedCandles(watchlist: watchlist)
+        appendSessionLogOnce(key: "live-monitor.primed", .init(
+            timestamp: clock.now,
+            category: .bot,
+            message: "Live monitor armed after marking \(result.primedCount) latest completed candle route(s) as already seen. New entries can start from the current forming candle or the next completed candle."
+        ))
+
+        for failure in result.failures.prefix(3) {
+            appendSessionLogOnce(key: "live-monitor.prime.failure.\(failure.symbol.rawValue).\(failure.timeframe.rawValue)", .init(
+                timestamp: clock.now,
+                category: .bot,
+                severity: .warning,
+                symbol: failure.symbol,
+                message: "Live monitor warmup skipped \(failure.timeframe.rawValue): \(failure.message)"
+            ))
         }
     }
 
@@ -480,16 +661,93 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    func stopPaperBot() {
-        paperMonitorTask?.cancel()
-        paperMonitorTask = nil
+    func stopLiveBot() {
+        let stoppedAt = clock.now
+        let wasRunning: Bool
+        if case .runningLive = state.runState {
+            wasRunning = true
+        } else {
+            wasRunning = false
+        }
+        liveMonitorTask?.cancel()
+        liveMonitorTask = nil
+        markLiveAutomationSessionStopped(at: stoppedAt)
         state.runState = .stopped
+        if wasRunning {
+            appendAutomationLog(automationSessionLog(
+                title: "자동매매 세션 정지",
+                subtitle: "자동매매 루프를 정지했습니다. 누적 기록은 삭제하지 않고 다음 시작 후에도 계속 합산합니다.",
+                timestamp: stoppedAt,
+                message: "Live automation session stopped.",
+                account: usdtAccount,
+                tags: [
+                    TradeLogTag(label: "LIVE", tone: .success),
+                    TradeLogTag(label: "STOP", tone: .warning),
+                    TradeLogTag(label: "누적 유지", tone: .neutral)
+                ]
+            ))
+        }
         appendSessionLog(.init(
-            timestamp: clock.now,
+            timestamp: stoppedAt,
             category: .bot,
             symbol: state.selectedSymbol,
-            message: "Paper bot stopped."
+            message: "Live auto trading stopped."
         ))
+    }
+
+    private func markLiveAutomationSessionStopped(at stoppedAt: Date) {
+        guard var session = state.liveAutomationSession else { return }
+        if let account = usdtAccount {
+            session.latestEquity = account.accountEquity
+            session.latestAvailable = account.available
+            session.latestUnrealizedProfitLoss = account.unrealizedProfitLoss
+            session.lastUpdatedAt = account.updatedAt
+        }
+        if session.stoppedAt == nil {
+            session.stoppedAt = stoppedAt
+        }
+        state.liveAutomationSession = session
+    }
+
+    private func automationSessionLog(
+        title: String,
+        subtitle: String,
+        timestamp: Date,
+        message: String,
+        account: AccountSnapshot?,
+        tags: [TradeLogTag]
+    ) -> TradeEventLog {
+        var details = [
+            TradeLogDetail(label: "기록 범위", value: "전체 자동매매 누적", tone: .accent),
+            TradeLogDetail(label: "시각", value: timestamp.dashboardDateTime)
+        ]
+        if let account {
+            details.append(TradeLogDetail(
+                label: "시드 Equity",
+                value: DecimalText.string(account.accountEquity),
+                tone: .accent
+            ))
+            details.append(TradeLogDetail(
+                label: "시드 가용잔고",
+                value: DecimalText.string(account.available)
+            ))
+            details.append(TradeLogDetail(
+                label: "미실현 PnL",
+                value: DecimalText.string(account.unrealizedProfitLoss),
+                tone: account.unrealizedProfitLoss < 0 ? .danger : .success
+            ))
+        }
+        return TradeEventLog(
+            timestamp: timestamp,
+            category: .automation,
+            message: message,
+            metadata: TradeLogMetadata(
+                title: title,
+                subtitle: subtitle,
+                tags: tags,
+                details: details
+            )
+        )
     }
 
     func loadCandles() {
@@ -979,12 +1237,18 @@ final class DashboardViewModel: ObservableObject {
     }
 
     private func handleLivePositions(_ positions: [PositionSnapshot]) async {
-        state.positions = positions.map { incoming in
+        let previousOpenPositions = state.positions.filter(\.isOpenForManualCloseDetection)
+        let mergedPositions = positions.map { incoming in
             guard let previous = state.positions.first(where: { $0.id == incoming.id }) else {
                 return incoming
             }
             return incoming.fillingMissingDetail(from: previous)
         }
+        state.positions = positionsWithChartProtectionLevels(mergedPositions)
+        recordExternallyClosedPositions(
+            previousOpenPositions: previousOpenPositions,
+            currentOpenPositions: state.positions.filter(\.isOpenForManualCloseDetection)
+        )
     }
 
     private func appendPositionWarning(_ error: Error) {
@@ -1063,9 +1327,25 @@ final class DashboardViewModel: ObservableObject {
         state.candles = visibleCandles
     }
 
-    private func runPaperMonitorOnce() async {
+    private func runLiveMonitorOnce() async {
         let watchlist = state.watchlist
         guard !watchlist.isEmpty else { return }
+        guard state.isConnected else {
+            appendSessionLogOnce(key: "live-monitor.not-connected", .init(
+                timestamp: clock.now,
+                category: .bot,
+                severity: .warning,
+                message: "Live auto trading requires a connected Bitget credential."
+            ))
+            stopLiveBot()
+            return
+        }
+
+        do {
+            try await refreshAccountSnapshot()
+        } catch {
+            appendPositionWarning(error)
+        }
 
         var leverageBySymbol: [FuturesSymbol: Int] = [:]
         var maximumRiskPerTradePercentBySymbol: [FuturesSymbol: Decimal] = [:]
@@ -1080,33 +1360,52 @@ final class DashboardViewModel: ObservableObject {
             )
         }
 
-        let result = await paperMonitor.evaluateOnce(
+        let result = await liveMonitor.evaluateOnce(
             watchlist: watchlist,
             leverageBySymbol: leverageBySymbol,
             maximumRiskPerTradePercentBySymbol: maximumRiskPerTradePercentBySymbol,
             maximumPositionMarginPercentBySymbol: maximumPositionMarginPercentBySymbol,
-            openPositions: state.positions.filter { watchlist.contains($0.symbol) },
-            accountEquity: state.accounts.first { $0.marginCoin.uppercased() == "USDT" }?.accountEquity
+            openPositions: positionsWithChartProtectionLevels(state.positions)
+                .filter { watchlist.contains($0.symbol) },
+            accountEquity: usdtAccount?.accountEquity,
+            accountAvailable: usdtAccount?.available,
+            contractSpecs: state.symbolCatalog
         )
 
-        if !result.evaluations.isEmpty {
+        if !result.evaluations.isEmpty || result.executionResult?.didSubmitOrder == true {
             loadRecentLogs()
+            try? await refreshAccountSnapshot()
+            await refreshPositions(logSuccess: false)
         }
 
         for failure in result.failures.prefix(3) {
             let strategyPart = failure.strategyID ?? "candles"
-            appendSessionLogOnce(key: "paper-monitor.failure.\(failure.symbol.rawValue).\(failure.timeframe.rawValue).\(strategyPart)", .init(
+            appendSessionLogOnce(key: "live-monitor.failure.\(failure.symbol.rawValue).\(failure.timeframe.rawValue).\(strategyPart)", .init(
                 timestamp: clock.now,
                 category: .bot,
                 severity: .warning,
                 symbol: failure.symbol,
-                message: "Paper monitor skipped \(failure.timeframe.rawValue) \(strategyPart): \(failure.message)"
+                message: "Live monitor skipped \(failure.timeframe.rawValue) \(strategyPart): \(failure.message)"
             ))
         }
     }
 
     func loadRecentLogs() {
         refreshVisibleLogs()
+    }
+
+    private func appendAutomationLog(_ log: TradeEventLog) {
+        do {
+            try logStore.append(log)
+            refreshVisibleLogs()
+        } catch {
+            appendSessionLog(.init(
+                timestamp: clock.now,
+                category: .bot,
+                severity: .warning,
+                message: sanitizedError(error)
+            ))
+        }
     }
 
     private func appendSessionLog(_ log: TradeEventLog) {
@@ -1124,8 +1423,60 @@ final class DashboardViewModel: ObservableObject {
     private func refreshVisibleLogs() {
         let persistentLogs = (try? logStore.loadRecent(limit: 200))?
             .filter(\.isPersistentTradingRecord) ?? []
+        state.automationLogs = (try? logStore.loadRecent(limit: 10_000))?
+            .filter(\.isAutomationTradingRecord) ?? []
+        if state.positions.isEmpty == false {
+            state.positions = positionsWithChartProtectionLevels(state.positions)
+        }
         state.recentLogs = (persistentLogs + sessionLogs)
             .sorted { $0.timestamp < $1.timestamp }
+    }
+
+    private func positionsWithChartProtectionLevels(
+        _ positions: [PositionSnapshot],
+        exchangeProtectionLevelsByPositionID: [String: ChartProtectionLevels]? = nil
+    ) -> [PositionSnapshot] {
+        let authoritativeLevels = exchangeProtectionLevelsByPositionID ??
+            latestExchangeProtectionLevelsByPositionID
+        if let authoritativeLevels {
+            return positions.map {
+                $0.withChartProtectionLevels(from: authoritativeLevels[$0.id])
+            }
+        }
+        return positions.map { $0.withChartProtectionLevels(from: state.automationLogs) }
+    }
+
+    private func fetchExchangeProtectionLevelsByPositionID(
+        positions: [PositionSnapshot]
+    ) async -> [String: ChartProtectionLevels]? {
+        guard let positionProtectionRepository else {
+            return latestExchangeProtectionLevelsByPositionID
+        }
+
+        do {
+            let protectionOrders = try await positionProtectionRepository.fetchPendingPositionProtectionOrders()
+            let levelPairs: [(String, ChartProtectionLevels)] = positions.compactMap { position in
+                guard let levels = ChartProtectionLevels(
+                    position: position,
+                    protectionOrders: protectionOrders,
+                    createdAt: clock.now
+                ) else {
+                    return nil
+                }
+                return (position.id, levels)
+            }
+            let levelsByPositionID = Dictionary(uniqueKeysWithValues: levelPairs)
+            latestExchangeProtectionLevelsByPositionID = levelsByPositionID
+            return levelsByPositionID
+        } catch {
+            appendSessionLogOnce(key: "positions.protection.refresh.failed.\(sanitizedError(error))", .init(
+                timestamp: clock.now,
+                category: .position,
+                severity: .warning,
+                message: "Position protection refresh skipped: \(sanitizedError(error))"
+            ))
+            return latestExchangeProtectionLevelsByPositionID
+        }
     }
 
     var selectedLeverageRange: ClosedRange<Int> {
@@ -1176,7 +1527,11 @@ final class DashboardViewModel: ObservableObject {
         for timeframe: CandleTimeframe,
         symbol: FuturesSymbol
     ) -> StrategyConfig {
-        if StrategyTimeframeRouting.isRecommended(strategyID: config.strategyID, for: timeframe) {
+        if StrategyTimeframeRouting.isRecommended(
+            strategyID: config.strategyID,
+            for: timeframe,
+            symbol: symbol
+        ) {
             var nextConfig = config
             nextConfig.leverage = clampedLeverage(nextConfig.leverage, for: symbol)
             nextConfig.maximumRiskPerTradePercent = clampedMaximumRiskPerTradePercent(
@@ -1188,7 +1543,10 @@ final class DashboardViewModel: ObservableObject {
             return nextConfig
         }
 
-        guard let defaultID = StrategyTimeframeRouting.recommendedStrategyIDs(for: timeframe).first,
+        guard let defaultID = StrategyTimeframeRouting.recommendedStrategyIDs(
+            for: timeframe,
+            symbol: symbol
+        ).first,
               let definition = strategyRegistry.definition(id: defaultID) else {
             var nextConfig = config
             nextConfig.leverage = clampedLeverage(nextConfig.leverage, for: symbol)
@@ -1368,10 +1726,21 @@ final class DashboardViewModel: ObservableObject {
             return "Strategy not found: \(id)"
         case TradingDomainError.selectedSymbolNotInWatchlist(let symbol):
             return "\(symbol.rawValue) is not in Watchlist."
+        case TradingDomainError.missingAccountEquity:
+            return "USDT account equity is required for live order sizing."
+        case TradingDomainError.missingContractSpec(let symbol):
+            return "\(symbol.rawValue) contract spec is required for live order sizing."
+        case TradingDomainError.liveOrderSizeTooSmall(let symbol):
+            return "\(symbol.rawValue) live order size is below Bitget minimum."
+        case TradingDomainError.liveOrderFillNotConfirmed(let clientOid):
+            return "Live order fill was not confirmed for \(TradeLogRedaction.identifier(clientOid))."
         case TradingDomainError.invalidProtectionPlan(let message):
             return "Invalid protection plan: \(message)"
-        case TradingDomainError.protectionOrderRetryExhausted(let kind, let attempts):
-            return "Protection \(kind.rawValue) order failed after \(attempts) attempts."
+        case TradingDomainError.protectionOrderRetryExhausted(let kind, let attempts, let cause):
+            let causeText = cause.map { " Cause: \($0)" } ?? ""
+            return "Protection \(kind.rawValue) order failed after \(attempts) attempts.\(causeText)"
+        case let error as URLError:
+            return "Network request failed: \(error.localizedDescription)"
         case BacktestEngineError.insufficientCandles(let required, let actual):
             return "백테스트에 필요한 캔들이 부족합니다. 최소 \(required)개 필요, 현재 \(actual)개입니다."
         case BacktestEngineError.invalidInitialCapital(let initialCapital):
@@ -1379,6 +1748,10 @@ final class DashboardViewModel: ObservableObject {
         case let error as SQLiteDatabaseError:
             return "SQLite database error: \(error.description)"
         default:
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain {
+                return "Network request failed: \(nsError.localizedDescription)"
+            }
             return "Operation failed: \(String(describing: type(of: error)))."
         }
     }
@@ -1402,6 +1775,10 @@ private extension Candle {
 }
 
 private extension PositionSnapshot {
+    var isOpenForManualCloseDetection: Bool {
+        total > 0 && side != .unknown
+    }
+
     func fillingMissingDetail(from previous: PositionSnapshot) -> PositionSnapshot {
         PositionSnapshot(
             symbol: symbol,
@@ -1413,7 +1790,9 @@ private extension PositionSnapshot {
             unrealizedProfitLoss: unrealizedProfitLoss,
             leverage: leverage == 0 ? previous.leverage : leverage,
             marginMode: marginMode.isEmpty ? previous.marginMode : marginMode,
+            positionMode: positionMode == .unknown ? previous.positionMode : positionMode,
             liquidationPrice: liquidationPrice ?? previous.liquidationPrice,
+            partialTakeProfit: partialTakeProfit ?? previous.partialTakeProfit,
             takeProfit: takeProfit ?? previous.takeProfit,
             stopLoss: stopLoss ?? previous.stopLoss,
             createdAt: createdAt ?? previous.createdAt,

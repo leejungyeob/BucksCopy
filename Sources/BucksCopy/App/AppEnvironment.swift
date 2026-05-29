@@ -26,8 +26,19 @@ struct AppEnvironment {
             let candleStreamService = Self.isRunningTests
                 ? nil
                 : BitgetCandleWebSocketClient()
-            let paperRunner = PaperTradingRunner(
+            let liveOrderClient = BitgetLiveOrderClient(client: restClient)
+            let protectionInstaller = ExchangeProtectionInstaller(
+                orderPlacer: BitgetTPSLOrderClient(client: restClient)
+            )
+            let signalEvaluator = TradingSignalEvaluator(
                 strategyRegistry: strategyRegistry,
+                logStore: logStore
+            )
+            let liveExecutor = LiveTradeExecutor(
+                orderPlacer: liveOrderClient,
+                leverageSetter: liveOrderClient,
+                protectionInstaller: protectionInstaller,
+                positionRepository: positionRepository,
                 logStore: logStore
             )
 
@@ -35,6 +46,7 @@ struct AppEnvironment {
                 credentialStore: credentialStore,
                 accountRepository: accountRepository,
                 positionRepository: positionRepository,
+                positionProtectionRepository: positionRepository,
                 positionStreamService: positionStreamService,
                 symbolCatalogRepository: symbolCatalogRepository,
                 candleRepository: candleRepository,
@@ -42,15 +54,26 @@ struct AppEnvironment {
                 candleBackfillRepository: candleBackfillRepository,
                 candleStreamService: candleStreamService,
                 logStore: logStore,
-                paperRunner: paperRunner,
+                signalEvaluator: signalEvaluator,
+                liveExecutor: liveExecutor,
                 strategyRegistry: strategyRegistry
             )
         } catch {
             let fallbackCredentialStore = InMemoryCredentialStore()
             let fallbackCandleRepository = InMemoryCandleRepository()
             let fallbackLogStore = InMemoryTradeEventLogStore()
-            let paperRunner = PaperTradingRunner(
+            let fallbackLiveOrderClient = UnavailableLiveOrderClient()
+            let protectionInstaller = ExchangeProtectionInstaller(
+                orderPlacer: fallbackLiveOrderClient
+            )
+            let signalEvaluator = TradingSignalEvaluator(
                 strategyRegistry: strategyRegistry,
+                logStore: fallbackLogStore
+            )
+            let liveExecutor = LiveTradeExecutor(
+                orderPlacer: fallbackLiveOrderClient,
+                leverageSetter: fallbackLiveOrderClient,
+                protectionInstaller: protectionInstaller,
                 logStore: fallbackLogStore
             )
             return DashboardViewModel(
@@ -60,7 +83,8 @@ struct AppEnvironment {
                 candleRepository: fallbackCandleRepository,
                 candleBackfillRepository: nil,
                 logStore: fallbackLogStore,
-                paperRunner: paperRunner,
+                signalEvaluator: signalEvaluator,
+                liveExecutor: liveExecutor,
                 strategyRegistry: strategyRegistry
             )
         }

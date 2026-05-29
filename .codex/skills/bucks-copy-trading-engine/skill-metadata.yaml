@@ -1,4 +1,4 @@
 interface:
   display_name: "BucksCopy Trading Engine"
-  short_description: "Guide candle, strategy, paper execution, and live safety"
-  default_prompt: "Use $bucks-copy-trading-engine for candle aggregation, strategy boundary, paper execution, or live-trading safety work."
+  short_description: "Guide candle, strategy, live execution, and live safety"
+  default_prompt: "Use $bucks-copy-trading-engine for candle aggregation, strategy boundary, live execution, or live-trading safety work."

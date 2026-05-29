@@ -3,15 +3,18 @@ import SwiftUI
 struct CandleChartView: View {
     let candles: [Candle]
     let positions: [PositionSnapshot]
+    let partialTakeProfitByPositionID: [String: Decimal]
     let onNeedsOlderCandles: () -> Void
 
     init(
         candles: [Candle],
         positions: [PositionSnapshot] = [],
+        partialTakeProfitByPositionID: [String: Decimal] = [:],
         onNeedsOlderCandles: @escaping () -> Void = {}
     ) {
         self.candles = candles
         self.positions = positions
+        self.partialTakeProfitByPositionID = partialTakeProfitByPositionID
         self.onNeedsOlderCandles = onNeedsOlderCandles
     }
 
@@ -44,6 +47,7 @@ struct CandleChartView: View {
                     size: size,
                     candles: chartCandles,
                     positions: positions,
+                    partialTakeProfitByPositionID: partialTakeProfitByPositionID,
                     viewport: viewport,
                     spacing: spacing
                 )
@@ -178,6 +182,7 @@ struct CandleChartView: View {
         size: CGSize,
         candles chartCandles: [Candle],
         positions: [PositionSnapshot],
+        partialTakeProfitByPositionID: [String: Decimal],
         viewport: ChartViewport,
         spacing: Double
     ) {
@@ -195,9 +200,10 @@ struct CandleChartView: View {
               let priceRange = priceRange(
                 for: visibleCandles,
                 positions: positions,
+                partialTakeProfitByPositionID: partialTakeProfitByPositionID,
                 indicatorSeries: indicatorSeries,
                 chartRect: chartRect
-              ) else {
+            ) else {
             return
         }
 
@@ -221,6 +227,7 @@ struct CandleChartView: View {
             context: context,
             chartRect: chartRect,
             positions: positions,
+            partialTakeProfitByPositionID: partialTakeProfitByPositionID,
             allCandles: chartCandles,
             visibleCandles: visibleCandles,
             rightEdgeIndex: viewport.rightEdgeIndex,
@@ -350,6 +357,7 @@ struct CandleChartView: View {
         context: GraphicsContext,
         chartRect: CGRect,
         positions: [PositionSnapshot],
+        partialTakeProfitByPositionID: [String: Decimal],
         allCandles: [Candle],
         visibleCandles: ArraySlice<Candle>,
         rightEdgeIndex: Double,
@@ -364,7 +372,8 @@ struct CandleChartView: View {
         }
 
         for position in positions {
-            for level in PositionChartLevel.levels(for: position) {
+            let partialTakeProfit = partialTakeProfitByPositionID[position.id]
+            for level in PositionChartLevel.levels(for: position, partialTakeProfit: partialTakeProfit) {
                 let levelY = y(level.price)
                 guard levelY >= chartRect.minY - 12, levelY <= chartRect.maxY + 12 else {
                     continue
@@ -599,6 +608,7 @@ struct CandleChartView: View {
     private func priceRange(
         for candles: ArraySlice<Candle>,
         positions: [PositionSnapshot],
+        partialTakeProfitByPositionID: [String: Decimal],
         indicatorSeries: [ChartIndicatorSeries],
         chartRect: CGRect
     ) -> ClosedRange<Double>? {
@@ -611,7 +621,8 @@ struct CandleChartView: View {
         }
 
         for position in positions {
-            for level in PositionChartLevel.levels(for: position) {
+            let partialTakeProfit = partialTakeProfitByPositionID[position.id]
+            for level in PositionChartLevel.levels(for: position, partialTakeProfit: partialTakeProfit) {
                 minPrice = min(minPrice, level.price)
                 maxPrice = max(maxPrice, level.price)
             }
@@ -983,7 +994,7 @@ private struct PositionChartLevel {
     let color: Color
     let dash: [CGFloat]
 
-    static func levels(for position: PositionSnapshot) -> [PositionChartLevel] {
+    static func levels(for position: PositionSnapshot, partialTakeProfit: Decimal? = nil) -> [PositionChartLevel] {
         var levels = [
             PositionChartLevel(
                 price: position.openPriceAverage.chartDouble,
@@ -993,10 +1004,19 @@ private struct PositionChartLevel {
             )
         ]
 
+        if let partialTakeProfit = partialTakeProfit ?? position.partialTakeProfit {
+            levels.append(PositionChartLevel(
+                price: partialTakeProfit.chartDouble,
+                label: "TP1",
+                color: .green,
+                dash: [2, 4]
+            ))
+        }
+
         if let takeProfit = position.takeProfit {
             levels.append(PositionChartLevel(
                 price: takeProfit.chartDouble,
-                label: "TP",
+                label: "TP2",
                 color: .green,
                 dash: [3, 3]
             ))

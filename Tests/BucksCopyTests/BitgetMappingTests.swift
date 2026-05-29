@@ -40,6 +40,32 @@ final class BitgetMappingTests: XCTestCase {
         XCTAssertFalse(candle.isClosed)
     }
 
+    func testRESTCandlePayloadKeepsCurrentCandleOpenUntilTimeframeCompletes() throws {
+        let openTime = Date(timeIntervalSince1970: 1_695_685_500)
+        let row = BitgetCandleRow(values: [
+            String(Int(openTime.timeIntervalSince1970 * 1000)),
+            "27000",
+            "27000.5",
+            "26990",
+            "27000.25",
+            "0.057"
+        ])
+
+        let inProgress = try XCTUnwrap(row.domain(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            receivedAt: openTime.addingTimeInterval(899)
+        ))
+        let closed = try XCTUnwrap(row.domain(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            receivedAt: openTime.addingTimeInterval(900)
+        ))
+
+        XCTAssertFalse(inProgress.isClosed)
+        XCTAssertTrue(closed.isClosed)
+    }
+
     func testAccountDTOMappingKeepsBalanceFields() throws {
         let json = """
         {
@@ -173,6 +199,172 @@ final class BitgetMappingTests: XCTestCase {
         XCTAssertEqual(stopLossDTO.triggerPrice, "110")
         XCTAssertEqual(stopLossDTO.executePrice, "0")
         XCTAssertEqual(stopLossDTO.productType, ProductType.usdtFutures.rawValue)
+    }
+
+    func testTPSLRequestUsesOneWayHoldSideAndContractPrecision() throws {
+        let signal = StrategySignal(
+            id: UUID(),
+            strategyID: "fixture",
+            symbol: FuturesSymbol("ETHUSDT"),
+            side: .buy,
+            entryPrice: Decimal(string: "100.123")!,
+            stopLoss: Decimal(string: "90.126")!,
+            takeProfit: Decimal(string: "120.128")!,
+            reason: "fixture",
+            generatedAt: Date()
+        )
+        let plan = ExchangeProtectionPlan(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000654")!,
+            signal: signal,
+            size: Decimal(string: "0.1234")!,
+            positionMode: .oneWay,
+            contractSpec: ContractSpec(
+                symbol: FuturesSymbol("ETHUSDT"),
+                baseCoin: "ETH",
+                quoteCoin: "USDT",
+                symbolStatus: "normal",
+                supportMarginCoins: ["USDT"],
+                minTradeNum: Decimal(string: "0.0001")!,
+                minTradeUSDT: 5,
+                sizeMultiplier: Decimal(string: "0.01")!,
+                pricePlace: 2,
+                volumePlace: 2,
+                minLeverage: 1,
+                maxLeverage: 10
+            ),
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+
+        let firstTakeProfitDTO = BitgetTPSLOrderRequestDTO(order: plan.orders[0])
+        let stopLossDTO = BitgetTPSLOrderRequestDTO(order: plan.orders[2])
+
+        XCTAssertEqual(firstTakeProfitDTO.holdSide, "buy")
+        XCTAssertEqual(firstTakeProfitDTO.triggerPrice, "110.13")
+        XCTAssertEqual(firstTakeProfitDTO.executePrice, "110.13")
+        XCTAssertEqual(firstTakeProfitDTO.size, "0.06")
+        XCTAssertEqual(stopLossDTO.holdSide, "buy")
+        XCTAssertEqual(stopLossDTO.triggerPrice, "90.13")
+        XCTAssertEqual(stopLossDTO.executePrice, "0")
+        XCTAssertEqual(stopLossDTO.size, "0.12")
+    }
+
+    func testLiveMarketOrderRequestMapsToBitgetOpenOrderPayload() {
+        let request = LiveOrderRequest(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000111")!,
+            symbol: FuturesSymbol("BTCUSDT"),
+            side: .buy,
+            purpose: .open,
+            size: Decimal(string: "0.25")!,
+            leverage: 10,
+            marginMode: "isolated",
+            clientOid: "client-1"
+        )
+
+        let dto = BitgetPlaceOrderRequestDTO(request: request)
+
+        XCTAssertEqual(dto.symbol, "BTCUSDT")
+        XCTAssertEqual(dto.productType, ProductType.usdtFutures.rawValue)
+        XCTAssertEqual(dto.marginMode, "isolated")
+        XCTAssertEqual(dto.marginCoin, "USDT")
+        XCTAssertEqual(dto.size, "0.25")
+        XCTAssertEqual(dto.side, "buy")
+        XCTAssertEqual(dto.tradeSide, "open")
+        XCTAssertEqual(dto.orderType, "market")
+        XCTAssertEqual(dto.clientOid, "client-1")
+        XCTAssertEqual(dto.reduceOnly, "NO")
+    }
+
+    func testLiveOrderDetailMapsBitgetFillAliasesToFilledReceipt() throws {
+        let json = """
+        {
+          "orderId": "order-1",
+          "clientOid": "client-1",
+          "state": "full-fill",
+          "baseVolume": "0.25",
+          "priceAvg": "100.5"
+        }
+        """.data(using: .utf8)!
+
+        let dto = try JSONDecoder().decode(BitgetOrderDetailDTO.self, from: json)
+        let receipt = dto.receipt(
+            symbol: FuturesSymbol("BTCUSDT"),
+            fallbackClientOid: "fallback-client"
+        )
+
+        XCTAssertEqual(receipt.orderID, "order-1")
+        XCTAssertEqual(receipt.clientOid, "client-1")
+        XCTAssertEqual(receipt.status, .filled)
+        XCTAssertEqual(receipt.filledSize, Decimal(string: "0.25"))
+        XCTAssertEqual(receipt.averagePrice, Decimal(string: "100.5"))
+    }
+
+    func testClosePositionRequestKeepsHedgeHoldSide() {
+        let dto = BitgetClosePositionRequestDTO(
+            symbol: "BTCUSDT",
+            productType: ProductType.usdtFutures.rawValue,
+            holdSide: "long"
+        )
+
+        XCTAssertEqual(dto.symbol, "BTCUSDT")
+        XCTAssertEqual(dto.productType, ProductType.usdtFutures.rawValue)
+        XCTAssertEqual(dto.holdSide, "long")
+    }
+
+    func testSetLeverageRequestUsesUSDTFuturesScope() {
+        let dto = BitgetSetLeverageRequestDTO(
+            symbol: "BTCUSDT",
+            productType: ProductType.usdtFutures.rawValue,
+            marginCoin: "USDT",
+            leverage: "10"
+        )
+
+        XCTAssertEqual(dto.symbol, "BTCUSDT")
+        XCTAssertEqual(dto.productType, ProductType.usdtFutures.rawValue)
+        XCTAssertEqual(dto.marginCoin, "USDT")
+        XCTAssertEqual(dto.leverage, "10")
+    }
+
+    func testPendingPlanOrdersMapManualTPSLProtection() throws {
+        let json = """
+        {
+          "entrustedList": [
+            {
+              "planType": "profit_loss",
+              "symbol": "ethusdt",
+              "size": "0.05",
+              "orderId": "tp1",
+              "triggerPrice": "2050",
+              "executePrice": "2050",
+              "posSide": "long",
+              "orderSource": "profit_limit",
+              "uTime": "1710000001000"
+            },
+            {
+              "planType": "profit_loss",
+              "symbol": "ethusdt",
+              "size": "0.1",
+              "orderId": "sl1",
+              "triggerPrice": "1900",
+              "executePrice": "0",
+              "posSide": "long",
+              "orderSource": "loss_market",
+              "uTime": "1710000002000"
+            }
+          ],
+          "endId": "sl1"
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(BitgetPendingPlanOrdersResponseDTO.self, from: json)
+        let orders = response.entrustedList.compactMap(\.domain)
+
+        XCTAssertEqual(orders.count, 2)
+        XCTAssertEqual(orders[0].symbol, FuturesSymbol("ETHUSDT"))
+        XCTAssertEqual(orders[0].side, .long)
+        XCTAssertEqual(orders[0].kind, .takeProfit)
+        XCTAssertEqual(orders[0].triggerPrice, 2050)
+        XCTAssertEqual(orders[1].kind, .stopLoss)
+        XCTAssertEqual(orders[1].triggerPrice, 1900)
     }
 
     func testCandleRowMappingUsesBitgetArrayOrder() throws {

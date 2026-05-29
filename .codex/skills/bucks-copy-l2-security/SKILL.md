@@ -21,7 +21,7 @@ description: >
 - Signature construction and logging.
 - Keychain lifecycle.
 - WebSocket private channel login.
-- Paper/live execution boundary.
+- Live execution consent, protection, and fail-closed boundary.
 
 ## Output
 

@@ -1,6 +1,6 @@
 import Foundation
 
-struct PaperTradeCandidate: Equatable, Identifiable {
+struct TradeCandidate: Equatable, Identifiable {
     let id: String
     let signal: StrategySignal
     let timeframe: CandleTimeframe
@@ -67,50 +67,84 @@ struct PortfolioOpenPositionAssessment: Equatable {
 
 enum PortfolioSignalDecision: Equatable {
     case noAction
-    case enter(PaperTradeCandidate, reason: String)
-    case replace(existing: PortfolioOpenPositionAssessment, with: PaperTradeCandidate, reason: String)
-    case holdExisting(PortfolioOpenPositionAssessment, bestCandidate: PaperTradeCandidate, reason: String)
+    case enter(TradeCandidate, reason: String)
+    case replace(existing: PortfolioOpenPositionAssessment, with: TradeCandidate, reason: String)
+    case holdExisting(PortfolioOpenPositionAssessment, bestCandidate: TradeCandidate, reason: String)
 }
 
 enum PortfolioSignalSelectionPolicy {
     static func decision(
-        candidates: [PaperTradeCandidate],
+        candidates: [TradeCandidate],
         openPositions: [PositionSnapshot],
         accountEquity: Decimal? = nil
     ) -> PortfolioSignalDecision {
-        guard let bestCandidate = bestCandidate(in: candidates, accountEquity: accountEquity) else {
-            return .noAction
+        let occupiedPositions = openPositions
+            .filter { $0.total > 0 && $0.side != .unknown }
+        let blockedCandidates = candidates.filter {
+            occupiedPosition(
+                for: $0,
+                in: occupiedPositions,
+                accountEquity: accountEquity
+            ) != nil
+        }
+        let availableCandidates = candidates.filter { candidate in
+            blockedCandidates.contains { $0.id == candidate.id } == false
         }
 
-        let openPositionAssessments = openPositions
-            .filter { $0.total > 0 && $0.side != .unknown }
-            .map { assessment(for: $0, accountEquity: accountEquity) }
+        guard let bestCandidate = bestCandidate(in: availableCandidates, accountEquity: accountEquity) else {
+            guard let blockedCandidate = bestCandidate(in: blockedCandidates, accountEquity: accountEquity),
+                  let existing = occupiedPosition(
+                    for: blockedCandidate,
+                    in: occupiedPositions,
+                    accountEquity: accountEquity
+                  ) else {
+                return .noAction
+            }
+            return .holdExisting(
+                existing,
+                bestCandidate: blockedCandidate,
+                reason: "이미 점유된 포지션 슬롯이라 새 신호를 받지 않습니다. 기존 \(positionSummary(existing))가 정리될 때까지 \(summary(for: blockedCandidate, accountEquity: accountEquity)) 신규 진입은 보류합니다."
+            )
+        }
 
-        guard let bestExisting = bestPosition(in: openPositionAssessments) else {
+        if blockedCandidates.isEmpty == false {
+            return .enter(
+                bestCandidate,
+                reason: "이미 점유된 포지션 슬롯의 신호는 보류하고, 비어 있는 방향 슬롯의 최우선 신호를 선택했습니다. \(summary(for: bestCandidate, accountEquity: accountEquity))"
+            )
+        }
+
+        guard occupiedPositions.isEmpty == false else {
             return .enter(
                 bestCandidate,
                 reason: "열려 있는 포지션이 없어 최우선 신호를 신규 진입 대상으로 선택했습니다. \(summary(for: bestCandidate, accountEquity: accountEquity))"
             )
         }
 
-        let candidateScore = score(for: bestCandidate, accountEquity: accountEquity)
-        if candidateScore.isStrictlyBetter(than: bestExisting.score) {
-            return .replace(
-                existing: bestExisting,
-                with: bestCandidate,
-                reason: "새 신호가 진행 중 포지션보다 우위입니다. 기존 \(positionSummary(bestExisting))를 시장가 정리 대상으로 보고, \(summary(for: bestCandidate, accountEquity: accountEquity)) 신규 진입을 선택했습니다."
-            )
-        }
-
-        return .holdExisting(
-            bestExisting,
-            bestCandidate: bestCandidate,
-            reason: "진행 중 포지션이 새 최우선 신호보다 우위이거나 동률입니다. 기존 \(positionSummary(bestExisting))를 유지하고, \(summary(for: bestCandidate, accountEquity: accountEquity)) 신규 진입은 보류합니다."
+        return .enter(
+            bestCandidate,
+            reason: "현재 열린 포지션과 다른 심볼/방향 슬롯의 최우선 신호를 추가 진입 대상으로 선택했습니다. \(summary(for: bestCandidate, accountEquity: accountEquity))"
         )
     }
 
+    private static func occupiedPosition(
+        for candidate: TradeCandidate,
+        in openPositions: [PositionSnapshot],
+        accountEquity: Decimal?
+    ) -> PortfolioOpenPositionAssessment? {
+        let candidateSide = PositionSide(openedBy: candidate.signal.side)
+        guard let position = openPositions.first(where: {
+            $0.symbol == candidate.signal.symbol &&
+                ($0.side == candidateSide || $0.positionMode == .oneWay)
+        }) else {
+            return nil
+        }
+
+        return assessment(for: position, accountEquity: accountEquity)
+    }
+
     static func score(
-        for candidate: PaperTradeCandidate,
+        for candidate: TradeCandidate,
         accountEquity: Decimal? = nil
     ) -> PortfolioSignalScore {
         let rewardRiskRatio = candidate.signal.plannedRewardRiskRatio ?? 0
@@ -202,9 +236,9 @@ enum PortfolioSignalSelectionPolicy {
     }
 
     private static func bestCandidate(
-        in candidates: [PaperTradeCandidate],
+        in candidates: [TradeCandidate],
         accountEquity: Decimal?
-    ) -> PaperTradeCandidate? {
+    ) -> TradeCandidate? {
         candidates.sorted {
             let lhsScore = score(for: $0, accountEquity: accountEquity)
             let rhsScore = score(for: $1, accountEquity: accountEquity)
@@ -246,7 +280,7 @@ enum PortfolioSignalSelectionPolicy {
     }
 
     private static func summary(
-        for candidate: PaperTradeCandidate,
+        for candidate: TradeCandidate,
         accountEquity: Decimal?
     ) -> String {
         let candidateScore = score(for: candidate, accountEquity: accountEquity)

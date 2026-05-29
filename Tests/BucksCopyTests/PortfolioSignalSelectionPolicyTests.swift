@@ -54,7 +54,7 @@ final class PortfolioSignalSelectionPolicyTests: XCTestCase {
         XCTAssertEqual(selected.signal.strategyID, "large-size")
     }
 
-    func testReplacesOpenPositionWhenNewSignalScoresHigher() throws {
+    func testBlocksSameSymbolSameSideSignalUntilPositionCloses() throws {
         let existing = position(
             symbol: FuturesSymbol("BTCUSDT"),
             side: .long,
@@ -75,14 +75,14 @@ final class PortfolioSignalSelectionPolicyTests: XCTestCase {
             accountEquity: 100
         )
 
-        guard case .replace(let assessedPosition, let selected, _) = decision else {
-            return XCTFail("Expected replacement decision")
+        guard case .holdExisting(let assessedPosition, let bestCandidate, _) = decision else {
+            return XCTFail("Expected same-side hold decision")
         }
         XCTAssertEqual(assessedPosition.position.symbol, FuturesSymbol("BTCUSDT"))
-        XCTAssertEqual(selected.signal.strategyID, "stronger")
+        XCTAssertEqual(bestCandidate.signal.strategyID, "stronger")
     }
 
-    func testHoldsExistingPositionWhenItScoresAtLeastAsWellAsNewSignal() throws {
+    func testAllowsOppositeSideHedgeSignalWhilePositionIsOpen() throws {
         let existing = position(
             symbol: FuturesSymbol("BTCUSDT"),
             side: .long,
@@ -90,37 +90,69 @@ final class PortfolioSignalSelectionPolicyTests: XCTestCase {
             takeProfit: 106,
             stopLoss: 98
         )
-        let weakerSignal = try candidate(
-            strategyID: "weaker",
-            stopLoss: 99,
-            takeProfit: 102,
-            positionMarginRatio: Decimal(string: "0.80")!
+        let shortSignal = try candidate(
+            strategyID: "short-hedge",
+            side: .sell,
+            stopLoss: 102,
+            takeProfit: 94,
+            positionMarginRatio: Decimal(string: "0.20")!
         )
 
         let decision = PortfolioSignalSelectionPolicy.decision(
-            candidates: [weakerSignal],
+            candidates: [shortSignal],
+            openPositions: [existing],
+            accountEquity: 100
+        )
+
+        guard case .enter(let selected, _) = decision else {
+            return XCTFail("Expected opposite-side entry decision")
+        }
+        XCTAssertEqual(selected.signal.strategyID, "short-hedge")
+        XCTAssertEqual(selected.signal.side, .sell)
+    }
+
+    func testBlocksOppositeSideSignalWhenPositionIsOneWayMode() throws {
+        let existing = position(
+            symbol: FuturesSymbol("BTCUSDT"),
+            side: .long,
+            markPrice: 100,
+            takeProfit: 106,
+            stopLoss: 98,
+            positionMode: .oneWay
+        )
+        let shortSignal = try candidate(
+            strategyID: "short-one-way-blocked",
+            side: .sell,
+            stopLoss: 102,
+            takeProfit: 94,
+            positionMarginRatio: Decimal(string: "0.20")!
+        )
+
+        let decision = PortfolioSignalSelectionPolicy.decision(
+            candidates: [shortSignal],
             openPositions: [existing],
             accountEquity: 100
         )
 
         guard case .holdExisting(let assessedPosition, let bestCandidate, _) = decision else {
-            return XCTFail("Expected hold decision")
+            return XCTFail("Expected one-way opposite-side hold decision")
         }
-        XCTAssertEqual(assessedPosition.position.symbol, FuturesSymbol("BTCUSDT"))
-        XCTAssertEqual(bestCandidate.signal.strategyID, "weaker")
+        XCTAssertEqual(assessedPosition.position.positionMode, .oneWay)
+        XCTAssertEqual(bestCandidate.signal.strategyID, "short-one-way-blocked")
     }
 }
 
 private func candidate(
     strategyID: String,
+    side: TradeSide = .buy,
     stopLoss: Decimal,
     takeProfit: Decimal,
     positionMarginRatio: Decimal
-) throws -> PaperTradeCandidate {
+) throws -> TradeCandidate {
     let signal = try StrategySignalDraft(
         strategyID: strategyID,
         symbol: FuturesSymbol("BTCUSDT"),
-        side: .buy,
+        side: side,
         entryPrice: 100,
         stopLoss: stopLoss,
         takeProfit: takeProfit,
@@ -137,7 +169,7 @@ private func candidate(
         decidedAt: Date(timeIntervalSince1970: 1)
     )
 
-    return PaperTradeCandidate(
+    return TradeCandidate(
         signal: signal,
         timeframe: .fifteenMinutes,
         candleOpenTime: Date(timeIntervalSince1970: 1),
@@ -151,7 +183,8 @@ private func position(
     side: PositionSide,
     markPrice: Decimal,
     takeProfit: Decimal,
-    stopLoss: Decimal
+    stopLoss: Decimal,
+    positionMode: PositionMode = .hedge
 ) -> PositionSnapshot {
     PositionSnapshot(
         symbol: symbol,
@@ -163,6 +196,7 @@ private func position(
         unrealizedProfitLoss: 0,
         leverage: 10,
         marginMode: "crossed",
+        positionMode: positionMode,
         liquidationPrice: nil,
         takeProfit: takeProfit,
         stopLoss: stopLoss,

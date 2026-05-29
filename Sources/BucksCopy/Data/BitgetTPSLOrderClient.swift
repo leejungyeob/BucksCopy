@@ -43,7 +43,10 @@ struct BitgetTPSLOrderRequestDTO: Encodable, Equatable {
         triggerPrice = DecimalText.string(order.triggerPrice)
         triggerType = "mark_price"
         executePrice = order.executePrice.map(DecimalText.string) ?? "0"
-        holdSide = order.holdSide.bitgetHoldSide
+        holdSide = order.holdSide.bitgetHoldSide(
+            positionMode: order.positionMode,
+            tradeSide: order.tradeSide
+        )
         size = DecimalText.string(order.size)
         rangeRate = ""
         clientOid = order.clientOid
@@ -67,14 +70,19 @@ private extension ExchangeProtectionOrderKind {
 }
 
 private extension PositionSide {
-    var bitgetHoldSide: String {
-        switch self {
-        case .long:
-            return "long"
-        case .short:
-            return "short"
-        case .unknown:
-            return ""
+    func bitgetHoldSide(positionMode: PositionMode, tradeSide: TradeSide) -> String {
+        switch positionMode {
+        case .oneWay:
+            return tradeSide.rawValue
+        case .hedge, .unknown:
+            switch self {
+            case .long:
+                return "long"
+            case .short:
+                return "short"
+            case .unknown:
+                return ""
+            }
         }
     }
 }

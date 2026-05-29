@@ -26,4 +26,4 @@ description: >
 
 - Do not attach specialists to trivial work.
 - Treat Bitget private API, credential, Keychain, order, and live trading as high risk.
-- Use Paper-first as the default assumption.
+- Treat live trading as active only behind the accepted explicit-consent and protection-order policy.
