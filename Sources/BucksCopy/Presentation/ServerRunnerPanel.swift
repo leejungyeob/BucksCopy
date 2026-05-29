@@ -42,7 +42,7 @@ struct ServerRunnerPanel: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Toggle("Paper 판단", isOn: enabledBinding)
+                Toggle("자동 판단", isOn: enabledBinding)
                     .toggleStyle(.switch)
                     .disabled(status == nil || isRefreshing)
 

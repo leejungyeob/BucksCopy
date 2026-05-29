@@ -570,7 +570,6 @@ private struct CompactAutomationStatusPanel: View {
                             Text("서버 자동매매")
                                 .font(.headline)
                             Badge(text: serverBadgeText, color: serverBadgeColor)
-                            Badge(text: status?.mode.uppercased() ?? "PAPER", color: .blue)
                             Badge(text: liveBadgeText, color: liveBadgeColor)
                         }
 
@@ -582,11 +581,11 @@ private struct CompactAutomationStatusPanel: View {
 
                     Spacer()
 
-                    Toggle("Paper", isOn: serverEnabledBinding)
+                    Toggle("자동화", isOn: serverEnabledBinding)
                         .toggleStyle(.switch)
                         .disabled(status == nil || isRefreshing)
                         .labelsHidden()
-                        .help("서버 paper 평가 ON/OFF")
+                        .help("서버 자동매매 판단 ON/OFF")
 
                     compactIconButton("arrow.clockwise", help: "새로고침", action: onRefreshServer)
                         .disabled(isRefreshing)
@@ -610,8 +609,6 @@ private struct CompactAutomationStatusPanel: View {
                     compactMetric("Equity", account?.accountEquity.dashboardText ?? "-")
                     compactMetric("가용", account?.available.dashboardText ?? "-")
                     compactMetric("미실현", account?.unrealizedProfitLoss.dashboardText ?? "-", tint: accountProfitTint)
-                    compactMetric("저장 캔들", status.map { "\($0.savedCandles)" } ?? "-")
-                    compactMetric("신호", status.map { "\($0.signals)" } ?? "-")
                     compactMetric("최근 마감", latestClosedText)
                     compactMetric("주문금액", liveMarginText)
                 }
@@ -636,7 +633,7 @@ private struct CompactAutomationStatusPanel: View {
 
     private var metricColumns: [GridItem] {
         [
-            GridItem(.adaptive(minimum: 104, maximum: 170), spacing: 8, alignment: .leading)
+            GridItem(.adaptive(minimum: 92, maximum: 150), spacing: 6, alignment: .leading)
         ]
     }
 
@@ -735,9 +732,9 @@ private struct CompactAutomationStatusPanel: View {
                 .minimumScaleFactor(0.78)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.58))
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.42))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
