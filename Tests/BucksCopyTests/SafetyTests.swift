@@ -38,7 +38,7 @@ final class SafetyTests: XCTestCase {
         XCTAssertTrue(try logStore.loadRecent(limit: 10).contains { $0.category == .liveOrder })
     }
 
-    func testLiveTradeExecutorCapsEntrySizeToAvailableBalanceBuffer() async throws {
+    func testLiveTradeExecutorCapsEntrySizeToAvailableBalance() async throws {
         let client = TestLiveOrderClient()
         let logStore = InMemoryTradeEventLogStore()
         let executor = LiveTradeExecutor(
@@ -66,7 +66,7 @@ final class SafetyTests: XCTestCase {
             signalEvaluator: evaluator
         )
 
-        XCTAssertEqual(client.marketOrders.first?.size, Decimal(string: "1.9")!)
+        XCTAssertEqual(client.marketOrders.first?.size, Decimal(string: "2")!)
     }
 
     func testLiveTradeExecutorFailClosesWhenProtectionInstallFails() async throws {

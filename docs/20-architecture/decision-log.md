@@ -578,7 +578,7 @@
   - Bitget 주문 가능 금액은 열린 포지션, 예약 주문, 수수료 여유분 때문에 `accountEquity`보다 작은 `available` 기준으로 제한될 수 있습니다.
 - Decision:
   - Dashboard Live monitor는 USDT `accountEquity`와 함께 `available`을 Live executor에 전달합니다.
-  - Live order sizing은 기존 risk-sized planned margin을 유지하되, 주문 직전 사용 증거금을 `available × 95%` 이하로 한 번 더 제한합니다.
+  - Live order sizing은 기존 risk-sized planned margin을 유지하되, 주문 직전 사용 증거금을 configured available balance ratio 이하로 한 번 더 제한합니다. 현재 production ratio는 명시 동의 기준 `1`(100%)입니다.
   - 제한 후 주문 수량이 Bitget 최소 주문 조건보다 작으면 live order size too small로 차단하고 주문을 제출하지 않습니다.
 - Consequences:
   - `10x`와 `5%` 리스크 정책은 계속 적용됩니다. 다만 실제 available balance가 부족하면 주문 크기가 더 작아져 계좌 손실위험도 5%보다 낮아질 수 있습니다.
@@ -792,7 +792,7 @@
   - 서버 live order path는 기존 live gate readiness 뒤에 붙입니다.
   - 추가로 `BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED=true`와 양수 `BUCKS_COPY_LIVE_ORDER_MARGIN_USDT`가 있어야 `orderExecutionEnabled=true`가 됩니다.
   - 기본 배포값은 execution disabled, margin `0`입니다.
-  - live size는 설정 margin과 USDT available 95% buffer 중 작은 값을 기준으로 산정하고, Bitget contract config의 minimum/multiplier에 맞춰 내림 처리합니다.
+  - live size는 설정 margin과 USDT available balance ratio 중 작은 값을 기준으로 산정하고, Bitget contract config의 minimum/multiplier에 맞춰 내림 처리합니다. 현재 production ratio는 명시 동의 기준 `1`(100%)입니다.
   - 진입 체결 후 fresh position snapshot에서 실제 open position이 확인되어야 TP1/TP2/SL 보호주문을 등록합니다.
   - 보호주문 등록 실패는 주문별 최소 5회 재시도하고, 재시도 소진 후에는 fresh position snapshot에서 포지션이 남아 있을 때만 `close-positions`를 호출합니다.
   - 서버 live audit log는 redacted clientOid, size, entry/TP/SL 요약만 저장하고 raw private response와 raw order identifier는 저장하지 않습니다.

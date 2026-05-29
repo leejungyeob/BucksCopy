@@ -136,6 +136,7 @@ struct ServerLiveStatus: Equatable {
 
 struct ServerLiveExecutionConfig: Equatable {
     let marginUSDT: String
+    let availableBalanceRatio: String
     let marginMode: String
     let positionMode: String
 }
@@ -154,5 +155,6 @@ protocol ServerPaperRunnerService {
     func fetchStatus() async throws -> ServerPaperRunnerStatus
     func fetchLogs(limit: Int) async throws -> [TradeEventLog]
     func updateControl(enabled: Bool) async throws -> ServerPaperRunnerControl
+    func updateLiveControl(enabled: Bool, acknowledgedRisk: Bool) async throws -> ServerLiveStatus
     func logoutSession() async throws
 }

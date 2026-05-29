@@ -610,7 +610,7 @@ private struct CompactAutomationStatusPanel: View {
                     compactMetric("가용", account?.available.dashboardText ?? "-")
                     compactMetric("미실현", account?.unrealizedProfitLoss.dashboardText ?? "-", tint: accountProfitTint)
                     compactMetric("최근 마감", latestClosedText)
-                    compactMetric("주문금액", liveMarginText)
+                    compactMetric("주문한도", liveMarginText)
                 }
 
                 if let alertText {
@@ -706,10 +706,14 @@ private struct CompactAutomationStatusPanel: View {
     }
 
     private var liveMarginText: String {
-        guard let margin = status?.live?.executionConfig?.marginUSDT else {
+        guard let config = status?.live?.executionConfig else {
             return "0 USDT"
         }
-        return "\(margin) USDT"
+        let ratio = DecimalText.parse(config.availableBalanceRatio)
+        if ratio > 0 {
+            return "가용 \((ratio * 100).dashboardText)%"
+        }
+        return "\(config.marginUSDT) USDT"
     }
 
     private var alertColor: Color {

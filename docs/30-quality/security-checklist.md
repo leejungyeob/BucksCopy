@@ -69,7 +69,7 @@
 - 자동매매 레버리지가 10x 이하로 제한되는가
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal이 차단되는가
 - 레버리지 반영 손절 위험이 설정된 1회 최대 손실률보다 큰 signal은 차단 대신 포지션 투입비율이 축소되는가
-- live entry size가 risk-sized planned margin과 USDT available balance 95% 버퍼 중 더 작은 쪽으로 제한되는가
+- live entry size가 configured planned margin과 USDT available balance ratio 중 더 작은 쪽으로 제한되는가
 - 수수료 모델이 market/taker와 limit/maker 가정을 명시하고, maker 체결을 보장할 수 없는 주문을 maker로 과대평가하지 않는가
 - 진입 체결 후 TP1/TP2/SL 거래소-side 보호 주문이 모두 등록되기 전까지 protected 상태로 표시하지 않는가
 - Bitget position snapshot의 TP/SL 누락을 live entry log로 보강할 때, 표시와 portfolio scoring에만 사용하고 거래소 보호주문 체결/이동 상태를 과대 확정하지 않는가

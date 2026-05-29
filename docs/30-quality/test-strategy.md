@@ -86,7 +86,7 @@
 - 손익비 2:1 미만, 레버리지 10x 초과, 또는 익절 기대 수익이 진입 taker + 익절 maker 수수료 이하인 signal -> live/backtest 모두 risk-blocked로 처리
 - 최대 보유기간이 설정된 백테스트 거래가 TP2/SL 미도달 상태로 기간 만료 -> candle 종가 시간 종료, taker 수수료, Korean reason 기록
 - 손절폭이 큰 signal -> 차단하지 않고 `손절폭 × 레버리지 × 투입비율 <= 1회 최대 손실률`이 되도록 포지션 투입비율을 축소
-- Live order sizing -> risk-sized planned margin이 USDT available balance 95%보다 크면 available buffer 기준으로 주문 수량 축소
+- Live order sizing -> configured planned margin이 USDT available balance ratio보다 크면 available 기준으로 주문 수량 축소
 - 1회 최대 손실률 설정 -> 기본 5%, UI 최대 15%로 제한
 - Backtest risk-blocked signal -> 차단 사유를 손절 위험, 손익비, 수수료, 레버리지 제한 등으로 집계해 결과 화면에 표시
 - TP 2분할 -> 진입가와 최종 목표가의 중간값에서 50% 익절 -> 남은 50%는 최종 목표가 또는 profit-lock stop 중 먼저 닿는 가격에 청산

@@ -251,9 +251,14 @@ The deployment variables are:
 ```text
 BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED=false
 BUCKS_COPY_LIVE_ORDER_MARGIN_USDT=0
+BUCKS_COPY_LIVE_AVAILABLE_BALANCE_RATIO=1
 BUCKS_COPY_LIVE_MARGIN_MODE=isolated
 BUCKS_COPY_LIVE_POSITION_MODE=hedge
 ```
+
+`BUCKS_COPY_LIVE_AVAILABLE_BALANCE_RATIO=1` means the live executor may size up
+to 100% of current USDT available balance, still capped by
+`BUCKS_COPY_LIVE_ORDER_MARGIN_USDT` and Bitget contract minimum/step rules.
 
 To log out and revoke the current app session token:
 

@@ -226,9 +226,12 @@ final class DashboardViewModelTests: XCTestCase {
         viewModel.deleteCredential()
 
         try await waitUntil { service.logoutCallCount == 1 }
-        XCTAssertNil(try configurationStore.load())
+        let savedConfiguration = try XCTUnwrap(configurationStore.load())
+        XCTAssertEqual(savedConfiguration.endpoint, "https://api.example.com")
+        XCTAssertNil(savedConfiguration.authToken)
         XCTAssertFalse(viewModel.state.isConnected)
         XCTAssertFalse(viewModel.state.serverRunnerHasAuthToken)
+        XCTAssertEqual(viewModel.state.serverRunnerEndpoint, "https://api.example.com")
         XCTAssertNil(viewModel.state.serverRunnerStatus)
     }
 
@@ -1273,6 +1276,7 @@ private final class TestCandleStreamService: CandleStreamService {
 
 private final class StubServerPaperRunnerService: ServerPaperRunnerService {
     var updatedEnabledValues: [Bool] = []
+    var updatedLiveEnabledValues: [Bool] = []
     var logoutCallCount = 0
     var accounts: [AccountSnapshot] = [
         AccountSnapshot(
@@ -1303,7 +1307,9 @@ private final class StubServerPaperRunnerService: ServerPaperRunnerService {
     ]
 
     func loginWithBitgetCredential(_ credential: APIKeyCredential) async throws -> ServerRunnerLoginSession {
-        loginSessions.removeFirst()
+        await MainActor.run {
+            loginSessions.removeFirst()
+        }
     }
 
     func fetchAccounts() async throws -> [AccountSnapshot] {
@@ -1341,7 +1347,9 @@ private final class StubServerPaperRunnerService: ServerPaperRunnerService {
     }
 
     func updateControl(enabled: Bool) async throws -> ServerPaperRunnerControl {
-        updatedEnabledValues.append(enabled)
+        await MainActor.run {
+            updatedEnabledValues.append(enabled)
+        }
         return ServerPaperRunnerControl(
             enabled: enabled,
             mode: "paper",
@@ -1350,8 +1358,28 @@ private final class StubServerPaperRunnerService: ServerPaperRunnerService {
         )
     }
 
+    func updateLiveControl(enabled: Bool, acknowledgedRisk: Bool) async throws -> ServerLiveStatus {
+        await MainActor.run {
+            updatedLiveEnabledValues.append(enabled)
+        }
+        return ServerLiveStatus(
+            ready: enabled,
+            orderExecutionEnabled: enabled,
+            blockers: enabled ? [] : ["live consent is disabled"],
+            orderBlockers: [],
+            executionConfig: ServerLiveExecutionConfig(
+                marginUSDT: "1000000",
+                availableBalanceRatio: "1",
+                marginMode: "isolated",
+                positionMode: "hedge"
+            )
+        )
+    }
+
     func logoutSession() async throws {
-        logoutCallCount += 1
+        await MainActor.run {
+            logoutCallCount += 1
+        }
     }
 }
 

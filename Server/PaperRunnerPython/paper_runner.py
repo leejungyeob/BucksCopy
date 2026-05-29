@@ -805,6 +805,10 @@ class PaperRunner:
             parse_decimal_env(os.environ.get("BUCKS_COPY_LIVE_ORDER_MARGIN_USDT")),
             dec(0),
         )
+        self.live_available_balance_ratio = min(
+            max(parse_decimal_env(os.environ.get("BUCKS_COPY_LIVE_AVAILABLE_BALANCE_RATIO"), dec(1)), dec(0)),
+            dec(1),
+        )
         self.live_margin_mode = os.environ.get("BUCKS_COPY_LIVE_MARGIN_MODE", "isolated").strip().lower() or "isolated"
         self.live_position_mode = os.environ.get("BUCKS_COPY_LIVE_POSITION_MODE", "hedge").strip().lower() or "hedge"
         self.live_confirmation_attempts = clamp_int(
@@ -1227,7 +1231,7 @@ class PaperRunner:
         if self.live_order_margin_usdt <= 0:
             raise LiveExecutionError("live order margin is not configured")
         leverage = min(signal.leverage, int(contract_spec.get("maxLeverage") or signal.leverage))
-        planned_margin = min(self.live_order_margin_usdt, account_available * dec("0.95"))
+        planned_margin = min(self.live_order_margin_usdt, account_available * self.live_available_balance_ratio)
         if planned_margin <= 0:
             raise LiveExecutionError("USDT available balance is not enough for live order")
         notional = planned_margin * dec(leverage)
@@ -1559,6 +1563,7 @@ class PaperRunner:
                     "entry": decimal_text(signal.entry),
                     "size": decimal_text(size),
                     "marginUSDT": decimal_text(self.live_order_margin_usdt),
+                    "availableBalanceRatio": decimal_text(self.live_available_balance_ratio),
                     "leverage": f"{signal.leverage}x",
                     "tp1": decimal_text(signal.partial_take_profit),
                     "tp2": decimal_text(signal.take_profit),
@@ -1707,6 +1712,7 @@ class PaperRunner:
             "control": control,
             "executionConfig": {
                 "marginUSDT": decimal_text(self.live_order_margin_usdt),
+                "availableBalanceRatio": decimal_text(self.live_available_balance_ratio),
                 "marginMode": self.live_margin_mode,
                 "positionMode": self.live_position_mode,
             },

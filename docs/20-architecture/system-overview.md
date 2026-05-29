@@ -169,7 +169,7 @@ References:
 - Automatic strategy leverage is capped at `10x` even if Bitget contract config allows more.
 - Risk policy blocks invalid entry/stop/take layouts, signals below `2:1` reward/risk, leverage above `10x`, and signals whose take-profit cannot cover estimated round-trip trading fees.
 - Risk policy sizes each position so `stop-loss percent × leverage × margin allocation <= configured max loss per trade`. The default max loss per trade is `5%`, and UI configuration is capped at `15%`.
-- Live order sizing starts from the risk-sized margin allocation, then caps required margin to `95%` of current USDT available balance before converting to contract size. This prevents equity-based sizing from exceeding spendable exchange balance when other positions or reservations already use margin.
+- Live order sizing starts from the risk-sized margin allocation, then caps required margin to the configured available-balance ratio before converting to contract size. The production server currently uses `100%` by explicit user consent, preventing equity-based sizing from exceeding spendable exchange balance while still allowing full available-balance allocation.
 - Strategy config can define `maximumHoldingCandles`. If TP2/SL does not resolve before that window expires, the backtest closes the remaining position at the candle close with a conservative taker-fee market exit and records a Korean time-exit reason.
 - Current trading fee estimates distinguish order intent:
   - Entry after a closed-candle signal is assumed to be market execution, so it uses taker fee.

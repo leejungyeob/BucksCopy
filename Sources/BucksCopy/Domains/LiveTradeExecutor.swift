@@ -574,7 +574,7 @@ enum LiveOrderSizing {
     ) throws -> Decimal {
         let plannedMargin = accountEquity * candidate.riskDecision.positionMarginRatio
         let availableMargin = accountAvailable.flatMap { $0 > 0 ? $0 : nil } ?? accountEquity
-        let usableMargin = min(plannedMargin, availableMargin * Decimal(string: "0.95")!)
+        let usableMargin = min(plannedMargin, availableMargin)
         guard usableMargin > 0 else {
             throw TradingDomainError.liveOrderSizeTooSmall(candidate.signal.symbol)
         }

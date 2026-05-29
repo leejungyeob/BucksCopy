@@ -71,6 +71,20 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
         return try decoder.decode(ControlDTO.self, from: data).domain
     }
 
+    func updateLiveControl(enabled: Bool, acknowledgedRisk: Bool) async throws -> ServerLiveStatus {
+        let body = try JSONEncoder().encode(LiveControlUpdateDTO(
+            enabled: enabled,
+            acknowledgedRisk: acknowledgedRisk
+        ))
+        let data = try await request(
+            path: "users/me/live/control",
+            method: "POST",
+            body: body,
+            headers: ["Content-Type": "application/json"]
+        )
+        return try decoder.decode(LiveStatusDTO.self, from: data).domain
+    }
+
     func logoutSession() async throws {
         _ = try await request(path: "users/me/session", method: "DELETE")
     }
@@ -229,6 +243,11 @@ private struct ControlUpdateDTO: Encodable {
     let enabled: Bool
 }
 
+private struct LiveControlUpdateDTO: Encodable {
+    let enabled: Bool
+    let acknowledgedRisk: Bool
+}
+
 private struct ControlDTO: Decodable {
     let enabled: Bool
     let mode: String
@@ -299,12 +318,14 @@ private struct LiveStatusDTO: Decodable {
 
 private struct LiveExecutionConfigDTO: Decodable {
     let marginUSDT: String?
+    let availableBalanceRatio: String?
     let marginMode: String?
     let positionMode: String?
 
     var domain: ServerLiveExecutionConfig {
         ServerLiveExecutionConfig(
             marginUSDT: marginUSDT ?? "0",
+            availableBalanceRatio: availableBalanceRatio ?? "1",
             marginMode: marginMode ?? "-",
             positionMode: positionMode ?? "-"
         )
