@@ -205,6 +205,33 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.state.serverRunnerHasAuthToken)
     }
 
+    func testDeleteCredentialRevokesServerSessionAndClearsLocalState() async throws {
+        let credentialStore = InMemoryCredentialStore()
+        let configurationStore = InMemoryServerRunnerConfigurationStore()
+        let service = StubServerPaperRunnerService()
+        let viewModel = makeViewModel(
+            credentialStore: credentialStore,
+            serverRunnerConfigurationStore: configurationStore,
+            serverPaperRunnerServiceFactory: { _ in service }
+        )
+
+        viewModel.saveServerRunnerConnection(endpoint: "https://api.example.com", authToken: "")
+        viewModel.connectCredential(
+            apiKey: "abcdefgh12345678",
+            secretKey: "secret",
+            passphrase: "passphrase"
+        )
+        try await waitUntil { viewModel.state.isConnected }
+
+        viewModel.deleteCredential()
+
+        try await waitUntil { service.logoutCallCount == 1 }
+        XCTAssertNil(try configurationStore.load())
+        XCTAssertFalse(viewModel.state.isConnected)
+        XCTAssertFalse(viewModel.state.serverRunnerHasAuthToken)
+        XCTAssertNil(viewModel.state.serverRunnerStatus)
+    }
+
     func testBootstrapAutoConnectsSavedCredential() async throws {
         let credentialStore = InMemoryCredentialStore()
         try credentialStore.save(APIKeyCredential(
@@ -1246,6 +1273,7 @@ private final class TestCandleStreamService: CandleStreamService {
 
 private final class StubServerPaperRunnerService: ServerPaperRunnerService {
     var updatedEnabledValues: [Bool] = []
+    var logoutCallCount = 0
     var accounts: [AccountSnapshot] = [
         AccountSnapshot(
             marginCoin: "USDT",
@@ -1320,6 +1348,10 @@ private final class StubServerPaperRunnerService: ServerPaperRunnerService {
             updatedAt: Date(timeIntervalSince1970: 2),
             updatedBy: "test"
         )
+    }
+
+    func logoutSession() async throws {
+        logoutCallCount += 1
     }
 }
 

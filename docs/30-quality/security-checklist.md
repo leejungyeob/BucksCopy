@@ -31,6 +31,7 @@
 - credential 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
 - server runner endpoint/token 저장/삭제가 Keychain-facing Data adapter를 통해서만 이뤄지는가
 - macOS 앱의 서버 로그인 flow가 Bitget secret/passphrase를 Keychain에 저장하지 않고 server session token만 저장하는가
+- 로그아웃/Disconnect가 서버 session token을 revoke하고 process-memory Bitget credential을 제거하는가
 - server runner 재시작 후 in-memory Bitget credential이 사라진 상태에서 account/position read가 409로 실패하고 앱이 재로그인을 요구하는가
 - 로그아웃/credential 삭제 시 관련 local state가 정리되는가
 - Live execution record와 민감 주문/account data가 구분되는가

@@ -2,7 +2,7 @@ import Foundation
 
 enum ServerPaperRunnerClientError: Error, Equatable {
     case invalidURL
-    case httpStatus(Int)
+    case httpStatus(Int, message: String? = nil)
     case emptyResponse
 }
 
@@ -71,6 +71,10 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
         return try decoder.decode(ControlDTO.self, from: data).domain
     }
 
+    func logoutSession() async throws {
+        _ = try await request(path: "users/me/session", method: "DELETE")
+    }
+
     private func request(
         path: String,
         method: String = "GET",
@@ -104,13 +108,29 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
             throw ServerPaperRunnerClientError.emptyResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw ServerPaperRunnerClientError.httpStatus(httpResponse.statusCode)
+            throw ServerPaperRunnerClientError.httpStatus(
+                httpResponse.statusCode,
+                message: Self.errorMessage(from: data, decoder: decoder)
+            )
         }
         guard data.isEmpty == false else {
             throw ServerPaperRunnerClientError.emptyResponse
         }
         return data
     }
+
+    private static func errorMessage(from data: Data, decoder: JSONDecoder) -> String? {
+        guard data.isEmpty == false,
+              let response = try? decoder.decode(ErrorResponseDTO.self, from: data) else {
+            return nil
+        }
+        let message = response.error.trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? nil : String(message.prefix(240))
+    }
+}
+
+private struct ErrorResponseDTO: Decodable {
+    let error: String
 }
 
 private struct LoginRequestDTO: Encodable {

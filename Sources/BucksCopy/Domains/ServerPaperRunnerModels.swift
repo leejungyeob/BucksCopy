@@ -78,4 +78,5 @@ protocol ServerPaperRunnerService {
     func fetchStatus() async throws -> ServerPaperRunnerStatus
     func fetchLogs(limit: Int) async throws -> [TradeEventLog]
     func updateControl(enabled: Bool) async throws -> ServerPaperRunnerControl
+    func logoutSession() async throws
 }

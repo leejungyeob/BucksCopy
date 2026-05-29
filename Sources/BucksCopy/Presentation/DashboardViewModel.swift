@@ -361,6 +361,7 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func deleteCredential() {
+        let serverLogoutService = usesServerBitgetSession ? serverPaperRunnerService : nil
         do {
             try credentialStore.delete()
             try? serverRunnerConfigurationStore.delete()
@@ -382,9 +383,27 @@ final class DashboardViewModel: ObservableObject {
                 category: .credential,
                 message: "Credential deleted."
             ))
+            if let serverLogoutService {
+                Task { [weak self] in
+                    do {
+                        try await serverLogoutService.logoutSession()
+                    } catch {
+                        self?.appendServerLogoutWarning(error)
+                    }
+                }
+            }
         } catch {
             state.credentialStatus = .failed(message: sanitizedError(error))
         }
+    }
+
+    private func appendServerLogoutWarning(_ error: Error) {
+        appendSessionLog(.init(
+            timestamp: clock.now,
+            category: .credential,
+            severity: .warning,
+            message: "Server session revoke failed: \(sanitizedError(error))"
+        ))
     }
 
     func connectSavedCredential() {
@@ -1721,7 +1740,7 @@ final class DashboardViewModel: ObservableObject {
             refreshVisibleLogs()
         } catch {
             if let serverError = error as? ServerPaperRunnerClientError,
-               case .httpStatus(401) = serverError {
+               case .httpStatus(401, _) = serverError {
                 clearServerAuthenticatedSession()
             }
             state.serverRunnerConnectionState = .failed(message: sanitizedError(error))
@@ -1734,7 +1753,7 @@ final class DashboardViewModel: ObservableObject {
             await refreshPositions(logSuccess: false)
         } catch {
             if let serverError = error as? ServerPaperRunnerClientError,
-               case .httpStatus(409) = serverError {
+               case .httpStatus(409, _) = serverError {
                 state.credentialStatus = .failed(message: "Bitget login is required again.")
                 return
             }
@@ -2111,7 +2130,10 @@ final class DashboardViewModel: ObservableObject {
             return "SQLite database error: \(error.description)"
         case ServerPaperRunnerClientError.invalidURL:
             return "Server runner URL is invalid."
-        case ServerPaperRunnerClientError.httpStatus(let status):
+        case ServerPaperRunnerClientError.httpStatus(let status, let message):
+            if let message {
+                return "Server runner request failed with HTTP \(status): \(message)"
+            }
             return "Server runner request failed with HTTP \(status)."
         case ServerPaperRunnerClientError.emptyResponse:
             return "Server runner returned an empty response."

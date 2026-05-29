@@ -649,6 +649,17 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         control = self.runner.save_control(user_id, payload["enabled"], updated_by="api")
         self.write_json(control)
 
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path != "/users/me/session":
+            self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+        user_id = self.authorize_user()
+        if user_id is None:
+            return
+        self.runner.revoke_user_session(user_id)
+        self.write_json({"ok": True, "revoked": True, "updatedAt": iso(now_utc())})
+
     def handle_bitget_login(self) -> None:
         try:
             payload = self.read_json_body()
@@ -834,6 +845,13 @@ class PaperRunner:
             "accounts": accounts,
             "updatedAt": iso(now_utc()),
         }
+
+    def revoke_user_session(self, user_id: str) -> None:
+        with self.lock:
+            self.auth_tokens_by_user_id.pop(user_id, None)
+            self.bitget_credentials_by_user_id.pop(user_id, None)
+            self.auth_required = self.require_auth or bool(self.auth_tokens_by_user_id)
+            self.save_auth_users()
 
     def fetch_user_accounts(self, user_id: str) -> list[dict[str, Any]]:
         return self.fetch_bitget_accounts(self.credential_for_user(user_id))

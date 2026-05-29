@@ -182,6 +182,16 @@ curl https://api.example.com/users/me/positions \
   -H 'Authorization: Bearer <token>'
 ```
 
+To log out and revoke the current app session token:
+
+```bash
+curl -X DELETE https://api.example.com/users/me/session \
+  -H 'Authorization: Bearer <token>'
+```
+
+Logout removes the bearer token and the in-memory Bitget credential for that
+user. User-scoped paper runner files remain on disk.
+
 If the container restarts, `auth-users.json` can still recognize the app session
 token, but the in-memory Bitget credential is gone. In that case private
 account/position reads return `409` and the app asks for Bitget login again.
@@ -209,6 +219,8 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
   position snapshots for the authenticated user.
 - Bitget API key, secret, and passphrase are process-memory only and disappear
   on container restart.
+- `DELETE /users/me/session` revokes the app bearer token and clears the
+  process-memory Bitget credential for that user.
 - No WebSocket private login.
 - No order placement.
 - No Bitget API key/secret/passphrase disk, env, or log storage.

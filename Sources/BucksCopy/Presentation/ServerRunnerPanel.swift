@@ -12,12 +12,13 @@ struct ServerRunnerPanel: View {
     let onSetEnabled: (Bool) -> Void
 
     @State private var endpointDraft = ""
+    @State private var showsAdvancedSettings = false
 
     var body: some View {
         DashboardPanel {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    Text("Server Runner")
+                    Text("Cloud Runner")
                         .font(.headline)
                     Spacer()
                     Badge(text: statusText, color: statusColor)
@@ -30,40 +31,16 @@ struct ServerRunnerPanel: View {
                     .help("서버 상태 새로고침")
                 }
 
-                Text(endpoint)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    TextField("Server URL", text: $endpointDraft)
-                        .textFieldStyle(.roundedBorder)
+                HStack(spacing: 6) {
+                    Image(systemName: endpoint.isEmpty ? "cloud.slash" : "cloud")
+                        .foregroundStyle(.secondary)
+                    Text(endpointHostText)
                         .font(.caption)
-
-                    HStack(spacing: 8) {
-                        Button("Save") {
-                            onSaveConnection(endpointDraft, "")
-                        }
-                        .disabled(endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        Button("Clear") {
-                            endpointDraft = ""
-                            onDeleteConnection()
-                        }
-                        .disabled(endpoint.isEmpty && !hasAuthToken)
-
-                        Spacer()
-
-                        if let redactedAuthToken {
-                            Label(redactedAuthToken, systemImage: "lock.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Toggle("Paper 판단", isOn: enabledBinding)
                     .toggleStyle(.switch)
@@ -79,7 +56,7 @@ struct ServerRunnerPanel: View {
                     Image(systemName: "clock")
                         .foregroundStyle(.secondary)
                     Text(latestClosedText)
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -91,6 +68,47 @@ struct ServerRunnerPanel: View {
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
+                DisclosureGroup("고급", isExpanded: $showsAdvancedSettings) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("Server URL", text: $endpointDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+
+                        HStack(spacing: 8) {
+                            Button {
+                                onSaveConnection(endpointDraft, "")
+                            } label: {
+                                Image(systemName: "tray.and.arrow.down")
+                                    .frame(width: 16, height: 16)
+                            }
+                            .disabled(endpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .help("저장")
+
+                            Button {
+                                endpointDraft = ""
+                                onDeleteConnection()
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                                    .frame(width: 16, height: 16)
+                            }
+                            .disabled(endpoint.isEmpty && !hasAuthToken)
+                            .help("초기화")
+
+                            Spacer()
+
+                            if let redactedAuthToken {
+                                Label(redactedAuthToken, systemImage: "lock.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(.top, 6)
+                }
+                .font(.caption)
             }
         }
         .onAppear {
@@ -146,9 +164,16 @@ struct ServerRunnerPanel: View {
 
     private var latestClosedText: String {
         guard let date = status?.latestClosedCandleOpenTimeDate else {
-            return "latest closed: -"
+            return "최근 마감: -"
         }
-        return "latest closed: \(Self.dateFormatter.string(from: date))"
+        return "최근 마감: \(Self.dateFormatter.string(from: date))"
+    }
+
+    private var endpointHostText: String {
+        guard let host = URL(string: endpoint)?.host, !host.isEmpty else {
+            return "미설정"
+        }
+        return host
     }
 
     private var failureText: String? {

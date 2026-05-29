@@ -704,3 +704,21 @@
   - 앱은 서버 로그인 이후 계정/포지션 표시를 같은 server session 경계로 조회할 수 있습니다.
   - 서버 재시작 후에는 session token이 남아도 private snapshot 조회를 위해 사용자가 다시 Bitget login을 해야 합니다.
   - 실거래 서버 전환 전에는 credential encryption/rotation/revocation, account/position polling policy, order consent, exchange-side TP/SL protection, fail-closed close path를 별도 결정으로 추가해야 합니다.
+
+## 0040. Server Session Logout Revokes Token And Memory Credential
+
+- Status: accepted
+- Date: 2026-05-29
+- Context:
+  - 앱 Disconnect가 로컬 Keychain state만 지우면 서버의 bearer token과 process-memory Bitget credential이 컨테이너 종료 전까지 남을 수 있습니다.
+  - 실거래 서버 전환 전에도 사용자가 명시적으로 접속을 끊으면 서버 session과 private read 권한이 같이 사라져야 합니다.
+  - user-scoped paper runner data는 credential secret이 아니므로 로그아웃 때 삭제하면 운영/감사 흐름이 불필요하게 깨집니다.
+- Decision:
+  - 서버는 authenticated user 전용 `DELETE /users/me/session` endpoint를 제공합니다.
+  - endpoint는 해당 user의 bearer token을 `auth-users.json`에서 제거하고, process-memory Bitget credential을 제거합니다.
+  - user paper state/control/log/candle data는 삭제하지 않습니다.
+  - macOS 앱의 Disconnect는 서버 revoke를 요청하고, 네트워크 실패가 있어도 로컬 Keychain/session state는 정리합니다.
+- Consequences:
+  - 사용자는 앱에서 명시적으로 서버 session을 폐기할 수 있습니다.
+  - revoke 이후 기존 bearer token으로 `/users/me/*` 요청을 보내면 401로 실패해야 합니다.
+  - server-side live execution 전에는 여전히 encrypted credential storage, account/position polling policy, protection order state machine이 별도 필요합니다.

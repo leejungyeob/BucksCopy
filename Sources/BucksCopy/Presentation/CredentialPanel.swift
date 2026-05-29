@@ -25,9 +25,16 @@ struct CredentialPanel: View {
                 SecureField("Passphrase", text: $passphrase)
                     .textFieldStyle(.roundedBorder)
 
-                Text("Connect validates Bitget access through the server.")
+                Text("api.buckscopy.com")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if case .failed(let message) = credentialStatus {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Button {
                     onConnect(apiKey, secretKey, passphrase)
