@@ -615,8 +615,8 @@
   - 기존 macOS 앱은 UI, Keychain credential, local candle storage, Live monitor를 모두 한 프로세스 안에 갖고 있어 Ubuntu 서버에 그대로 올릴 수 없습니다.
   - 실거래 서버 전환은 credential 저장, 주문, 보호주문, fail-closed 책임을 옮기는 고위험 변경이므로 먼저 public market data와 paper signal만 검증해야 합니다.
 - Decision:
-  - repo root에 Swift Package executable `BucksCopyPaperRunner`를 추가합니다.
-  - `BucksCopyPaperRunner`는 기존 Domain 전략 코드를 재사용하고, Bitget public REST `15m` candle만 받아 file-based JSON 저장소에 저장합니다.
+  - 서버 paper runner는 Python 컨테이너로 운영합니다. Swift 런타임/권한 의존을 제거해 Lightsail Ubuntu에서 우선 안정적으로 실행되게 합니다.
+  - runner는 현재 활성 live route인 BTC 15m Phase Vacuum Reclaim, BTC 15m Vacuum Pulse, ETH 15m Vacuum Pulse 조건을 Python으로 이식하고, Bitget public REST `15m` candle만 받아 file-based JSON 저장소에 저장합니다.
   - runner는 closed 15m candle별 `symbol × timeframe × strategy × openTime` key를 저장해 같은 candle의 paper signal 중복 평가를 막습니다.
   - runner는 `paper-runner-status.json`, `paper-runner-evaluations.jsonl`, `trade-event-logs.jsonl`에 상태와 paper signal을 남깁니다.
   - 이 단계는 private Bitget API, credential 저장, live order, protection order를 포함하지 않습니다.

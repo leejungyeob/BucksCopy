@@ -7,3 +7,5 @@ DerivedData/
 *.xcworkspace/
 .tuist-cache/
 .codex/runs/**/*.json
+__pycache__/
+*.py[cod]

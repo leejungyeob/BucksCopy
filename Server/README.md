@@ -13,7 +13,7 @@ Local one-shot check:
 ```bash
 BUCKS_COPY_DATA_DIR=.server-data \
 BUCKS_COPY_RUN_ONCE=true \
-swift run BucksCopyPaperRunner
+python3 Server/PaperRunnerPython/paper_runner.py
 ```
 
 Docker one-shot check:
@@ -34,9 +34,8 @@ docker compose -f Server/docker-compose.paper.yml up -d --build
 docker compose -f Server/docker-compose.paper.yml logs -f
 ```
 
-On a normal Lightsail Ubuntu instance, `ubuntu` is UID/GID `1000`, and the
-paper runner container also runs as UID/GID `1000`. If the mounted data/log
-folders were created by an earlier root or container user, reset ownership:
+If the mounted data/log folders were created by an earlier container attempt
+with restrictive permissions, reset ownership once:
 
 ```bash
 sudo chown -R ubuntu:ubuntu ~/bucks-copy-server/data ~/bucks-copy-server/logs
