@@ -29,15 +29,7 @@ struct DashboardView: View {
                     )
 
                     HSplitView {
-                        VStack(spacing: 10) {
-                            StrategySelectionPanel(
-                                strategies: viewModel.state.serverRunnerStatus?.strategies?.available ?? [],
-                                enabledStrategyIDs: viewModel.state.serverRunnerStatus?.strategies?.enabledStrategyIDs ?? [],
-                                isRefreshing: isServerRefreshing,
-                                onToggle: viewModel.setServerStrategyEnabled
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: 245, alignment: .topLeading)
-
+                        VSplitView {
                             PositionPanel(
                                 positions: displayPositions,
                                 partialTakeProfitByPositionID: positionPartialTakeProfitByPositionID,
@@ -46,9 +38,31 @@ struct DashboardView: View {
                                     Task { await viewModel.refreshPositions() }
                                 }
                             )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .frame(minHeight: 120, idealHeight: 170, maxHeight: .infinity, alignment: .topLeading)
+
+                            DashboardChartPanel(
+                                symbol: viewModel.state.selectedSymbol,
+                                timeframe: viewModel.state.selectedTimeframe,
+                                watchlist: viewModel.state.watchlist,
+                                candles: viewModel.state.candles,
+                                candleStatus: viewModel.state.candleStatus,
+                                positions: chartPositions,
+                                partialTakeProfitByPositionID: positionPartialTakeProfitByPositionID,
+                                onSelectSymbol: viewModel.selectSymbol,
+                                onSelectTimeframe: viewModel.selectTimeframe,
+                                onNeedsOlderCandles: viewModel.loadMoreLocalCandles
+                            )
+                            .frame(minHeight: 180, idealHeight: 320, maxHeight: .infinity, alignment: .topLeading)
+
+                            StrategySelectionPanel(
+                                strategies: viewModel.state.serverRunnerStatus?.strategies?.available ?? [],
+                                enabledStrategyIDs: viewModel.state.serverRunnerStatus?.strategies?.enabledStrategyIDs ?? [],
+                                isRefreshing: isServerRefreshing,
+                                onToggle: viewModel.setServerStrategyEnabled
+                            )
+                            .frame(minHeight: 150, idealHeight: 230, maxHeight: .infinity, alignment: .topLeading)
                         }
-                        .frame(minWidth: 500, idealWidth: 660, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .frame(minWidth: 520, idealWidth: 720, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                         TradeLogPanel(
                             logs: dashboardTradeLogs,
@@ -57,7 +71,7 @@ struct DashboardView: View {
                             language: viewModel.state.logLanguage,
                             onLanguageChange: viewModel.updateLogLanguage
                         )
-                        .frame(minWidth: 340, idealWidth: 390, maxWidth: 460, maxHeight: .infinity)
+                        .frame(minWidth: 340, idealWidth: 460, maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -106,6 +120,10 @@ struct DashboardView: View {
             }
             return (position.id, partialTakeProfit)
         })
+    }
+
+    private var chartPositions: [PositionSnapshot] {
+        displayPositions.filter { $0.symbol == viewModel.state.selectedSymbol }
     }
 
     private var positionStrategyContextByPositionID: [String: PositionStrategyContext] {
@@ -355,6 +373,86 @@ private extension Array where Element == Decimal {
     func sortedByDistance(from base: Decimal) -> [Decimal] {
         sorted {
             absoluteDecimal($0 - base) < absoluteDecimal($1 - base)
+        }
+    }
+}
+
+private struct DashboardChartPanel: View {
+    let symbol: FuturesSymbol
+    let timeframe: CandleTimeframe
+    let watchlist: [FuturesSymbol]
+    let candles: [Candle]
+    let candleStatus: CandleLoadStatus
+    let positions: [PositionSnapshot]
+    let partialTakeProfitByPositionID: [String: Decimal]
+    let onSelectSymbol: (FuturesSymbol) -> Void
+    let onSelectTimeframe: (CandleTimeframe) -> Void
+    let onNeedsOlderCandles: () -> Void
+
+    var body: some View {
+        DashboardPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("차트")
+                        .font(.headline)
+                    Badge(text: "\(candles.count)", color: candles.isEmpty ? .secondary : .blue)
+                    Text(statusText)
+                        .font(.caption2)
+                        .foregroundStyle(statusColor)
+                        .lineLimit(1)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { symbol },
+                        set: onSelectSymbol
+                    )) {
+                        ForEach(watchlist) { symbol in
+                            Text(symbol.rawValue).tag(symbol)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 122)
+
+                    TimeframePicker(selection: timeframe, onSelect: onSelectTimeframe)
+                        .controlSize(.small)
+                }
+
+                CandleChartView(
+                    candles: candles,
+                    positions: positions,
+                    partialTakeProfitByPositionID: partialTakeProfitByPositionID,
+                    onNeedsOlderCandles: onNeedsOlderCandles
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var statusText: String {
+        switch candleStatus {
+        case .idle:
+            return "-"
+        case .loading:
+            return "로딩"
+        case .loaded(_, let source):
+            return source
+        case .failed:
+            return "실패"
+        }
+    }
+
+    private var statusColor: Color {
+        switch candleStatus {
+        case .failed:
+            return .red
+        case .loading:
+            return .orange
+        case .idle:
+            return .secondary
+        case .loaded:
+            return .secondary
         }
     }
 }

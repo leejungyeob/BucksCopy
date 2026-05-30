@@ -5,7 +5,7 @@ struct TimeframePicker: View {
     let onSelect: (CandleTimeframe) -> Void
 
     var body: some View {
-        Picker("Timeframe", selection: Binding(
+        Picker("", selection: Binding(
             get: { selection },
             set: onSelect
         )) {
@@ -15,6 +15,8 @@ struct TimeframePicker: View {
             }
         }
         .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("Timeframe")
         .frame(width: 120)
     }
 }

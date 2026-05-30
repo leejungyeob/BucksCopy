@@ -101,7 +101,7 @@ struct CandleChartView: View {
                 clampViewport(candleCount: newCount, chartRect: chartRect)
             }
         }
-        .frame(minHeight: 360)
+        .frame(minHeight: 160)
     }
 
     private var effectiveCandleSpacing: Double {
