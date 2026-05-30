@@ -1326,17 +1326,17 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
   <style>
     :root {
       color-scheme: dark;
-      --bg: #10100f;
-      --panel: #181817;
-      --panel-2: #20201e;
-      --line: #343430;
-      --text: #f4f1eb;
-      --muted: #aaa49a;
-      --green: #3fb16b;
-      --green-strong: #237a48;
-      --amber: #d7a642;
-      --red: #e05f5f;
-      --blue: #65a6d9;
+      --bg: #2f2f2f;
+      --panel: #1c1c1c;
+      --panel-2: #292929;
+      --line: #3a3a3a;
+      --text: #eeeeee;
+      --muted: #a6a6a6;
+      --green: #32d74b;
+      --green-strong: #1f6f3d;
+      --amber: #ff9f0a;
+      --red: #ff453a;
+      --blue: #8e8e93;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     * { box-sizing: border-box; }
@@ -1354,12 +1354,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 0 12px;
-      background: #242421;
+      background: #383838;
       color: var(--text);
       cursor: pointer;
       white-space: nowrap;
     }
-    button:hover { border-color: #55554f; background: #2c2c29; }
+    button:hover { border-color: #555; background: #434343; }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     button.primary { background: var(--green-strong); border-color: var(--green-strong); }
     button.danger { border-color: #6f3232; color: #ffd5d5; }
@@ -1368,7 +1368,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       min-height: 36px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #121211;
+      background: #252525;
       color: var(--text);
       padding: 0 10px;
     }
@@ -1437,7 +1437,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       border-radius: 8px;
       padding: 9px 11px;
       color: var(--muted);
-      background: #171715;
+      background: #202020;
     }
     .notice.show { display: block; }
     .notice.error { border-color: #6f3232; color: #ffd5d5; }
@@ -1561,7 +1561,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     .kv div {
       min-width: 0;
-      border-top: 1px solid #2b2b28;
+      border-top: 1px solid #3a3a3a;
       padding-top: 6px;
     }
     .kv span {
@@ -1596,7 +1596,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       color: var(--muted);
       font-size: 11px;
       font-weight: 700;
-      background: #151514;
+      background: #222;
       position: sticky;
       top: 0;
       z-index: 1;
@@ -1616,7 +1616,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 9px;
-      background: #151514;
+      background: #222;
       color: var(--text);
       font-size: 13px;
     }
@@ -1633,7 +1633,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       min-height: 20px;
       border-radius: 999px;
       padding: 0 7px;
-      background: #252521;
+      background: #303030;
       color: var(--muted);
       font-size: 11px;
     }
@@ -1646,12 +1646,28 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       font-size: 12px;
       line-height: 1.35;
     }
+    .automation-summary {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #222;
+      padding: 10px;
+      margin-bottom: 10px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .automation-summary strong {
+      display: block;
+      color: var(--text);
+      font-size: 18px;
+      line-height: 1.2;
+      margin-bottom: 3px;
+    }
     .empty {
       color: var(--muted);
       padding: 10px;
       border: 1px dashed var(--line);
       border-radius: 8px;
-      background: #151514;
+      background: #222;
     }
     [hidden] { display: none !important; }
     @media (max-width: 900px) {
@@ -1670,13 +1686,14 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     <header class="topbar">
       <div>
         <p class="eyebrow">BucksCopy Web</p>
-        <h1>Server Runner</h1>
+        <h1>서버 자동매매</h1>
       </div>
       <div class="top-actions">
+        <span class="pill ok"><span class="dot"></span>접속키 통과됨</span>
         <button type="button" data-action="refresh">새로고침</button>
         <button type="button" data-action="bitget-logout" class="danger">Bitget 로그아웃</button>
         <form id="lock-form" method="post" action="/web/access/logout">
-          <button type="submit">접속 잠금</button>
+          <button type="submit">웹 잠금</button>
         </form>
       </div>
     </header>
@@ -1685,7 +1702,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
     <section id="login-panel" class="panel login-card">
       <div class="panel-head">
-        <h2 class="panel-title">Bitget 연결</h2>
+        <h2 class="panel-title">Bitget Login</h2>
         <span class="pill bad"><span class="dot"></span>세션 없음</span>
       </div>
       <div class="panel-body">
@@ -1722,27 +1739,14 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
               <div class="status-line" id="runner-status"></div>
             </div>
             <div class="panel-body">
-              <div class="button-row">
-                <button type="button" data-action="runner-start" class="primary">시작</button>
-                <button type="button" data-action="runner-stop">중단</button>
-              </div>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <h2 class="panel-title">실거래 게이트</h2>
-              <div class="status-line" id="live-status"></div>
-            </div>
-            <div class="panel-body">
+              <div id="automation-summary" class="automation-summary"></div>
               <div id="live-config" class="kv"></div>
               <label class="risk-row">
                 <input id="risk-ack" type="checkbox">
-                <span>실거래 주문 위험과 서버 게이트 조건을 확인했습니다.</span>
+                <span>이 버튼을 누르면 다음 전략 신호부터 실제 Bitget 주문이 나갈 수 있음을 확인합니다.</span>
               </label>
               <div class="button-row">
-                <button type="button" data-action="live-start" class="primary">Start Live</button>
-                <button type="button" data-action="live-stop">Stop Live</button>
+                <button type="button" data-action="automation-toggle" id="automation-toggle" class="primary">실전 자동매매 시작</button>
               </div>
               <div id="live-blockers" class="tagline"></div>
             </div>
@@ -1762,7 +1766,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         <div class="stack">
           <section class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">계정 요약</h2>
+              <h2 class="panel-title">계정</h2>
               <span class="mini muted" id="account-updated"></span>
             </div>
             <div class="panel-body" id="account-summary"></div>
@@ -1770,7 +1774,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
           <section class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">현재 포지션</h2>
+              <h2 class="panel-title">포지션</h2>
               <span class="mini muted" id="position-count"></span>
             </div>
             <div class="panel-body" id="positions"></div>
@@ -1849,7 +1853,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         dashboard: document.getElementById("dashboard"),
         metrics: document.getElementById("metrics"),
         runnerStatus: document.getElementById("runner-status"),
-        liveStatus: document.getElementById("live-status"),
+        automationSummary: document.getElementById("automation-summary"),
+        automationToggle: document.getElementById("automation-toggle"),
         liveConfig: document.getElementById("live-config"),
         liveBlockers: document.getElementById("live-blockers"),
         strategyList: document.getElementById("strategy-list"),
@@ -1952,6 +1957,44 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       const setNotice = (message, tone = "") => {
         els.notice.textContent = message || "";
         els.notice.className = `notice${message ? " show" : ""}${tone ? ` ${tone}` : ""}`;
+      };
+
+      const automationMode = () => {
+        const control = state.control || state.status?.control || {};
+        const live = state.live || state.status?.live || {};
+        const judging = Boolean(control.enabled);
+        const liveConsent = Boolean(live.control?.enabled);
+        const orderReady = Boolean(live.orderExecutionEnabled);
+        if (judging && liveConsent && orderReady) {
+          return {
+            id: "live",
+            tone: "ok",
+            title: "실전 자동매매 실행 중",
+            note: "서버가 15분봉 마감마다 판단하고, 신호가 나오면 실제 주문까지 실행합니다."
+          };
+        }
+        if (judging && liveConsent && !orderReady) {
+          return {
+            id: "blocked",
+            tone: "warn",
+            title: "자동매매 준비 확인 필요",
+            note: "자동매매는 켜져 있지만 실제 주문 조건 중 확인할 항목이 남아 있습니다."
+          };
+        }
+        if (judging) {
+          return {
+            id: "paper",
+            tone: "warn",
+            title: "판단만 실행 중",
+            note: "서버가 전략은 보고 있지만 실제 주문은 나가지 않습니다."
+          };
+        }
+        return {
+          id: "off",
+          tone: "bad",
+          title: "자동매매 중단",
+          note: "서버가 새 신호를 주문으로 실행하지 않습니다."
+        };
       };
 
       const api = async (path, options = {}) => {
@@ -2057,8 +2100,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       };
 
       const renderMetrics = () => {
-        const control = state.control || state.status?.control || {};
-        const live = state.live || state.status?.live || {};
+        const mode = automationMode();
         const strategies = state.strategies || state.status?.strategies || {};
         const accountItems = state.account?.items || [];
         const positions = (state.positions?.items || []).filter((position) => (
@@ -2069,14 +2111,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         const availableCount = Array.isArray(strategies.available) ? strategies.available.length : 0;
         els.metrics.innerHTML = `
           <article class="metric">
-            <span>자동매매</span>
-            <strong>${control.enabled ? "실행 중" : "중단"}</strong>
-            <small>${escapeHTML(timeText(control.updatedAt))}</small>
-          </article>
-          <article class="metric">
-            <span>실거래 게이트</span>
-            <strong>${live.control?.enabled ? "동의 켜짐" : "동의 꺼짐"}</strong>
-            <small>${live.ready ? "Ready" : `${(live.blockers || []).length} blockers`}</small>
+            <span>실전 자동매매</span>
+            <strong>${escapeHTML(mode.title)}</strong>
+            <small>${escapeHTML(mode.note)}</small>
           </article>
           <article class="metric">
             <span>계정 Equity</span>
@@ -2088,36 +2125,49 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             <strong>${enabledCount}/${availableCount} · ${positions.length}</strong>
             <small>${escapeHTML(timeText(state.lastUpdated))}</small>
           </article>
+          <article class="metric">
+            <span>최근 마감</span>
+            <strong>${escapeHTML(timeText(state.status?.latestClosedCandleOpenTimeISO || state.status?.latestClosedCandleOpenTime))}</strong>
+            <small>15분봉 기준</small>
+          </article>
         `;
       };
 
-      const renderControl = () => {
+      const renderAutomation = () => {
         const control = state.control || state.status?.control || {};
-        els.runnerStatus.innerHTML = [
-          pill(control.enabled ? "ON" : "OFF", control.enabled ? "ok" : "warn"),
-          pill(timeText(control.updatedAt), "info")
-        ].join("");
-      };
-
-      const renderLive = () => {
         const live = state.live || state.status?.live || {};
-        const control = live.control || {};
         const config = live.executionConfig || {};
         const blockers = [...(live.blockers || []), ...(live.orderBlockers || [])];
-        els.liveStatus.innerHTML = [
-          pill(control.enabled ? "동의 ON" : "동의 OFF", control.enabled ? "ok" : "warn"),
-          pill(live.ready ? "Ready" : "Blocked", live.ready ? "ok" : "bad"),
-          pill(live.orderExecutionEnabled ? "Order ON" : "Order OFF", live.orderExecutionEnabled ? "ok" : "warn")
+        const mode = automationMode();
+        els.runnerStatus.innerHTML = [
+          pill(mode.title, mode.tone),
+          pill(timeText(control.updatedAt), "info")
         ].join("");
+        els.automationSummary.innerHTML = `
+          <strong>${escapeHTML(mode.title)}</strong>
+          <span>${escapeHTML(mode.note)}</span>
+        `;
         els.liveConfig.innerHTML = `
-          <div><span>Margin</span><strong>${escapeHTML(numberText(config.marginUSDT))} USDT</strong></div>
-          <div><span>Balance ratio</span><strong>${escapeHTML(numberText(config.availableBalanceRatio, 4))}</strong></div>
+          <div><span>주문금액</span><strong>${escapeHTML(numberText(config.marginUSDT))} USDT</strong></div>
+          <div><span>사용 비율</span><strong>${escapeHTML(numberText(config.availableBalanceRatio, 4))}</strong></div>
           <div><span>Margin mode</span><strong>${escapeHTML(config.marginMode || "-")}</strong></div>
           <div><span>Position mode</span><strong>${escapeHTML(config.positionMode || "-")}</strong></div>
         `;
         els.liveBlockers.innerHTML = blockers.length
           ? blockers.map((item) => `<span class="tag">${escapeHTML(item)}</span>`).join("")
-          : `<span class="tag">No blockers</span>`;
+          : `<span class="tag">실행 조건 충족</span>`;
+        if (live.control?.acknowledgedRisk) {
+          els.riskAck.checked = true;
+        }
+        const shouldStop = mode.id === "live" || mode.id === "blocked";
+        els.automationToggle.textContent = shouldStop ? "자동매매 중단" : "실전 자동매매 시작";
+        els.automationToggle.className = shouldStop ? "danger" : "primary";
+        els.automationToggle.dataset.intent = shouldStop ? "stop" : "start";
+        els.automationToggle.disabled = state.busy;
+        els.riskAck.disabled = state.busy || shouldStop;
+        if (shouldStop) {
+          els.riskAck.checked = true;
+        }
       };
 
       const renderStrategies = () => {
@@ -2284,8 +2334,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           return;
         }
         renderMetrics();
-        renderControl();
-        renderLive();
+        renderAutomation();
         renderStrategies();
         renderAccount();
         renderPositions();
@@ -2307,26 +2356,32 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         await refreshAll();
       };
 
-      const setRunnerEnabled = async (enabled) => {
+      const startAutomation = async () => {
+        if (!els.riskAck.checked) {
+          setNotice("실전 자동매매 시작 전에 실제 주문 동의가 필요합니다.", "error");
+          return;
+        }
         await api("/users/me/control", {
           method: "POST",
-          body: { enabled }
+          body: { enabled: true }
+        });
+        await api("/users/me/live/control", {
+          method: "POST",
+          body: { enabled: true, acknowledgedRisk: true }
         });
         await refreshAll();
       };
 
-      const setLiveEnabled = async (enabled) => {
-        if (enabled && !els.riskAck.checked) {
-          setNotice("Start Live 전에 실거래 위험 확인이 필요합니다.", "error");
-          return;
-        }
+      const stopAutomation = async () => {
         await api("/users/me/live/control", {
           method: "POST",
-          body: { enabled, acknowledgedRisk: enabled ? true : false }
+          body: { enabled: false, acknowledgedRisk: false }
         });
-        if (!enabled) {
-          els.riskAck.checked = false;
-        }
+        await api("/users/me/control", {
+          method: "POST",
+          body: { enabled: false }
+        });
+        els.riskAck.checked = false;
         await refreshAll();
       };
 
@@ -2393,14 +2448,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             await refreshAll();
           } else if (action === "bitget-logout") {
             await logoutBitget();
-          } else if (action === "runner-start") {
-            await setRunnerEnabled(true);
-          } else if (action === "runner-stop") {
-            await setRunnerEnabled(false);
-          } else if (action === "live-start") {
-            await setLiveEnabled(true);
-          } else if (action === "live-stop") {
-            await setLiveEnabled(false);
+          } else if (action === "automation-toggle") {
+            if (button.dataset.intent === "stop") {
+              await stopAutomation();
+            } else {
+              await startAutomation();
+            }
           } else if (action === "strategies-save") {
             await saveStrategies();
           }
