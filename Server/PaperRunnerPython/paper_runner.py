@@ -4245,18 +4245,45 @@ class PaperRunner:
             self.atomic_write_json(self.user_dir(user_id) / "paper-runner-control.json", control, pretty=True)
             return control
 
+    @staticmethod
+    def is_paper_trade_event(record: dict[str, Any]) -> bool:
+        metadata = record.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        details = metadata.get("details")
+        if not isinstance(details, dict):
+            details = {}
+        raw_tags = metadata.get("tags")
+        tags = [str(tag).upper() for tag in raw_tags] if isinstance(raw_tags, list) else []
+        title = str(metadata.get("title") or "").lower()
+        message = str(record.get("message") or "").lower()
+        mode = str(details.get("mode") or "").lower()
+        return (
+            "PAPER" in tags
+            or "paper" in mode
+            or "paper runner" in title
+            or "paper signal" in title
+            or "paper runner" in message
+            or "paper signal" in message
+        )
+
     def load_recent_logs(self, user_id: str, limit: int) -> list[dict[str, Any]]:
         path = self.user_dir(user_id) / "trade-event-logs.jsonl"
         if not path.exists():
             return []
         lines = path.read_text(encoding="utf-8").splitlines()
         records: list[dict[str, Any]] = []
-        for line in lines[-limit:]:
+        for line in reversed(lines):
             try:
-                records.append(json.loads(line))
+                record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-        return records
+            if self.is_paper_trade_event(record):
+                continue
+            records.append(record)
+            if len(records) >= limit:
+                break
+        return list(reversed(records))
 
     def append_jsonl(self, path: Path, record: dict[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as handle:
