@@ -1404,7 +1404,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
-    .top-actions, .button-row {
+    .top-actions, .button-row, .command-actions {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -1458,22 +1458,77 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       gap: 8px;
       margin-top: 10px;
     }
+    .command-panel { margin-bottom: 12px; }
+    .command-body {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+    .command-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .command-state {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .state-icon {
+      display: grid;
+      place-items: center;
+      flex: 0 0 34px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(142, 142, 147, 0.14);
+      color: var(--muted);
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .state-icon.ok {
+      background: rgba(50, 215, 75, 0.14);
+      color: var(--green);
+    }
+    .state-icon.warn {
+      background: rgba(255, 159, 10, 0.14);
+      color: var(--amber);
+    }
+    .state-icon.bad {
+      background: rgba(255, 69, 58, 0.14);
+      color: var(--red);
+    }
+    .state-title {
+      margin: 0 0 6px;
+      font-size: 18px;
+      line-height: 1.15;
+      font-weight: 800;
+    }
+    .command-actions {
+      justify-content: flex-end;
+      flex: 0 0 auto;
+    }
+    .command-footer {
+      display: grid;
+      gap: 7px;
+    }
     .dashboard {
       display: grid;
-      grid-template-columns: 1.05fr 0.95fr;
+      grid-template-columns: 0.95fr 1.05fr;
       gap: 12px;
       align-items: start;
     }
     .full { grid-column: 1 / -1; }
     .metrics {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 8px;
-      margin-bottom: 12px;
     }
     .metric {
-      min-height: 72px;
-      padding: 10px;
+      min-height: 58px;
+      padding: 8px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel-2);
@@ -1487,7 +1542,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .metric strong {
       display: block;
       overflow-wrap: anywhere;
-      font-size: 18px;
+      font-size: 15px;
       line-height: 1.1;
     }
     .metric small {
@@ -1538,7 +1593,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 9px;
-      background: #151514;
+      background: #222;
     }
     .row-title {
       display: flex;
@@ -1650,18 +1705,18 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #222;
-      padding: 10px;
-      margin-bottom: 10px;
+      padding: 8px 10px;
       color: var(--muted);
       line-height: 1.45;
     }
     .automation-summary strong {
-      display: block;
+      display: inline;
       color: var(--text);
-      font-size: 18px;
+      font-size: 13px;
       line-height: 1.2;
-      margin-bottom: 3px;
+      margin-right: 6px;
     }
+    .automation-summary span { font-size: 12px; }
     .empty {
       color: var(--muted);
       padding: 10px;
@@ -1673,10 +1728,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     @media (max-width: 900px) {
       .dashboard, .metrics { grid-template-columns: 1fr; }
       .login-grid { grid-template-columns: 1fr; }
-      .topbar { align-items: flex-start; flex-direction: column; }
+      .topbar, .command-row { align-items: flex-start; flex-direction: column; }
       .top-actions { width: 100%; }
       .top-actions button, .top-actions form { flex: 1; }
       .top-actions form button { width: 100%; }
+      .command-actions { width: 100%; }
+      .command-actions button { flex: 1; }
       table { min-width: 460px; }
     }
   </style>
@@ -1690,8 +1747,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       </div>
       <div class="top-actions">
         <span class="pill ok"><span class="dot"></span>접속키 통과됨</span>
-        <button type="button" data-action="refresh">새로고침</button>
-        <button type="button" data-action="bitget-logout" class="danger">Bitget 로그아웃</button>
         <form id="lock-form" method="post" action="/web/access/logout">
           <button type="submit">웹 잠금</button>
         </form>
@@ -1729,32 +1784,48 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     </section>
 
     <section id="dashboard" hidden>
-      <div class="metrics" id="metrics"></div>
+      <section class="panel command-panel">
+        <div class="command-body">
+          <div class="command-row">
+            <div class="command-state">
+              <div id="automation-icon" class="state-icon">II</div>
+              <div>
+                <h2 class="state-title" id="automation-title">자동매매 정지</h2>
+                <div class="status-line" id="runner-status"></div>
+              </div>
+            </div>
+            <div class="command-actions">
+              <button type="button" data-action="refresh">새로고침</button>
+              <button type="button" data-action="bitget-logout">로그아웃</button>
+              <button type="button" data-action="automation-toggle" id="automation-toggle" class="primary">자동매매 시작</button>
+            </div>
+          </div>
+          <div class="metrics" id="metrics"></div>
+          <div class="command-footer">
+            <div id="automation-summary" class="automation-summary"></div>
+            <div id="live-config" class="kv"></div>
+            <label class="risk-row">
+              <input id="risk-ack" type="checkbox">
+              <span>시작하면 다음 전략 신호부터 실제 Bitget 주문이 나갈 수 있음을 확인합니다.</span>
+            </label>
+            <div id="live-blockers" class="tagline"></div>
+          </div>
+        </div>
+      </section>
 
       <div class="dashboard">
         <div class="stack">
           <section class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">자동매매</h2>
-              <div class="status-line" id="runner-status"></div>
+              <h2 class="panel-title">포지션</h2>
+              <span class="mini muted" id="position-count"></span>
             </div>
-            <div class="panel-body">
-              <div id="automation-summary" class="automation-summary"></div>
-              <div id="live-config" class="kv"></div>
-              <label class="risk-row">
-                <input id="risk-ack" type="checkbox">
-                <span>이 버튼을 누르면 다음 전략 신호부터 실제 Bitget 주문이 나갈 수 있음을 확인합니다.</span>
-              </label>
-              <div class="button-row">
-                <button type="button" data-action="automation-toggle" id="automation-toggle" class="primary">실전 자동매매 시작</button>
-              </div>
-              <div id="live-blockers" class="tagline"></div>
-            </div>
+            <div class="panel-body" id="positions"></div>
           </section>
 
           <section class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">전략 선택</h2>
+              <h2 class="panel-title">매매전략</h2>
               <button type="button" data-action="strategies-save">저장</button>
             </div>
             <div class="panel-body">
@@ -1774,22 +1845,14 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
           <section class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">포지션</h2>
-              <span class="mini muted" id="position-count"></span>
+              <h2 class="panel-title">매매기록</h2>
+              <span class="mini muted" id="log-count"></span>
             </div>
-            <div class="panel-body" id="positions"></div>
+            <div class="panel-body">
+              <div id="logs" class="compact-list"></div>
+            </div>
           </section>
         </div>
-
-        <section class="panel full">
-          <div class="panel-head">
-            <h2 class="panel-title">매매기록</h2>
-            <span class="mini muted" id="log-count"></span>
-          </div>
-          <div class="panel-body">
-            <div id="logs" class="compact-list"></div>
-          </div>
-        </section>
       </div>
     </section>
   </main>
@@ -1817,7 +1880,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         "filledSize",
         "averagePrice",
         "size",
-        "marginUSDT",
         "availableBalanceRatio",
         "tp1",
         "tp2",
@@ -1852,6 +1914,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         loginPanel: document.getElementById("login-panel"),
         dashboard: document.getElementById("dashboard"),
         metrics: document.getElementById("metrics"),
+        automationIcon: document.getElementById("automation-icon"),
+        automationTitle: document.getElementById("automation-title"),
         runnerStatus: document.getElementById("runner-status"),
         automationSummary: document.getElementById("automation-summary"),
         automationToggle: document.getElementById("automation-toggle"),
@@ -1913,6 +1977,28 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         return parsed > 0 ? `+${text}` : text;
       };
 
+      const percentText = (ratio) => {
+        const parsed = Number(ratio ?? 0);
+        if (!Number.isFinite(parsed)) {
+          return "-";
+        }
+        return `${numberText(parsed * 100, 2)}%`;
+      };
+
+      const durationText = (seconds) => {
+        const safeSeconds = Math.max(Number(seconds) || 0, 0);
+        const days = Math.floor(safeSeconds / 86400);
+        const hours = Math.floor((safeSeconds % 86400) / 3600);
+        const minutes = Math.floor((safeSeconds % 3600) / 60);
+        if (days > 0) {
+          return `${days}d ${hours}h`;
+        }
+        if (hours > 0) {
+          return `${hours}h ${minutes}m`;
+        }
+        return `${minutes}m`;
+      };
+
       const timeText = (value) => {
         if (value === null || value === undefined || value === "") {
           return "-";
@@ -1930,6 +2016,45 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           minute: "2-digit",
           hour12: false
         });
+      };
+
+      const dateFromValue = (value) => {
+        if (value === null || value === undefined || value === "") {
+          return null;
+        }
+        const raw = String(value);
+        const numeric = /^\\d{11,}$/.test(raw) ? Number(raw) : NaN;
+        const date = Number.isFinite(numeric) ? new Date(numeric) : new Date(raw);
+        return Number.isNaN(date.getTime()) ? null : date;
+      };
+
+      const latestClosedText = () => {
+        const source = state.status?.latestClosedCandleOpenTimeISO || state.status?.latestClosedCandleOpenTime;
+        const date = dateFromValue(source);
+        if (!date) {
+          return "-";
+        }
+        return timeText(new Date(date.getTime() + 15 * 60 * 1000).toISOString());
+      };
+
+      const elapsedText = () => {
+        const control = state.control || state.status?.control || {};
+        if (!control.enabled || !control.updatedAt) {
+          return "-";
+        }
+        const startedAt = dateFromValue(control.updatedAt);
+        if (!startedAt) {
+          return "-";
+        }
+        return durationText((Date.now() - startedAt.getTime()) / 1000);
+      };
+
+      const orderLimitText = (config) => {
+        const ratio = config?.availableBalanceRatio;
+        if (ratio === null || ratio === undefined || ratio === "") {
+          return "가용잔고 기준";
+        }
+        return `가용 ${percentText(ratio)} 기준`;
       };
 
       const severityClass = (severity) => {
@@ -1954,6 +2079,22 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
       const empty = (text) => `<div class="empty">${escapeHTML(text)}</div>`;
 
+      const isPaperLog = (item) => {
+        const metadata = item.metadata || {};
+        const details = metadata.details || {};
+        const tags = Array.isArray(metadata.tags) ? metadata.tags.map((tag) => String(tag).toUpperCase()) : [];
+        const title = String(metadata.title || "");
+        const message = String(item.message || "");
+        return tags.includes("PAPER") ||
+          String(details.mode || "").toLowerCase().includes("paper") ||
+          title.toLowerCase().includes("paper runner") ||
+          title.toLowerCase().includes("paper signal") ||
+          message.toLowerCase().includes("paper runner") ||
+          message.toLowerCase().includes("paper signal");
+      };
+
+      const visibleTradeLogs = () => (state.logs?.items || []).filter((item) => !isPaperLog(item));
+
       const setNotice = (message, tone = "") => {
         els.notice.textContent = message || "";
         els.notice.className = `notice${message ? " show" : ""}${tone ? ` ${tone}` : ""}`;
@@ -1969,7 +2110,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           return {
             id: "live",
             tone: "ok",
-            title: "실전 자동매매 실행 중",
+            icon: "▶",
+            title: "자동매매 실행 중",
             note: "서버가 15분봉 마감마다 판단하고, 신호가 나오면 실제 주문까지 실행합니다."
           };
         }
@@ -1977,22 +2119,25 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           return {
             id: "blocked",
             tone: "warn",
+            icon: "!",
             title: "자동매매 준비 확인 필요",
             note: "자동매매는 켜져 있지만 실제 주문 조건 중 확인할 항목이 남아 있습니다."
           };
         }
         if (judging) {
           return {
-            id: "paper",
+            id: "judging",
             tone: "warn",
-            title: "판단만 실행 중",
-            note: "서버가 전략은 보고 있지만 실제 주문은 나가지 않습니다."
+            icon: "…",
+            title: "자동매매 준비 중",
+            note: "서버 판단은 켜져 있고, 실제 주문 시작 확인을 기다리는 상태입니다."
           };
         }
         return {
           id: "off",
           tone: "bad",
-          title: "자동매매 중단",
+          icon: "II",
+          title: "자동매매 정지",
           note: "서버가 새 신호를 주문으로 실행하지 않습니다."
         };
       };
@@ -2076,7 +2221,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             guardedLoad("control", () => api("/users/me/control")),
             guardedLoad("live", () => api("/users/me/live/status")),
             guardedLoad("strategies", () => api("/users/me/strategies")),
-            guardedLoad("logs", () => api("/users/me/logs?limit=80")),
+            guardedLoad("logs", () => api("/users/me/logs?limit=500")),
             guardedLoad("account", () => api("/users/me/account")),
             guardedLoad("positions", () => api("/users/me/positions"))
           ]);
@@ -2100,35 +2245,47 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       };
 
       const renderMetrics = () => {
-        const mode = automationMode();
         const strategies = state.strategies || state.status?.strategies || {};
+        const live = state.live || state.status?.live || {};
+        const config = live.executionConfig || {};
         const accountItems = state.account?.items || [];
         const positions = (state.positions?.items || []).filter((position) => (
           Number(position.total || position.available || 0) !== 0
         ));
         const equity = accountItems.reduce((sum, account) => sum + (Number(account.accountEquity) || 0), 0);
+        const available = accountItems.reduce((sum, account) => sum + (Number(account.available) || 0), 0);
         const enabledCount = Array.isArray(strategies.enabledStrategyIDs) ? strategies.enabledStrategyIDs.length : 0;
         const availableCount = Array.isArray(strategies.available) ? strategies.available.length : 0;
         els.metrics.innerHTML = `
           <article class="metric">
-            <span>실전 자동매매</span>
-            <strong>${escapeHTML(mode.title)}</strong>
-            <small>${escapeHTML(mode.note)}</small>
+            <span>경과</span>
+            <strong>${escapeHTML(elapsedText())}</strong>
+            <small>자동매매 활성 시간</small>
           </article>
           <article class="metric">
-            <span>계정 Equity</span>
+            <span>최근 마감</span>
+            <strong>${escapeHTML(latestClosedText())}</strong>
+            <small>15분봉 기준</small>
+          </article>
+          <article class="metric">
+            <span>포지션</span>
+            <strong>${positions.length}개</strong>
+            <small>열린 포지션</small>
+          </article>
+          <article class="metric">
+            <span>전략</span>
+            <strong>${enabledCount}/${availableCount}</strong>
+            <small>활성 전략</small>
+          </article>
+          <article class="metric">
+            <span>Equity</span>
             <strong>${accountItems.length ? numberText(equity, 3) : "-"}</strong>
             <small>${state.errors.account ? escapeHTML(state.errors.account) : "USDT-M Futures"}</small>
           </article>
           <article class="metric">
-            <span>전략 / 포지션</span>
-            <strong>${enabledCount}/${availableCount} · ${positions.length}</strong>
-            <small>${escapeHTML(timeText(state.lastUpdated))}</small>
-          </article>
-          <article class="metric">
-            <span>최근 마감</span>
-            <strong>${escapeHTML(timeText(state.status?.latestClosedCandleOpenTimeISO || state.status?.latestClosedCandleOpenTime))}</strong>
-            <small>15분봉 기준</small>
+            <span>가용</span>
+            <strong>${accountItems.length ? numberText(available, 3) : "-"}</strong>
+            <small>${escapeHTML(orderLimitText(config))}</small>
           </article>
         `;
       };
@@ -2139,28 +2296,28 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         const config = live.executionConfig || {};
         const blockers = [...(live.blockers || []), ...(live.orderBlockers || [])];
         const mode = automationMode();
+        els.automationTitle.textContent = mode.title;
+        els.automationIcon.textContent = mode.icon || "";
+        els.automationIcon.className = `state-icon ${mode.tone}`;
         els.runnerStatus.innerHTML = [
-          pill(mode.title, mode.tone),
-          pill(timeText(control.updatedAt), "info")
+          pill(control.enabled ? "ON" : "OFF", control.enabled ? "ok" : "bad"),
+          pill(live.orderExecutionEnabled ? "실주문" : "대기", live.orderExecutionEnabled ? "warn" : "info"),
+          pill(`${timeText(state.lastUpdated)} 갱신`, "info")
         ].join("");
         els.automationSummary.innerHTML = `
-          <strong>${escapeHTML(mode.title)}</strong>
+          <strong>${escapeHTML(orderLimitText(config))}</strong>
           <span>${escapeHTML(mode.note)}</span>
         `;
         els.liveConfig.innerHTML = `
-          <div><span>주문금액</span><strong>${escapeHTML(numberText(config.marginUSDT))} USDT</strong></div>
-          <div><span>사용 비율</span><strong>${escapeHTML(numberText(config.availableBalanceRatio, 4))}</strong></div>
-          <div><span>Margin mode</span><strong>${escapeHTML(config.marginMode || "-")}</strong></div>
-          <div><span>Position mode</span><strong>${escapeHTML(config.positionMode || "-")}</strong></div>
+          <div><span>주문한도</span><strong>${escapeHTML(orderLimitText(config))}</strong></div>
+          <div><span>마진/포지션</span><strong>${escapeHTML(config.marginMode || "-")} · ${escapeHTML(config.positionMode || "-")}</strong></div>
         `;
         els.liveBlockers.innerHTML = blockers.length
           ? blockers.map((item) => `<span class="tag">${escapeHTML(item)}</span>`).join("")
           : `<span class="tag">실행 조건 충족</span>`;
-        if (live.control?.acknowledgedRisk) {
-          els.riskAck.checked = true;
-        }
+        els.riskAck.checked = Boolean(live.control?.acknowledgedRisk);
         const shouldStop = mode.id === "live" || mode.id === "blocked";
-        els.automationToggle.textContent = shouldStop ? "자동매매 중단" : "실전 자동매매 시작";
+        els.automationToggle.textContent = shouldStop ? "자동매매 중단" : "자동매매 시작";
         els.automationToggle.className = shouldStop ? "danger" : "primary";
         els.automationToggle.dataset.intent = shouldStop ? "stop" : "start";
         els.automationToggle.disabled = state.busy;
@@ -2285,10 +2442,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           els.logs.innerHTML = empty(state.errors.logs);
           return;
         }
-        const items = state.logs?.items || [];
-        els.logCount.textContent = `${items.length} rows`;
+        const items = visibleTradeLogs();
+        els.logCount.textContent = `${items.length}`;
         if (!items.length) {
-          els.logs.innerHTML = empty("매매기록이 없습니다.");
+          els.logs.innerHTML = empty("실거래 매매기록이 없습니다.");
           return;
         }
         els.logs.innerHTML = items.slice().reverse().map((item) => {
@@ -2358,7 +2515,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
       const startAutomation = async () => {
         if (!els.riskAck.checked) {
-          setNotice("실전 자동매매 시작 전에 실제 주문 동의가 필요합니다.", "error");
+          setNotice("자동매매 시작 전에 실제 주문 동의가 필요합니다.", "error");
           return;
         }
         await api("/users/me/control", {
