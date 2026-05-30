@@ -800,3 +800,22 @@
   - 서버에는 live order adapter가 들어가지만 운영 `.env`가 opt-in하지 않으면 실제 주문 API를 호출하지 않습니다.
   - live entry가 성공했지만 보호주문이 실패한 경우 fail-closed 청산을 시도합니다.
   - 이후 단계에는 서버 live 상태를 macOS UI에 노출하고, pending protection/order reconciliation 및 TP1 이후 SL 이동 상태 전이를 추가해야 합니다.
+
+## 0045. Add BTC 15m Regime Strategies And Long History Backfill
+
+- Status: accepted
+- Date: 2026-05-30
+- Context:
+  - 사용자는 BTC 15m 기준으로 `10x` leverage, `5%` per-trade account-risk, `100%` margin 사용 조건에 맞는 추가 실전 후보 전략 2개를 서버 runner에 적용하길 원했습니다.
+  - 새 후보는 4년 단위 장세 판단과 시간대 필터를 사용하므로, 서버의 기존 `1000` candle 저장 상태로는 지표 warmup과 macro regime 판단이 불가능했습니다.
+  - Bitget public candle API는 한 번에 받을 수 있는 row 수에 제한이 있으므로, 저장 한도와 1회 요청 한도를 분리해야 합니다.
+- Decision:
+  - `BTC 15m Regime Session Fade`와 `BTC 15m Bull Pullback Long`을 built-in strategy와 BTCUSDT 15m active route에 추가합니다.
+  - 서버 paper/live runner도 동일 strategy ID와 조건을 Python으로 이식해 BTCUSDT 15m 평가 대상에 포함합니다.
+  - 서버 기본 candle 저장 한도는 `150000`개로 올리고, 1회 REST fetch 한도는 Bitget 제한에 맞춰 `1000`개로 유지합니다.
+  - 4년급 warmup이 필요한 BTC 전략이 활성화된 경우 서버는 `/market/history-candles`를 여러 페이지로 호출해 오래된 closed candle을 뒤로 채웁니다.
+  - 상태의 `savedCandles`는 이번 cycle fetch row가 아니라 저장소에 실제 보관 중인 candle 수를 보여줍니다.
+- Consequences:
+  - 신규 BTC 전략은 1000개 warmup에 갇히지 않고 4년급 closed candle history를 기준으로 평가할 수 있습니다.
+  - 초기 배포 직후에는 과거 candle backfill 때문에 첫 cycle이 더 오래 걸릴 수 있지만, 이후에는 저장된 JSON을 재사용합니다.
+  - 저장 한도는 운영 실수로 무한 backfill이 되는 것을 막는 safety bound이며, 기본값은 현재 전략 요구량을 넘도록 설정합니다.

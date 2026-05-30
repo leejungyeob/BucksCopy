@@ -405,6 +405,87 @@ struct BTCFifteenMinuteVacuumPulseStrategy: TradingStrategy {
     }
 }
 
+struct BTCFifteenMinuteRegimeSessionFadeStrategy: TradingStrategy {
+    static let identifier = "btc-15m-regime-session-fade"
+
+    let definition = StrategyDefinition(
+        id: Self.identifier,
+        name: "BTC 15m Regime Session Fade",
+        summary: "BTCUSDT 15분봉 장세별 session fade에 고점권 저변동성 회피 필터를 더한 전략",
+        defaultConfig: StrategyConfig(
+            strategyID: Self.identifier,
+            leverage: 10,
+            parameters: [
+                "lookback": 8,
+                "threshold": Decimal(string: "0.005")!,
+                "stopPercent": Decimal(string: "0.006")!,
+                "rewardRiskRatio": Decimal(string: "3.0")!,
+                "trendEMAPeriod": 192,
+                "macroMAPeriod": 200,
+                "macroSlopeDays": 60,
+                "macroReturnDays": 90,
+                "bullReturnThreshold": Decimal(string: "0.05")!,
+                "bearReturnThreshold": Decimal(string: "-0.03")!,
+                "bearDrawdownThreshold": Decimal(string: "0.25")!,
+                "nearHighDrawdownThreshold": Decimal(string: "-0.05")!,
+                "lowATRPercentThreshold": Decimal(string: "0.004")!,
+                "atrPeriod": 14
+            ],
+            maximumRiskPerTradePercent: 5,
+            maximumPositionMarginPercent: 100,
+            maximumHoldingCandles: 12,
+            signalConfirmation: .disabled
+        )
+    )
+
+    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        BTCFifteenMinuteRegimeFadeEvaluator.evaluate(
+            context,
+            config: config,
+            definition: definition
+        )
+    }
+}
+
+struct BTCFifteenMinuteBullPullbackLongStrategy: TradingStrategy {
+    static let identifier = "btc-15m-bull-pullback-long"
+
+    let definition = StrategyDefinition(
+        id: Self.identifier,
+        name: "BTC 15m Bull Pullback Long",
+        summary: "BTC 상승장 전용 15분봉 눌림 long 전략, 고점 대비 눌림폭에 따라 TP를 동적으로 조정",
+        defaultConfig: StrategyConfig(
+            strategyID: Self.identifier,
+            leverage: 10,
+            parameters: [
+                "lookback": 8,
+                "threshold": Decimal(string: "0.005")!,
+                "stopPercent": Decimal(string: "0.006")!,
+                "tightRewardRiskRatio": Decimal(string: "2.2")!,
+                "looseRewardRiskRatio": Decimal(string: "3.5")!,
+                "looseDrawdownThreshold": Decimal(string: "-0.02")!,
+                "trendEMAPeriod": 192,
+                "macroMAPeriod": 200,
+                "macroSlopeDays": 60,
+                "macroReturnDays": 90,
+                "bullReturnThreshold": Decimal(string: "0.05")!
+            ],
+            maximumRiskPerTradePercent: 5,
+            maximumPositionMarginPercent: 100,
+            maximumHoldingCandles: 12,
+            signalConfirmation: .disabled
+        )
+    )
+
+    func evaluate(_ context: StrategyContext, config: StrategyConfig) throws -> StrategyEvaluation {
+        BTCFifteenMinuteBullPullbackLongEvaluator.evaluate(
+            context,
+            config: config,
+            definition: definition
+        )
+    }
+}
+
 struct ETHFifteenMinuteVacuumPulseStrategy: TradingStrategy {
     static let identifier = "eth-15m-vacuum-pulse"
 
@@ -1595,6 +1676,308 @@ private enum FifteenMinuteVacuumPulseEvaluator {
     }
 }
 
+private enum BTCFifteenMinuteRegimeFadeEvaluator {
+    private static let bullHours: Set<Int> = [
+        128, 135, 140, 15, 144, 16, 150, 151,
+        155, 163, 164, 165, 36, 48, 56, 59,
+        71, 72, 84, 109, 111, 120, 122, 127
+    ]
+    private static let bearHours: Set<Int> = [
+        137, 11, 12, 16, 145, 22, 154, 162,
+        36, 165, 166, 38, 48, 54, 55, 63,
+        75, 81, 95, 98, 100, 101, 110, 120
+    ]
+    private static let neutralHours: Set<Int> = [
+        130, 132, 5, 135, 13, 146, 147, 148,
+        18, 23, 30, 159, 162, 36, 165, 166,
+        167, 53, 63, 65, 100, 108, 113, 114
+    ]
+
+    static func evaluate(
+        _ context: StrategyContext,
+        config: StrategyConfig,
+        definition: StrategyDefinition
+    ) -> StrategyEvaluation {
+        guard context.symbol == FuturesSymbol("BTCUSDT"),
+              context.timeframe == .fifteenMinutes else {
+            return .noSignal
+        }
+
+        let candles = context.closedCandles
+        let parameters = BTCRegimeSessionFadeParameters(overrides: config.parameters)
+        guard candles.count > parameters.lookback,
+              let latest = candles.last,
+              let trendEMA = BTCFifteenMinuteRegimeSupport.exponentialMovingAverage(
+                candles: candles,
+                period: parameters.trendEMAPeriod
+              ),
+              let atr = candles.averageTrueRange(period: parameters.atrPeriod),
+              latest.close > 0 else {
+            return .noSignal
+        }
+
+        let macro = BTCFifteenMinuteRegimeSupport.macroSnapshot(
+            candles: candles,
+            maPeriod: parameters.macroMAPeriod,
+            slopeDays: parameters.macroSlopeDays,
+            returnDays: parameters.macroReturnDays,
+            bullReturnThreshold: parameters.bullReturnThreshold,
+            bearReturnThreshold: parameters.bearReturnThreshold,
+            bearDrawdownThreshold: parameters.bearDrawdownThreshold
+        )
+        let allowedHours: Set<Int>
+        switch macro.regime {
+        case 1:
+            allowedHours = bullHours
+        case -1:
+            allowedHours = bearHours
+        default:
+            allowedHours = neutralHours
+        }
+        guard allowedHours.contains(BTCFifteenMinuteRegimeSupport.weekHour(latest.openTime)) else {
+            return .noSignal
+        }
+
+        let atrPercent = atr / latest.close
+        if let drawdown = macro.drawdown,
+           drawdown >= parameters.nearHighDrawdownThreshold,
+           atrPercent <= parameters.lowATRPercentThreshold {
+            return .noSignal
+        }
+
+        let base = candles[candles.count - 1 - parameters.lookback]
+        guard base.close > 0 else { return .noSignal }
+        let returnValue = latest.close / base.close - 1
+        guard absoluteDecimal(returnValue) >= parameters.threshold else {
+            return .noSignal
+        }
+
+        let side: TradeSide = returnValue > 0 ? .sell : .buy
+        let trendSide: TradeSide = latest.close >= trendEMA ? .buy : .sell
+        guard side == trendSide else { return .noSignal }
+
+        return BTCFifteenMinuteRegimeSupport.fixedStopPercentSignal(
+            definition: definition,
+            context: context,
+            side: side,
+            entry: latest.close,
+            stopPercent: parameters.stopPercent,
+            rewardRiskRatio: parameters.rewardRiskRatio,
+            reason: "BTC 15m Regime Session Fade: 장세별 허용 시간대에서 8봉 impulse를 EMA192 방향으로 fade"
+        )
+    }
+}
+
+private enum BTCFifteenMinuteBullPullbackLongEvaluator {
+    private static let allowedHours: Set<Int> = [
+        128, 4, 135, 144, 19, 21, 150, 151,
+        32, 164, 165, 59, 69, 70, 72, 81,
+        105, 107, 109, 111, 112, 114, 122, 127
+    ]
+
+    static func evaluate(
+        _ context: StrategyContext,
+        config: StrategyConfig,
+        definition: StrategyDefinition
+    ) -> StrategyEvaluation {
+        guard context.symbol == FuturesSymbol("BTCUSDT"),
+              context.timeframe == .fifteenMinutes else {
+            return .noSignal
+        }
+
+        let candles = context.closedCandles
+        let parameters = BTCBullPullbackLongParameters(overrides: config.parameters)
+        guard candles.count > parameters.lookback,
+              let latest = candles.last,
+              let trendEMA = BTCFifteenMinuteRegimeSupport.exponentialMovingAverage(
+                candles: candles,
+                period: parameters.trendEMAPeriod
+              ),
+              latest.close > 0 else {
+            return .noSignal
+        }
+
+        let macro = BTCFifteenMinuteRegimeSupport.macroSnapshot(
+            candles: candles,
+            maPeriod: parameters.macroMAPeriod,
+            slopeDays: parameters.macroSlopeDays,
+            returnDays: parameters.macroReturnDays,
+            bullReturnThreshold: parameters.bullReturnThreshold,
+            bearReturnThreshold: Decimal(string: "-0.03")!,
+            bearDrawdownThreshold: Decimal(string: "0.25")!
+        )
+        guard macro.regime == 1,
+              allowedHours.contains(BTCFifteenMinuteRegimeSupport.weekHour(latest.openTime)),
+              latest.close >= trendEMA else {
+            return .noSignal
+        }
+
+        let base = candles[candles.count - 1 - parameters.lookback]
+        guard base.close > 0 else { return .noSignal }
+        let returnValue = latest.close / base.close - 1
+        guard returnValue <= -parameters.threshold else {
+            return .noSignal
+        }
+
+        let rewardRiskRatio: Decimal
+        if let drawdown = macro.drawdown,
+           drawdown <= parameters.looseDrawdownThreshold {
+            rewardRiskRatio = parameters.looseRewardRiskRatio
+        } else {
+            rewardRiskRatio = parameters.tightRewardRiskRatio
+        }
+
+        return BTCFifteenMinuteRegimeSupport.fixedStopPercentSignal(
+            definition: definition,
+            context: context,
+            side: .buy,
+            entry: latest.close,
+            stopPercent: parameters.stopPercent,
+            rewardRiskRatio: rewardRiskRatio,
+            reason: "BTC 15m Bull Pullback Long: 상승장 눌림 long, 고점 대비 눌림폭에 따라 TP 동적 조정"
+        )
+    }
+}
+
+private enum BTCFifteenMinuteRegimeSupport {
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+
+    struct MacroSnapshot {
+        let regime: Int
+        let drawdown: Decimal?
+    }
+
+    private struct DailyClose {
+        let day: Date
+        let close: Decimal
+    }
+
+    static func weekHour(_ date: Date) -> Int {
+        let weekday = utcCalendar.component(.weekday, from: date)
+        let mondayZeroBasedWeekday = (weekday + 5) % 7
+        let hour = utcCalendar.component(.hour, from: date)
+        return mondayZeroBasedWeekday * 24 + hour
+    }
+
+    static func fixedStopPercentSignal(
+        definition: StrategyDefinition,
+        context: StrategyContext,
+        side: TradeSide,
+        entry: Decimal,
+        stopPercent: Decimal,
+        rewardRiskRatio: Decimal,
+        reason: String
+    ) -> StrategyEvaluation {
+        let stop: Decimal
+        let takeProfit: Decimal
+        switch side {
+        case .buy:
+            stop = entry * (1 - stopPercent)
+            takeProfit = entry + (entry - stop) * rewardRiskRatio
+        case .sell:
+            stop = entry * (1 + stopPercent)
+            takeProfit = entry - (stop - entry) * rewardRiskRatio
+        }
+        return strategyFixedTargetSignal(
+            definition: definition,
+            context: context,
+            side: side,
+            entry: entry,
+            stop: stop,
+            takeProfit: takeProfit,
+            reason: reason
+        )
+    }
+
+    static func exponentialMovingAverage(candles: [Candle], period: Int) -> Decimal? {
+        guard period > 0, candles.count >= period else { return nil }
+        var current = candles.prefix(period).reduce(Decimal(0)) { $0 + $1.close } / Decimal(period)
+        guard candles.count > period else { return current }
+        let alpha = Decimal(2) / Decimal(period + 1)
+        for candle in candles.dropFirst(period) {
+            current = candle.close * alpha + current * (1 - alpha)
+        }
+        return current
+    }
+
+    static func macroSnapshot(
+        candles: [Candle],
+        maPeriod: Int,
+        slopeDays: Int,
+        returnDays: Int,
+        bullReturnThreshold: Decimal,
+        bearReturnThreshold: Decimal,
+        bearDrawdownThreshold: Decimal
+    ) -> MacroSnapshot {
+        let daily = dailyCloses(from: candles)
+        guard let latest = candles.last,
+              let currentDayIndex = daily.firstIndex(where: {
+                utcCalendar.isDate($0.day, inSameDayAs: utcCalendar.startOfDay(for: latest.openTime))
+              }),
+              currentDayIndex > 0 else {
+            return MacroSnapshot(regime: 0, drawdown: nil)
+        }
+        let previousIndex = currentDayIndex - 1
+        let previousClose = daily[previousIndex].close
+        let rollingHigh = daily[0...previousIndex].map(\.close).max() ?? previousClose
+        let drawdown = rollingHigh > 0 ? previousClose / rollingHigh - 1 : Decimal(0)
+
+        guard let previousMA = simpleMovingAverage(daily, period: maPeriod, endingAt: previousIndex),
+              previousIndex - slopeDays >= 0,
+              let priorMA = simpleMovingAverage(daily, period: maPeriod, endingAt: previousIndex - slopeDays),
+              previousIndex - returnDays >= 0,
+              priorMA > 0,
+              previousMA > 0,
+              daily[previousIndex - returnDays].close > 0 else {
+            return MacroSnapshot(regime: 0, drawdown: drawdown)
+        }
+
+        let slope = previousMA / priorMA - 1
+        let periodReturn = previousClose / daily[previousIndex - returnDays].close - 1
+        if previousClose >= previousMA,
+           slope > 0,
+           periodReturn >= bullReturnThreshold {
+            return MacroSnapshot(regime: 1, drawdown: drawdown)
+        }
+        if previousClose <= previousMA,
+           (slope < 0 || periodReturn <= bearReturnThreshold || drawdown <= -bearDrawdownThreshold) {
+            return MacroSnapshot(regime: -1, drawdown: drawdown)
+        }
+        return MacroSnapshot(regime: 0, drawdown: drawdown)
+    }
+
+    private static func dailyCloses(from candles: [Candle]) -> [DailyClose] {
+        var output: [DailyClose] = []
+        for candle in candles {
+            let day = utcCalendar.startOfDay(for: candle.openTime)
+            if output.last?.day == day {
+                output[output.count - 1] = DailyClose(day: day, close: candle.close)
+            } else {
+                output.append(DailyClose(day: day, close: candle.close))
+            }
+        }
+        return output
+    }
+
+    private static func simpleMovingAverage(
+        _ daily: [DailyClose],
+        period: Int,
+        endingAt endIndex: Int
+    ) -> Decimal? {
+        guard period > 0,
+              endIndex >= 0,
+              endIndex < daily.count,
+              endIndex - period + 1 >= 0 else {
+            return nil
+        }
+        return daily[(endIndex - period + 1)...endIndex].reduce(Decimal(0)) { $0 + $1.close } / Decimal(period)
+    }
+}
+
 private extension TradingStrategy {
     func fixedTargetSignal(
         context: StrategyContext,
@@ -2161,6 +2544,68 @@ private struct FifteenMinuteVacuumPulseParameters {
         stopMode = min(2, max(0, zeroBasedIntOverride("stopMode", overrides: overrides, defaultValue: 0)))
         sideMode = sideModeOverride(overrides: overrides)
         weekdayMask = min(127, max(1, intOverride("weekdayMask", overrides: overrides, defaultValue: 127)))
+    }
+}
+
+private struct BTCRegimeSessionFadeParameters {
+    let lookback: Int
+    let threshold: Decimal
+    let stopPercent: Decimal
+    let rewardRiskRatio: Decimal
+    let trendEMAPeriod: Int
+    let macroMAPeriod: Int
+    let macroSlopeDays: Int
+    let macroReturnDays: Int
+    let bullReturnThreshold: Decimal
+    let bearReturnThreshold: Decimal
+    let bearDrawdownThreshold: Decimal
+    let nearHighDrawdownThreshold: Decimal
+    let lowATRPercentThreshold: Decimal
+    let atrPeriod: Int
+
+    init(overrides: [String: Decimal]) {
+        lookback = intOverride("lookback", overrides: overrides, defaultValue: 8)
+        threshold = overrides["threshold"] ?? Decimal(string: "0.005")!
+        stopPercent = overrides["stopPercent"] ?? Decimal(string: "0.006")!
+        rewardRiskRatio = overrides["rewardRiskRatio"] ?? Decimal(string: "3.0")!
+        trendEMAPeriod = intOverride("trendEMAPeriod", overrides: overrides, defaultValue: 192)
+        macroMAPeriod = intOverride("macroMAPeriod", overrides: overrides, defaultValue: 200)
+        macroSlopeDays = intOverride("macroSlopeDays", overrides: overrides, defaultValue: 60)
+        macroReturnDays = intOverride("macroReturnDays", overrides: overrides, defaultValue: 90)
+        bullReturnThreshold = overrides["bullReturnThreshold"] ?? Decimal(string: "0.05")!
+        bearReturnThreshold = overrides["bearReturnThreshold"] ?? Decimal(string: "-0.03")!
+        bearDrawdownThreshold = overrides["bearDrawdownThreshold"] ?? Decimal(string: "0.25")!
+        nearHighDrawdownThreshold = overrides["nearHighDrawdownThreshold"] ?? Decimal(string: "-0.05")!
+        lowATRPercentThreshold = overrides["lowATRPercentThreshold"] ?? Decimal(string: "0.004")!
+        atrPeriod = intOverride("atrPeriod", overrides: overrides, defaultValue: 14)
+    }
+}
+
+private struct BTCBullPullbackLongParameters {
+    let lookback: Int
+    let threshold: Decimal
+    let stopPercent: Decimal
+    let tightRewardRiskRatio: Decimal
+    let looseRewardRiskRatio: Decimal
+    let looseDrawdownThreshold: Decimal
+    let trendEMAPeriod: Int
+    let macroMAPeriod: Int
+    let macroSlopeDays: Int
+    let macroReturnDays: Int
+    let bullReturnThreshold: Decimal
+
+    init(overrides: [String: Decimal]) {
+        lookback = intOverride("lookback", overrides: overrides, defaultValue: 8)
+        threshold = overrides["threshold"] ?? Decimal(string: "0.005")!
+        stopPercent = overrides["stopPercent"] ?? Decimal(string: "0.006")!
+        tightRewardRiskRatio = overrides["tightRewardRiskRatio"] ?? Decimal(string: "2.2")!
+        looseRewardRiskRatio = overrides["looseRewardRiskRatio"] ?? Decimal(string: "3.5")!
+        looseDrawdownThreshold = overrides["looseDrawdownThreshold"] ?? Decimal(string: "-0.02")!
+        trendEMAPeriod = intOverride("trendEMAPeriod", overrides: overrides, defaultValue: 192)
+        macroMAPeriod = intOverride("macroMAPeriod", overrides: overrides, defaultValue: 200)
+        macroSlopeDays = intOverride("macroSlopeDays", overrides: overrides, defaultValue: 60)
+        macroReturnDays = intOverride("macroReturnDays", overrides: overrides, defaultValue: 90)
+        bullReturnThreshold = overrides["bullReturnThreshold"] ?? Decimal(string: "0.05")!
     }
 }
 

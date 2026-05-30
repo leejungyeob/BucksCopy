@@ -10,10 +10,10 @@ description: >
 
 ## 기본 원칙
 
-- Use local closed candle history from SQLite. Current default scope is 15m and 1H latest 20,000 candles, with 4H/12H/1D full history.
+- Use local closed candle history from SQLite. For 15m BTC strategy validation, prefer full available history or explicitly pass `--15m-limit 0` when the user asks for 4-year or full-history validation.
 - Treat backtest validation as mandatory before judging any strategy as usable for live monitoring.
 - Keep auxiliary indicators out of the primary result unless the user explicitly asks to test them.
-- Current routed portfolio is symbol-scoped. Active routes: BTCUSDT 15m BTC Phase Vacuum Reclaim, ETHUSDT 1H ETH Momentum Burst, BTCUSDT 15m BTC Vacuum Pulse, and ETHUSDT 15m ETH Vacuum Pulse. These routes also carry maximum holding windows: 15m routes 96 candles and ETH 1H Momentum Burst 72 candles. BTCUSDT 12H VWMA100 touch trend and other removed symbol routes must stay excluded unless the user explicitly asks to re-enable them.
+- Current routed portfolio is symbol-scoped and Dashboard/Live runtime is 15m-only. Active routes: BTCUSDT 15m BTC Phase Vacuum Reclaim, BTCUSDT 15m BTC Vacuum Pulse, BTCUSDT 15m BTC Regime Session Fade, BTCUSDT 15m BTC Bull Pullback Long, and ETHUSDT 15m ETH Vacuum Pulse. Higher-timeframe and removed symbol routes must stay excluded unless the user explicitly asks to re-enable them.
 - Report practical metrics, not just final balance: final balance, net return, win rate, trade count, MDD, PF, TP1/TP2/profit-lock stop/time-exit counts.
 - Explain jargon in Korean when showing results. At minimum define MDD, PF, TP1, TP2, TP1후 SL, 순수 SL.
 
@@ -44,7 +44,7 @@ Derived/Reports/split-tp-backtest-BTCUSDT-cache.json
 ```
 
 By default, the script reuses cached rows for combinations that were already run. Use `--refresh-cache` only when the user explicitly wants to recompute prior combinations.
-The default 15m and 1H scope is latest 20,000 candles. Use `--15m-limit 0` or `--1h-limit 0` only when the user explicitly wants full history for that timeframe.
+The default script may limit 15m rows for speed. Use `--15m-limit 0` when the user explicitly wants full available or 4-year 15m validation.
 Use `--leverage`, `--risk`, and `--margin` to match the user's requested risk settings instead of editing the runner source.
 
 Use `--recommended-only` only when the user specifically wants current app-routing candidates.

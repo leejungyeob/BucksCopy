@@ -36,6 +36,9 @@ DEFAULT_BASE_URL = "https://api.bitget.com"
 DEFAULT_API_HOST = "0.0.0.0"
 DEFAULT_API_PORT = 8787
 DEFAULT_USER_ID = "local-admin"
+DEFAULT_CANDLE_STORAGE_LIMIT = 150_000
+MAX_CANDLE_FETCH_LIMIT = 1_000
+REGIME_STRATEGY_MIN_CANDLES = 140_256
 USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 CREDENTIAL_ENCRYPTION_ALGORITHM = "AES-256-GCM"
 
@@ -288,6 +291,47 @@ BTC_PULSE_PARAMS = {
     "leverage": 10,
 }
 
+BTC_REGIME_SESSION_FADE_PARAMS = {
+    "strategy_id": "btc-15m-regime-session-fade",
+    "name": "BTC 15m Regime Session Fade",
+    "symbol": "BTCUSDT",
+    "lookback": 8,
+    "threshold": dec("0.005"),
+    "stop_percent": dec("0.006"),
+    "reward_risk_ratio": dec("3.0"),
+    "trend_ema_period": 192,
+    "macro_ma_period": 200,
+    "macro_slope_days": 60,
+    "macro_return_days": 90,
+    "bull_return_threshold": dec("0.05"),
+    "bear_return_threshold": dec("-0.03"),
+    "bear_drawdown_threshold": dec("0.25"),
+    "near_high_drawdown_threshold": dec("-0.05"),
+    "low_atr_percent_threshold": dec("0.004"),
+    "atr_period": 14,
+    "maximum_holding_candles": 12,
+    "leverage": 10,
+}
+
+BTC_BULL_PULLBACK_LONG_PARAMS = {
+    "strategy_id": "btc-15m-bull-pullback-long",
+    "name": "BTC 15m Bull Pullback Long",
+    "symbol": "BTCUSDT",
+    "lookback": 8,
+    "threshold": dec("0.005"),
+    "stop_percent": dec("0.006"),
+    "tight_reward_risk_ratio": dec("2.2"),
+    "loose_reward_risk_ratio": dec("3.5"),
+    "loose_drawdown_threshold": dec("-0.02"),
+    "trend_ema_period": 192,
+    "macro_ma_period": 200,
+    "macro_slope_days": 60,
+    "macro_return_days": 90,
+    "bull_return_threshold": dec("0.05"),
+    "maximum_holding_candles": 12,
+    "leverage": 10,
+}
+
 ETH_PULSE_PARAMS = {
     "strategy_id": "eth-15m-vacuum-pulse",
     "name": "ETH 15m Vacuum Pulse",
@@ -318,7 +362,12 @@ ETH_PULSE_PARAMS = {
 }
 
 ACTIVE_STRATEGIES_BY_SYMBOL = {
-    "BTCUSDT": [BTC_PHASE_PARAMS, BTC_PULSE_PARAMS],
+    "BTCUSDT": [
+        BTC_PHASE_PARAMS,
+        BTC_PULSE_PARAMS,
+        BTC_REGIME_SESSION_FADE_PARAMS,
+        BTC_BULL_PULLBACK_LONG_PARAMS,
+    ],
     "ETHUSDT": [ETH_PULSE_PARAMS],
 }
 
@@ -359,6 +408,85 @@ def average_true_range(candles: list[Candle], period: int, ending_at: int | None
         previous_close = candles[index - 1].close
         total += max(candle.high - candle.low, abs(candle.high - previous_close), abs(candle.low - previous_close))
     return total / dec(period)
+
+
+def exponential_moving_average(candles: list[Candle], period: int) -> Decimal | None:
+    if period <= 0 or len(candles) < period:
+        return None
+    current = sum((c.close for c in candles[:period]), dec(0)) / dec(period)
+    alpha = dec(2) / dec(period + 1)
+    for candle in candles[period:]:
+        current = candle.close * alpha + current * (dec(1) - alpha)
+    return current
+
+
+def daily_closes(candles: list[Candle]) -> list[tuple[int, Decimal]]:
+    output: list[tuple[int, Decimal]] = []
+    for candle in candles:
+        day = candle.open_time // 86_400
+        if output and output[-1][0] == day:
+            output[-1] = (day, candle.close)
+        else:
+            output.append((day, candle.close))
+    return output
+
+
+def daily_sma(days: list[tuple[int, Decimal]], period: int, ending_at: int) -> Decimal | None:
+    if period <= 0 or ending_at < 0 or ending_at >= len(days) or ending_at - period + 1 < 0:
+        return None
+    return sum((close for _, close in days[ending_at - period + 1 : ending_at + 1]), dec(0)) / dec(period)
+
+
+def btc_macro_snapshot(
+    candles: list[Candle],
+    ma_period: int,
+    slope_days: int,
+    return_days: int,
+    bull_return_threshold: Decimal,
+    bear_return_threshold: Decimal,
+    bear_drawdown_threshold: Decimal,
+) -> dict[str, Any]:
+    days = daily_closes(candles)
+    if not candles or len(days) < 2:
+        return {"regime": 0, "drawdown": None}
+    current_day = candles[-1].open_time // 86_400
+    current_index = next((index for index, item in enumerate(days) if item[0] == current_day), len(days) - 1)
+    if current_index <= 0:
+        return {"regime": 0, "drawdown": None}
+
+    previous_index = current_index - 1
+    previous_close = days[previous_index][1]
+    rolling_high = max(close for _, close in days[: previous_index + 1])
+    drawdown = previous_close / rolling_high - dec(1) if rolling_high > 0 else dec(0)
+
+    previous_ma = daily_sma(days, ma_period, previous_index)
+    prior_ma = daily_sma(days, ma_period, previous_index - slope_days)
+    if (
+        previous_ma is None
+        or prior_ma is None
+        or previous_index - return_days < 0
+        or prior_ma <= 0
+        or previous_ma <= 0
+        or days[previous_index - return_days][1] <= 0
+    ):
+        return {"regime": 0, "drawdown": drawdown}
+
+    slope = previous_ma / prior_ma - dec(1)
+    period_return = previous_close / days[previous_index - return_days][1] - dec(1)
+    if previous_close >= previous_ma and slope > 0 and period_return >= bull_return_threshold:
+        regime = 1
+    elif previous_close <= previous_ma and (
+        slope < 0 or period_return <= bear_return_threshold or drawdown <= -bear_drawdown_threshold
+    ):
+        regime = -1
+    else:
+        regime = 0
+    return {
+        "regime": regime,
+        "drawdown": drawdown,
+        "periodReturn": period_return,
+        "slope": slope,
+    }
 
 
 def has_valid_price_layout(signal: Signal) -> bool:
@@ -570,9 +698,166 @@ def evaluate_vacuum_pulse(candles: list[Candle], params: dict[str, Any], generat
     return None
 
 
+BTC_REGIME_BULL_HOURS = {
+    128, 135, 140, 15, 144, 16, 150, 151,
+    155, 163, 164, 165, 36, 48, 56, 59,
+    71, 72, 84, 109, 111, 120, 122, 127,
+}
+BTC_REGIME_BEAR_HOURS = {
+    137, 11, 12, 16, 145, 22, 154, 162,
+    36, 165, 166, 38, 48, 54, 55, 63,
+    75, 81, 95, 98, 100, 101, 110, 120,
+}
+BTC_REGIME_NEUTRAL_HOURS = {
+    130, 132, 5, 135, 13, 146, 147, 148,
+    18, 23, 30, 159, 162, 36, 165, 166,
+    167, 53, 63, 65, 100, 108, 113, 114,
+}
+BTC_BULL_PULLBACK_HOURS = {
+    128, 4, 135, 144, 19, 21, 150, 151,
+    32, 164, 165, 59, 69, 70, 72, 81,
+    105, 107, 109, 111, 112, 114, 122, 127,
+}
+
+
+def candle_week_hour(candle: Candle) -> int:
+    dt = datetime.fromtimestamp(candle.open_time, timezone.utc)
+    return dt.weekday() * 24 + dt.hour
+
+
+def fixed_percent_signal(
+    params: dict[str, Any],
+    side: str,
+    entry: Decimal,
+    stop_percent: Decimal,
+    reward_risk_ratio: Decimal,
+    reason: str,
+) -> Signal | None:
+    if side == "buy":
+        stop = entry * (dec(1) - stop_percent)
+        take_profit = entry + (entry - stop) * reward_risk_ratio
+    else:
+        stop = entry * (dec(1) + stop_percent)
+        take_profit = entry - (stop - entry) * reward_risk_ratio
+    return Signal(
+        strategy_id=params["strategy_id"],
+        symbol=params["symbol"],
+        side=side,
+        entry=entry,
+        stop=stop,
+        take_profit=take_profit,
+        reason=reason,
+        leverage=params["leverage"],
+    )
+
+
+def evaluate_btc_regime_session_fade(candles: list[Candle], params: dict[str, Any]) -> Signal | None:
+    if len(candles) <= params["lookback"]:
+        return None
+    latest = candles[-1]
+    trend_ema = exponential_moving_average(candles, params["trend_ema_period"])
+    atr = average_true_range(candles, params["atr_period"])
+    if trend_ema is None or atr is None or latest.close <= 0:
+        return None
+
+    macro = btc_macro_snapshot(
+        candles,
+        params["macro_ma_period"],
+        params["macro_slope_days"],
+        params["macro_return_days"],
+        params["bull_return_threshold"],
+        params["bear_return_threshold"],
+        params["bear_drawdown_threshold"],
+    )
+    regime = int(macro.get("regime", 0))
+    allowed_hours = BTC_REGIME_BULL_HOURS if regime == 1 else BTC_REGIME_BEAR_HOURS if regime == -1 else BTC_REGIME_NEUTRAL_HOURS
+    if candle_week_hour(latest) not in allowed_hours:
+        return None
+
+    drawdown = macro.get("drawdown")
+    atr_percent = atr / latest.close
+    if (
+        isinstance(drawdown, Decimal)
+        and drawdown >= params["near_high_drawdown_threshold"]
+        and atr_percent <= params["low_atr_percent_threshold"]
+    ):
+        return None
+
+    base = candles[-1 - params["lookback"]]
+    if base.close <= 0:
+        return None
+    return_value = latest.close / base.close - dec(1)
+    if abs(return_value) < params["threshold"]:
+        return None
+    side = "sell" if return_value > 0 else "buy"
+    trend_side = "buy" if latest.close >= trend_ema else "sell"
+    if side != trend_side:
+        return None
+
+    return fixed_percent_signal(
+        params,
+        side,
+        latest.close,
+        params["stop_percent"],
+        params["reward_risk_ratio"],
+        "BTC 15m Regime Session Fade: 장세별 허용 시간대에서 8봉 impulse를 EMA192 방향으로 fade",
+    )
+
+
+def evaluate_btc_bull_pullback_long(candles: list[Candle], params: dict[str, Any]) -> Signal | None:
+    if len(candles) <= params["lookback"]:
+        return None
+    latest = candles[-1]
+    trend_ema = exponential_moving_average(candles, params["trend_ema_period"])
+    if trend_ema is None or latest.close <= 0:
+        return None
+
+    macro = btc_macro_snapshot(
+        candles,
+        params["macro_ma_period"],
+        params["macro_slope_days"],
+        params["macro_return_days"],
+        params["bull_return_threshold"],
+        dec("-0.03"),
+        dec("0.25"),
+    )
+    if int(macro.get("regime", 0)) != 1:
+        return None
+    if candle_week_hour(latest) not in BTC_BULL_PULLBACK_HOURS:
+        return None
+    if latest.close < trend_ema:
+        return None
+
+    base = candles[-1 - params["lookback"]]
+    if base.close <= 0:
+        return None
+    return_value = latest.close / base.close - dec(1)
+    if return_value > -params["threshold"]:
+        return None
+
+    drawdown = macro.get("drawdown")
+    reward_risk_ratio = (
+        params["loose_reward_risk_ratio"]
+        if isinstance(drawdown, Decimal) and drawdown <= params["loose_drawdown_threshold"]
+        else params["tight_reward_risk_ratio"]
+    )
+    return fixed_percent_signal(
+        params,
+        "buy",
+        latest.close,
+        params["stop_percent"],
+        reward_risk_ratio,
+        "BTC 15m Bull Pullback Long: 상승장 눌림 long, 고점 대비 눌림폭에 따라 TP 동적 조정",
+    )
+
+
 def evaluate_strategy(candles: list[Candle], params: dict[str, Any], generated_at: datetime) -> Signal | None:
     if params["strategy_id"] == BTC_PHASE_PARAMS["strategy_id"]:
         signal = evaluate_btc_phase(candles, params, generated_at)
+    elif params["strategy_id"] == BTC_REGIME_SESSION_FADE_PARAMS["strategy_id"]:
+        signal = evaluate_btc_regime_session_fade(candles, params)
+    elif params["strategy_id"] == BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"]:
+        signal = evaluate_btc_bull_pullback_long(candles, params)
     else:
         signal = evaluate_vacuum_pulse(candles, params, generated_at)
     if signal and risk_allowed(signal):
@@ -796,7 +1081,18 @@ class PaperRunner:
         self.data_dir = Path(os.environ.get("BUCKS_COPY_DATA_DIR", "/var/lib/bucks-copy"))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.symbols = self.parse_symbols(os.environ.get("BUCKS_COPY_SYMBOLS", "BTCUSDT,ETHUSDT"))
-        self.candle_limit = min(max(int(os.environ.get("BUCKS_COPY_CANDLE_LIMIT", "500")), 1), 1000)
+        configured_candle_limit = int(os.environ.get("BUCKS_COPY_CANDLE_LIMIT", str(DEFAULT_CANDLE_STORAGE_LIMIT)))
+        self.candle_limit = min(max(configured_candle_limit, 1), 1_000_000)
+        self.fetch_candle_limit = min(
+            max(int(os.environ.get("BUCKS_COPY_FETCH_CANDLE_LIMIT", str(MAX_CANDLE_FETCH_LIMIT))), 1),
+            MAX_CANDLE_FETCH_LIMIT,
+        )
+        self.history_backfill_pages_per_cycle = clamp_int(
+            os.environ.get("BUCKS_COPY_HISTORY_BACKFILL_PAGES_PER_CYCLE"),
+            default=800,
+            minimum=0,
+            maximum=2_000,
+        )
         self.poll_seconds = max(int(os.environ.get("BUCKS_COPY_POLL_SECONDS", "30")), 5)
         self.private_poll_seconds = max(int(os.environ.get("BUCKS_COPY_PRIVATE_POLL_SECONDS", "60")), 30)
         self.base_url = os.environ.get("BUCKS_COPY_BITGET_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
@@ -1729,7 +2025,7 @@ class PaperRunner:
     def fetch_candles(self, symbol: str) -> list[Candle]:
         params = {
             "granularity": TIMEFRAME,
-            "limit": str(self.candle_limit),
+            "limit": str(self.fetch_candle_limit),
             "productType": PRODUCT_TYPE,
             "symbol": symbol,
         }
@@ -1768,6 +2064,90 @@ class PaperRunner:
             )
         return sorted(candles, key=lambda candle: candle.open_time)
 
+    def fetch_history_candles(self, symbol: str, end_time_ms: int, limit: int = 200) -> list[Candle]:
+        params = {
+            "endTime": str(end_time_ms),
+            "granularity": TIMEFRAME,
+            "limit": str(min(max(limit, 1), 200)),
+            "productType": PRODUCT_TYPE,
+            "symbol": symbol,
+        }
+        url = f"{self.base_url}/api/v2/mix/market/history-candles?{urlencode(sorted(params.items()))}"
+        request = Request(
+            url,
+            headers={
+                "Content-Type": "application/json",
+                "locale": "en-US",
+                "User-Agent": "BucksCopyPaperRunner/1.0",
+            },
+            method="GET",
+        )
+        with urlopen(request, timeout=20, context=ssl_context()) as response:
+            body = response.read()
+        decoded = json.loads(body.decode("utf-8"))
+        if decoded.get("code") != "00000":
+            raise RuntimeError(f"Bitget API {decoded.get('code')}: {decoded.get('msg')}")
+        candles: list[Candle] = []
+        for row in decoded.get("data", []):
+            if len(row) < 6:
+                continue
+            open_time = int(dec(row[0]) / dec(1000))
+            candles.append(
+                Candle(
+                    symbol=symbol,
+                    open_time=open_time,
+                    open=dec(row[1]),
+                    high=dec(row[2]),
+                    low=dec(row[3]),
+                    close=dec(row[4]),
+                    volume=dec(row[5]),
+                    is_closed=True,
+                )
+            )
+        return sorted(candles, key=lambda candle: candle.open_time)
+
+    def required_candle_count(self, symbol: str) -> int:
+        required = self.fetch_candle_limit
+        for params in ACTIVE_STRATEGIES_BY_SYMBOL.get(symbol, []):
+            if params["strategy_id"] in {
+                BTC_REGIME_SESSION_FADE_PARAMS["strategy_id"],
+                BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"],
+            }:
+                required = max(required, REGIME_STRATEGY_MIN_CANDLES)
+            else:
+                required = max(required, int(params.get("slow_mean_period", self.fetch_candle_limit)) + 10)
+        return min(required, self.candle_limit)
+
+    def backfill_history_if_needed(self, symbol: str, candles: list[Candle]) -> list[Candle]:
+        required = self.required_candle_count(symbol)
+        closed_count = len([candle for candle in candles if candle.is_closed])
+        if closed_count >= required or self.history_backfill_pages_per_cycle <= 0:
+            trimmed = candles[-self.candle_limit :]
+            self.save_candles(symbol, trimmed)
+            return trimmed
+        if not candles:
+            return candles
+
+        merged = {candle.key: candle for candle in candles}
+        oldest_open_time = min(candle.open_time for candle in candles)
+        pages = 0
+        while closed_count < required and pages < self.history_backfill_pages_per_cycle:
+            history = self.fetch_history_candles(symbol, oldest_open_time * 1000 - 1)
+            if not history:
+                break
+            previous_oldest = oldest_open_time
+            for candle in history:
+                merged[candle.key] = candle
+            oldest_open_time = min(candle.open_time for candle in merged.values())
+            candles = sorted(merged.values(), key=lambda candle: candle.open_time)
+            closed_count = len([candle for candle in candles if candle.is_closed])
+            pages += 1
+            if oldest_open_time >= previous_oldest:
+                break
+            time.sleep(0.06)
+        self.save_candles(symbol, candles[-self.candle_limit :])
+        return candles[-self.candle_limit :]
+
     def candles_path(self, symbol: str) -> Path:
         return self.data_dir / f"candles-{symbol}-{TIMEFRAME}.json"
 
@@ -1787,8 +2167,7 @@ class PaperRunner:
         for candle in incoming:
             merged[candle.key] = candle
         candles = sorted(merged.values(), key=lambda candle: candle.open_time)
-        self.save_candles(symbol, candles)
-        return candles[-self.candle_limit :]
+        return self.backfill_history_if_needed(symbol, candles)
 
     def load_evaluated_keys(self, user_id: str) -> set[str]:
         path = self.user_dir(user_id) / "paper-runner-evaluations.jsonl"
@@ -2016,7 +2395,7 @@ class PaperRunner:
             try:
                 remote_candles = self.fetch_candles(symbol)
                 stored_candles = self.upsert_candles(symbol, remote_candles)
-                saved_candles += len(remote_candles)
+                saved_candles += len(stored_candles)
                 closed_candles = [candle for candle in stored_candles if candle.is_closed]
                 if not closed_candles:
                     market_failures.append(f"{symbol}: no closed 15m candle available")

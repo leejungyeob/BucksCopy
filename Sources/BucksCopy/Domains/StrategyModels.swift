@@ -152,6 +152,8 @@ struct StrategyRegistry {
             XOneHourShortStrategy(),
             BTCFifteenMinutePhaseVacuumReclaimStrategy(),
             BTCFifteenMinuteVacuumPulseStrategy(),
+            BTCFifteenMinuteRegimeSessionFadeStrategy(),
+            BTCFifteenMinuteBullPullbackLongStrategy(),
             XFrequencyStrategy(),
             XStrategy()
         ]
@@ -171,6 +173,8 @@ enum StrategyTimeframeRouting {
                 XFrequencyStrategy.identifier,
                 BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
                 BTCFifteenMinuteVacuumPulseStrategy.identifier,
+                BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
+                BTCFifteenMinuteBullPullbackLongStrategy.identifier,
                 ETHFifteenMinuteVacuumPulseStrategy.identifier
             ]
         case .oneHour:
@@ -282,6 +286,16 @@ enum StrategyTimeframeRouting {
         ),
         StrategyRouteKey(
             symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: BTCFifteenMinuteRegimeSessionFadeStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: BTCFifteenMinuteBullPullbackLongStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("ETHUSDT"),
             timeframe: .fourHours,
             strategyID: DonchianChannelBreakoutStrategy.identifier
         ),
@@ -322,6 +336,16 @@ enum StrategyTimeframeRouting {
             symbol: FuturesSymbol("BTCUSDT"),
             timeframe: .fifteenMinutes,
             strategyID: BTCFifteenMinuteVacuumPulseStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: BTCFifteenMinuteRegimeSessionFadeStrategy.identifier
+        ),
+        StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: BTCFifteenMinuteBullPullbackLongStrategy.identifier
         ),
         StrategyRouteKey(
             symbol: FuturesSymbol("ETHUSDT"),

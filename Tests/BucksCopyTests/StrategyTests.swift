@@ -13,6 +13,8 @@ final class StrategyTests: XCTestCase {
             VWMATouchTrendStrategy.identifier,
             BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
             BTCFifteenMinuteVacuumPulseStrategy.identifier,
+            BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
+            BTCFifteenMinuteBullPullbackLongStrategy.identifier,
             XOneHourLongStrategy.identifier,
             XOneHourShortStrategy.identifier,
             XFrequencyStrategy.identifier,
@@ -28,6 +30,8 @@ final class StrategyTests: XCTestCase {
                 XFrequencyStrategy.identifier,
                 BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
                 BTCFifteenMinuteVacuumPulseStrategy.identifier,
+                BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
+                BTCFifteenMinuteBullPullbackLongStrategy.identifier,
                 ETHFifteenMinuteVacuumPulseStrategy.identifier
             ]
         )
@@ -81,11 +85,23 @@ final class StrategyTests: XCTestCase {
             ),
             [
                 BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
-                BTCFifteenMinuteVacuumPulseStrategy.identifier
+                BTCFifteenMinuteVacuumPulseStrategy.identifier,
+                BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
+                BTCFifteenMinuteBullPullbackLongStrategy.identifier
             ]
         )
         XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
             strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
+            for: .fifteenMinutes,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
+            strategyID: BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
+            for: .fifteenMinutes,
+            symbol: FuturesSymbol("BTCUSDT")
+        ))
+        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
+            strategyID: BTCFifteenMinuteBullPullbackLongStrategy.identifier,
             for: .fifteenMinutes,
             symbol: FuturesSymbol("BTCUSDT")
         ))
@@ -396,6 +412,68 @@ final class StrategyTests: XCTestCase {
             config: strategy.definition.defaultConfig
         )
         XCTAssertEqual(oneHourEvaluation, .noSignal)
+    }
+
+    func testBTCRegimeSessionFadeCreatesSignalFromClosedFifteenMinuteCandle() throws {
+        let strategy = BTCFifteenMinuteRegimeSessionFadeStrategy()
+        let candles = btcRegimeSessionFadeCandles()
+        var config = strategy.definition.defaultConfig
+        config.parameters["threshold"] = Decimal(string: "0.004")!
+        config.parameters["trendEMAPeriod"] = 5
+        config.parameters["macroMAPeriod"] = 5
+        config.parameters["macroSlopeDays"] = 1
+        config.parameters["macroReturnDays"] = 1
+
+        let evaluation = try strategy.evaluate(
+            StrategyContext(
+                symbol: FuturesSymbol("BTCUSDT"),
+                timeframe: .fifteenMinutes,
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
+            ),
+            config: config
+        )
+
+        guard case .signal(let signal) = evaluation else {
+            return XCTFail("Expected BTC regime session fade signal")
+        }
+
+        XCTAssertEqual(signal.strategyID, BTCFifteenMinuteRegimeSessionFadeStrategy.identifier)
+        XCTAssertEqual(signal.side, .buy)
+        XCTAssertEqual(signal.entryPrice, Decimal(string: "100.5")!)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, 3)
+        XCTAssertEqual(strategy.definition.defaultConfig.maximumHoldingCandles, 12)
+    }
+
+    func testBTCBullPullbackLongUsesTightTargetNearHigh() throws {
+        let strategy = BTCFifteenMinuteBullPullbackLongStrategy()
+        let candles = btcBullPullbackLongCandles()
+        var config = strategy.definition.defaultConfig
+        config.parameters["trendEMAPeriod"] = 5
+        config.parameters["macroMAPeriod"] = 2
+        config.parameters["macroSlopeDays"] = 1
+        config.parameters["macroReturnDays"] = 1
+        config.parameters["bullReturnThreshold"] = Decimal(string: "0.001")!
+
+        let evaluation = try strategy.evaluate(
+            StrategyContext(
+                symbol: FuturesSymbol("BTCUSDT"),
+                timeframe: .fifteenMinutes,
+                closedCandles: candles,
+                generatedAt: candles.last?.openTime ?? Date()
+            ),
+            config: config
+        )
+
+        guard case .signal(let signal) = evaluation else {
+            return XCTFail("Expected BTC bull pullback long signal")
+        }
+
+        XCTAssertEqual(signal.strategyID, BTCFifteenMinuteBullPullbackLongStrategy.identifier)
+        XCTAssertEqual(signal.side, .buy)
+        XCTAssertEqual(signal.entryPrice, Decimal(string: "103.8")!)
+        XCTAssertEqual(signal.plannedRewardRiskRatio, Decimal(string: "2.2")!)
+        XCTAssertEqual(strategy.definition.defaultConfig.maximumHoldingCandles, 12)
     }
 
     func testXFrequencyStrategyCreatesShortAfterThreeBarReclaim() throws {
@@ -1522,6 +1600,71 @@ private func xShortCandles() -> [Candle] {
         volume: 2_000
     )
     return slowBase + fastBase + [reclaim]
+}
+
+private func btcRegimeSessionFadeCandles() -> [Candle] {
+    var candles = (0..<396).map { index in
+        makeStrategyCandle(offset: index, open: 99, high: Decimal(string: "99.2")!, low: Decimal(string: "98.8")!, close: 99)
+    }
+    candles.append(makeStrategyCandle(offset: 396, open: 101, high: Decimal(string: "101.2")!, low: Decimal(string: "100.8")!, close: 101))
+    candles.append(contentsOf: (397..<404).map { index in
+        makeStrategyCandle(offset: index, open: 99, high: Decimal(string: "99.2")!, low: Decimal(string: "98.8")!, close: 99)
+    })
+    candles.append(makeStrategyCandle(
+        offset: 404,
+        open: Decimal(string: "100.1")!,
+        high: Decimal(string: "100.8")!,
+        low: Decimal(string: "99.8")!,
+        close: Decimal(string: "100.5")!
+    ))
+    return candles
+}
+
+private func btcBullPullbackLongCandles() -> [Candle] {
+    var candles = (0..<384).map { index in
+        let day = Decimal(index / 96)
+        let close = Decimal(100) + day
+        return makeStrategyCandle(
+            offset: index,
+            open: close,
+            high: close + Decimal(string: "0.5")!,
+            low: close - Decimal(string: "0.5")!,
+            close: close
+        )
+    }
+    candles.append(contentsOf: (384..<392).map { index in
+        makeStrategyCandle(
+            offset: index,
+            open: Decimal(string: "104.5")!,
+            high: Decimal(string: "104.7")!,
+            low: Decimal(string: "104.2")!,
+            close: Decimal(string: "104.5")!
+        )
+    })
+    candles.append(makeStrategyCandle(
+        offset: 392,
+        open: Decimal(string: "104.5")!,
+        high: Decimal(string: "104.7")!,
+        low: Decimal(string: "104.2")!,
+        close: Decimal(string: "104.5")!
+    ))
+    candles.append(contentsOf: (393..<400).map { index in
+        makeStrategyCandle(
+            offset: index,
+            open: Decimal(string: "103.2")!,
+            high: Decimal(string: "103.4")!,
+            low: Decimal(string: "103.0")!,
+            close: Decimal(string: "103.2")!
+        )
+    })
+    candles.append(makeStrategyCandle(
+        offset: 400,
+        open: Decimal(string: "103.3")!,
+        high: Decimal(string: "104.0")!,
+        low: Decimal(string: "103.0")!,
+        close: Decimal(string: "103.8")!
+    ))
+    return candles
 }
 
 private func xOneHourLongCandles() -> [Candle] {
