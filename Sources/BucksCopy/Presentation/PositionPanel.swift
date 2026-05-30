@@ -10,8 +10,9 @@ struct PositionPanel: View {
         DashboardPanel {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("내 포지션")
+                    Text("포지션")
                         .font(.headline)
+                    Badge(text: "\(positions.count)", color: positions.isEmpty ? .secondary : .blue)
                     Spacer()
                     Button(action: onRefresh) {
                         Image(systemName: "arrow.clockwise")
@@ -22,7 +23,7 @@ struct PositionPanel: View {
                 }
 
                 ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         if positions.isEmpty {
                             EmptyPositionCard()
                         } else {
@@ -67,24 +68,24 @@ private struct PositionCard: View {
             price: position.stopLoss
         )
 
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Text(position.symbol.rawValue)
-                            .font(.headline.monospacedDigit())
+                            .font(.callout.monospacedDigit().weight(.semibold))
 
                         Text(position.side.displayName)
-                            .font(.caption.weight(.bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(position.side.tint)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
                             .background(position.side.tint.opacity(0.12))
                             .clipShape(Capsule())
                     }
 
                     Text("\(position.marginMode.uppercased()) · \(position.leverage)x · \(position.total.dashboardText)")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
@@ -92,7 +93,7 @@ private struct PositionCard: View {
 
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(position.unrealizedProfitLoss.dashboardText)
-                        .font(.title3.monospacedDigit().weight(.semibold))
+                        .font(.callout.monospacedDigit().weight(.semibold))
                         .foregroundStyle(position.profitTint)
                     Text(position.priceMovePercent?.percentText ?? "-")
                         .font(.caption.monospacedDigit().weight(.semibold))
@@ -100,7 +101,7 @@ private struct PositionCard: View {
                 }
             }
 
-            LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 6) {
                 PositionMetric(title: "Entry", value: position.openPriceAverage.dashboardText)
                 PositionMetric(title: "Mark", value: position.markPrice.dashboardText)
                 PositionMetric(title: "Size", value: position.total.dashboardText)
@@ -131,7 +132,7 @@ private struct PositionCard: View {
                 }
             }
         }
-        .padding(10)
+        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.72))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -144,7 +145,7 @@ private struct PositionCard: View {
     private var metricColumns: [GridItem] {
         [
             GridItem(
-                .adaptive(minimum: 92, maximum: 150),
+                .adaptive(minimum: 78, maximum: 132),
                 spacing: 6,
                 alignment: .leading
             )
@@ -177,8 +178,9 @@ private struct PositionMetric: View {
                     .minimumScaleFactor(0.72)
             }
         }
-        .padding(7)
-        .frame(maxWidth: .infinity, minHeight: subtitle == nil ? 42 : 58, alignment: .leading)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: subtitle == nil ? 36 : 50, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
@@ -285,14 +287,14 @@ struct PositionExitProjection: Equatable {
 
 private struct EmptyPositionCard: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 8) {
+            Image(systemName: "tray")
+                .foregroundStyle(.secondary)
             Text("열린 포지션 없음")
-                .font(.callout.weight(.semibold))
-            Text("서버가 읽어온 USDT-M Futures 포지션이 여기에 표시됩니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(10)
+        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.58))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

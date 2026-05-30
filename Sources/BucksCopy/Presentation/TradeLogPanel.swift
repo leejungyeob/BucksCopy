@@ -9,10 +9,11 @@ struct TradeLogPanel: View {
 
     var body: some View {
         DashboardPanel {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(language == .korean ? "매매기록" : "Trade History")
                         .font(.headline)
+                    Badge(text: "\(logs.count)", color: logs.isEmpty ? .secondary : .blue)
                     Spacer()
                     Picker("", selection: Binding(
                         get: { language },
@@ -62,7 +63,7 @@ private struct TradeHistorySummaryStrip: View {
     let language: TradeLogLanguage
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 5) {
             summaryCell(title: label("실현손익", "Realized"), value: realizedProfit.signedDashboardText, tone: realizedProfit >= 0 ? .green : .red)
             summaryCell(title: label("미실현", "Unrealized"), value: unrealizedProfit.signedDashboardText, tone: unrealizedProfit >= 0 ? .green : .red)
             summaryCell(title: label("승률", "Win Rate"), value: winRateText)
@@ -72,7 +73,7 @@ private struct TradeHistorySummaryStrip: View {
     }
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 88, maximum: 150), spacing: 6, alignment: .leading)]
+        [GridItem(.adaptive(minimum: 82, maximum: 140), spacing: 5, alignment: .leading)]
     }
 
     private var scopedLogs: [TradeEventLog] {
@@ -150,8 +151,8 @@ private struct TradeHistorySummaryStrip: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.44))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -211,9 +212,9 @@ private struct LogRow: View {
 
                 if !display.details.isEmpty {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 138), spacing: 6, alignment: .topLeading)],
+                        columns: [GridItem(.adaptive(minimum: 118), spacing: 5, alignment: .topLeading)],
                         alignment: .leading,
-                        spacing: 6
+                        spacing: 5
                     ) {
                         ForEach(display.details) { detail in
                             LogDetailCell(detail: detail)
@@ -224,8 +225,8 @@ private struct LogRow: View {
             .padding(.top, 6)
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 6) {
-                    LogChipFlow(spacing: 6, rowSpacing: 5) {
+                VStack(alignment: .leading, spacing: 5) {
+                    LogChipFlow(spacing: 5, rowSpacing: 4) {
                         LogChip(
                             text: log.timestamp.dashboardLogDateTime,
                             tone: .neutral,
@@ -243,7 +244,7 @@ private struct LogRow: View {
                     }
 
                     Text(display.title)
-                        .font(.callout.weight(.semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(log.severity == .error ? .red : .primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
@@ -253,11 +254,11 @@ private struct LogRow: View {
             .contentShape(Rectangle())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
+        .padding(6)
         .background(rowBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(borderColor, lineWidth: 0.8)
         }
     }
@@ -326,8 +327,8 @@ private struct LogChip: View {
             .monospacedDigit()
             .lineLimit(2)
             .foregroundStyle(foreground)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
             .background(background)
             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             .fixedSize(horizontal: true, vertical: true)
@@ -363,15 +364,15 @@ private struct LogDetailCell: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Text(detail.value)
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(valueColor)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
         .background(valueColor.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }

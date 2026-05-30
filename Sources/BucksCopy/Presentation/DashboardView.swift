@@ -7,7 +7,7 @@ struct DashboardView: View {
     var body: some View {
         Group {
             if isAuthenticated {
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     TradingCommandPanel(
                         endpoint: viewModel.state.serverRunnerEndpoint,
                         connectionState: viewModel.state.serverRunnerConnectionState,
@@ -30,7 +30,15 @@ struct DashboardView: View {
                     )
 
                     HSplitView {
-                        VStack(spacing: 12) {
+                        VStack(spacing: 10) {
+                            StrategySelectionPanel(
+                                strategies: viewModel.state.serverRunnerStatus?.strategies?.available ?? [],
+                                enabledStrategyIDs: viewModel.state.serverRunnerStatus?.strategies?.enabledStrategyIDs ?? [],
+                                isRefreshing: isServerRefreshing,
+                                onToggle: viewModel.setServerStrategyEnabled
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: 245, alignment: .topLeading)
+
                             PositionPanel(
                                 positions: displayPositions,
                                 partialTakeProfitByPositionID: positionPartialTakeProfitByPositionID,
@@ -40,16 +48,8 @@ struct DashboardView: View {
                                 }
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                            StrategySelectionPanel(
-                                strategies: viewModel.state.serverRunnerStatus?.strategies?.available ?? [],
-                                enabledStrategyIDs: viewModel.state.serverRunnerStatus?.strategies?.enabledStrategyIDs ?? [],
-                                isRefreshing: isServerRefreshing,
-                                onToggle: viewModel.setServerStrategyEnabled
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: 260, alignment: .topLeading)
                         }
-                        .frame(minWidth: 360, idealWidth: 460, maxWidth: 620, maxHeight: .infinity, alignment: .topLeading)
+                        .frame(minWidth: 360, idealWidth: 440, maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
 
                         TradeLogPanel(
                             logs: dashboardTradeLogs,
@@ -76,9 +76,9 @@ struct DashboardView: View {
                 .frame(maxWidth: 520, maxHeight: .infinity, alignment: .center)
             }
         }
-        .padding(16)
-        .padding(.top, 10)
-        .frame(minWidth: 920, minHeight: 620)
+        .padding(12)
+        .padding(.top, 8)
+        .frame(minWidth: 900, minHeight: 600)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             guard !didBootstrap else { return }
@@ -377,38 +377,43 @@ private struct TradingCommandPanel: View {
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { context in
             DashboardPanel {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .top, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .center, spacing: 14) {
+                        HStack(alignment: .center, spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(statusTint.opacity(0.12))
+                                    .frame(width: 34, height: 34)
                                 Image(systemName: statusIconName)
-                                    .font(.title3.weight(.semibold))
+                                    .font(.system(size: 17, weight: .semibold))
                                     .foregroundStyle(statusTint)
-                                    .frame(width: 24, height: 24)
-
-                                Text(titleText)
-                                    .font(.title2.weight(.semibold))
-                                    .lineLimit(1)
-
-                                Badge(text: automationBadgeText, color: statusTint)
-                                Badge(text: liveBadgeText, color: liveBadgeColor)
                             }
 
-                            Text(subtitleText)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(titleText)
+                                    .font(.headline.weight(.semibold))
+                                    .lineLimit(1)
+
+                                HStack(spacing: 6) {
+                                    Badge(text: automationBadgeText, color: statusTint)
+                                    Badge(text: liveBadgeText, color: liveBadgeColor)
+                                    Text(subtitleText)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutPriority(1)
 
-                        Spacer(minLength: 16)
-
-                        HStack(spacing: 10) {
+                        HStack(spacing: 8) {
                             Button(action: {
                                 onRefreshServer()
                                 onRefreshPositions()
                             }) {
                                 Image(systemName: "arrow.clockwise")
-                                    .frame(width: 18, height: 18)
+                                    .frame(width: 16, height: 16)
                             }
                             .buttonStyle(.borderless)
                             .disabled(isRefreshing)
@@ -416,15 +421,15 @@ private struct TradingCommandPanel: View {
 
                             if isConnected {
                                 Button(action: onLogout) {
-                                    Label("로그아웃", systemImage: "rectangle.and.arrow.right")
+                                    Label("로그아웃", systemImage: "rectangle.portrait.and.arrow.right")
                                 }
                                 .buttonStyle(.bordered)
                             }
 
                             Button(action: onToggleAutomation) {
                                 Label(primaryButtonText, systemImage: primaryButtonIcon)
-                                    .font(.headline)
-                                    .frame(minWidth: 148)
+                                    .font(.callout.weight(.semibold))
+                                    .frame(minWidth: 128)
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(isAutomationEnabled ? .red : .green)
@@ -456,7 +461,7 @@ private struct TradingCommandPanel: View {
     }
 
     private var metricColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 128, maximum: 220), spacing: 8, alignment: .leading)]
+        [GridItem(.adaptive(minimum: 104, maximum: 170), spacing: 6, alignment: .leading)]
     }
 
     private var isRefreshing: Bool {
@@ -504,11 +509,11 @@ private struct TradingCommandPanel: View {
 
     private var automationBadgeText: String {
         guard isConnected else { return "로그인 필요" }
-        return isAutomationEnabled ? "자동매매 ON" : "자동매매 OFF"
+        return isAutomationEnabled ? "ON" : "OFF"
     }
 
     private var liveBadgeText: String {
-        isOrderExecutionEnabled ? "실주문 가능" : "실주문 OFF"
+        isOrderExecutionEnabled ? "실주문" : "대기"
     }
 
     private var liveBadgeColor: Color {
@@ -703,7 +708,7 @@ private struct TradingCommandMetric: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Text(value)
-                .font(.title3.monospacedDigit().weight(.semibold))
+                .font(.callout.monospacedDigit().weight(.semibold))
                 .foregroundStyle(tone)
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
@@ -715,9 +720,9 @@ private struct TradingCommandMetric: View {
                     .minimumScaleFactor(0.72)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.46))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
@@ -731,7 +736,7 @@ private struct StrategySelectionPanel: View {
 
     var body: some View {
         DashboardPanel {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("매매전략")
                         .font(.headline)
@@ -740,7 +745,7 @@ private struct StrategySelectionPanel: View {
                 }
 
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         if strategies.isEmpty {
                             Text("서버 전략 정보를 불러오는 중입니다.")
                                 .font(.caption)
@@ -777,8 +782,8 @@ private struct StrategySelectionRow: View {
     let onToggle: (Bool) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: 7) {
                 Toggle("", isOn: Binding(
                     get: { isEnabled },
                     set: onToggle
@@ -788,36 +793,36 @@ private struct StrategySelectionRow: View {
                 .disabled(disableToggle)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Text(strategy.name)
-                            .font(.callout.weight(.semibold))
+                            .font(.caption.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.78)
                         Badge(text: strategy.symbol, color: .secondary)
                         Badge(text: strategy.timeframe, color: .secondary)
                     }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(width: 158, alignment: .leading)
 
-                    if let backtest = strategy.backtest {
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 72), spacing: 6, alignment: .leading)],
-                            alignment: .leading,
-                            spacing: 5
-                        ) {
-                            strategyMetric("수익률", "\(backtest.netReturnPercent)%", tone: .green)
-                            strategyMetric("승률", "\(backtest.winRatePercent)%")
-                            strategyMetric("MDD", "\(backtest.maxDrawdownPercent)%", tone: .orange)
-                            strategyMetric("거래", "\(backtest.totalTrades)")
-                            strategyMetric("PF", backtest.profitFactor)
-                        }
-                        Text(backtest.label)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+            if let backtest = strategy.backtest {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 40), spacing: 5, alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 3
+                ) {
+                    strategyMetric("수익", "\(backtest.netReturnPercent)%", tone: .green)
+                    strategyMetric("승률", "\(backtest.winRatePercent)%")
+                    strategyMetric("MDD", "\(backtest.maxDrawdownPercent)%", tone: .orange)
+                    strategyMetric("거래", "\(backtest.totalTrades)")
+                    strategyMetric("PF", backtest.profitFactor)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isEnabled ? Color.green.opacity(0.08) : Color(nsColor: .textBackgroundColor).opacity(0.38))
         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -833,10 +838,11 @@ private struct StrategySelectionRow: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(tone)
                 .monospacedDigit()
                 .lineLimit(1)
+                .minimumScaleFactor(0.72)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -847,7 +853,7 @@ struct DashboardPanel<Content: View>: View {
 
     var body: some View {
         content
-            .padding(12)
+            .padding(10)
             .background(Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {

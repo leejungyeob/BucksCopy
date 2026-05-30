@@ -92,10 +92,10 @@ struct Badge: View {
 
     var body: some View {
         Text(text)
-            .font(.caption.weight(.medium))
+            .font(.caption2.weight(.semibold))
             .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
             .background(color.opacity(0.12))
             .clipShape(Capsule())
     }
