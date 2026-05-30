@@ -1380,9 +1380,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     label { color: var(--muted); font-size: 12px; }
     .shell {
-      width: min(1180px, calc(100vw - 28px));
+      width: min(1260px, calc(100vw - 24px));
       margin: 0 auto;
-      padding: 18px 0 26px;
+      padding: 12px 0 20px;
     }
     .topbar {
       display: flex;
@@ -1463,7 +1463,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       gap: 8px;
       margin-top: 10px;
     }
-    .command-panel { margin-bottom: 12px; }
+    .command-panel { margin-bottom: 10px; }
     .command-body {
       display: grid;
       gap: 12px;
@@ -1520,8 +1520,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     .dashboard {
       display: grid;
-      grid-template-columns: 0.95fr 1.05fr;
-      gap: 12px;
+      grid-template-columns: minmax(520px, 1.45fr) minmax(340px, 0.85fr);
+      gap: 10px;
       align-items: start;
     }
     .full { grid-column: 1 / -1; }
@@ -1585,12 +1585,18 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .info .dot, .dot.info { background: var(--blue); }
     .stack {
       display: grid;
-      gap: 12px;
+      gap: 10px;
+    }
+    .left-stack {
+      grid-template-rows: minmax(120px, auto) minmax(240px, 1fr) minmax(190px, auto);
+    }
+    .trade-log-panel {
+      min-height: 640px;
     }
     .compact-list {
       display: grid;
       gap: 8px;
-      max-height: 350px;
+      max-height: 555px;
       overflow: auto;
     }
     .row-card {
@@ -1635,9 +1641,89 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       font-size: 13px;
       font-weight: 700;
     }
+    .position-list {
+      display: grid;
+      gap: 7px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .position-card {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      background: #222;
+    }
+    .position-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+    .position-symbol {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
+      font-weight: 750;
+    }
+    .side-chip {
+      display: inline-flex;
+      min-height: 18px;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0 7px;
+      background: #303030;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .side-chip.long {
+      color: var(--green);
+      background: rgba(50, 215, 75, 0.12);
+    }
+    .side-chip.short {
+      color: var(--red);
+      background: rgba(255, 69, 58, 0.12);
+    }
+    .position-meta {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .position-pnl {
+      text-align: right;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .position-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 5px;
+    }
+    .position-metrics div {
+      min-width: 0;
+      border-top: 1px solid #3a3a3a;
+      padding-top: 6px;
+    }
+    .position-metrics span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      margin-bottom: 2px;
+    }
+    .position-metrics strong {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 12px;
+      line-height: 1.15;
+    }
     .table-wrap {
       overflow: auto;
-      max-height: 310px;
+      max-height: 220px;
     }
     table {
       width: 100%;
@@ -1664,7 +1750,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .strategy-list {
       display: grid;
       gap: 6px;
-      max-height: 360px;
+      max-height: 260px;
       overflow: auto;
     }
     .strategy-item {
@@ -1732,6 +1818,60 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       font-size: 12px;
       line-height: 1.35;
     }
+    .chart-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    select {
+      min-height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #252525;
+      color: var(--text);
+      padding: 0 8px;
+      font: inherit;
+      font-size: 12px;
+    }
+    .chart-wrap {
+      width: 100%;
+      height: 260px;
+      border-radius: 7px;
+      background: #151515;
+      overflow: hidden;
+    }
+    #chart-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .log-summary {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .summary-cell {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      padding: 7px;
+    }
+    .summary-cell span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 3px;
+    }
+    .summary-cell strong {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      line-height: 1.15;
+    }
+    .profit { color: var(--green); }
+    .loss { color: var(--red); }
     .empty {
       color: var(--muted);
       padding: 10px;
@@ -1749,6 +1889,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       .top-actions form button { width: 100%; }
       .command-actions { width: 100%; }
       .command-actions button { flex: 1; }
+      .trade-log-panel { min-height: 0; }
+      .log-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       table { min-width: 460px; }
     }
   </style>
@@ -1756,9 +1898,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 <body>
   <main class="shell">
     <header class="topbar">
-      <div>
-        <p class="eyebrow">BucksCopy Web</p>
-      </div>
+      <div></div>
       <div class="top-actions">
         <span class="pill ok"><span class="dot"></span>접속키 통과됨</span>
         <form id="lock-form" method="post" action="/web/access/logout">
@@ -1822,13 +1962,28 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       </section>
 
       <div class="dashboard">
-        <div class="stack">
+        <div class="stack left-stack">
           <section class="panel">
             <div class="panel-head">
               <h2 class="panel-title">포지션</h2>
               <span class="mini muted" id="position-count"></span>
             </div>
             <div class="panel-body" id="positions"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">차트</h2>
+              <div class="chart-toolbar">
+                <select id="chart-symbol"></select>
+                <span class="pill info"><span class="dot"></span>15m</span>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="chart-wrap">
+                <canvas id="chart-canvas"></canvas>
+              </div>
+            </div>
           </section>
 
           <section class="panel">
@@ -1843,20 +1998,13 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="stack">
-          <section class="panel">
-            <div class="panel-head">
-              <h2 class="panel-title">계정</h2>
-              <span class="mini muted" id="account-updated"></span>
-            </div>
-            <div class="panel-body" id="account-summary"></div>
-          </section>
-
-          <section class="panel">
+          <section class="panel trade-log-panel">
             <div class="panel-head">
               <h2 class="panel-title">매매기록</h2>
               <span class="mini muted" id="log-count"></span>
             </div>
             <div class="panel-body">
+              <div id="log-summary" class="log-summary"></div>
               <div id="logs" class="compact-list"></div>
             </div>
           </section>
@@ -1911,6 +2059,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         account: null,
         positions: null,
         logs: null,
+        candles: null,
+        selectedSymbol: "",
         errors: {},
         redactedIdentifier: "",
         busy: false,
@@ -1928,11 +2078,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         runnerStatus: document.getElementById("runner-status"),
         automationToggle: document.getElementById("automation-toggle"),
         liveBlockers: document.getElementById("live-blockers"),
+        chartSymbol: document.getElementById("chart-symbol"),
+        chartCanvas: document.getElementById("chart-canvas"),
         strategyList: document.getElementById("strategy-list"),
-        accountSummary: document.getElementById("account-summary"),
-        accountUpdated: document.getElementById("account-updated"),
         positionCount: document.getElementById("position-count"),
         positions: document.getElementById("positions"),
+        logSummary: document.getElementById("log-summary"),
         logCount: document.getElementById("log-count"),
         logs: document.getElementById("logs"),
         loginForm: document.getElementById("bitget-login-form"),
@@ -2135,6 +2286,62 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
       const visibleTradeLogs = () => (state.logs?.items || []).filter((item) => !isPaperLog(item));
 
+      const availableSymbols = () => {
+        const statusSymbols = Array.isArray(state.status?.symbols) ? state.status.symbols : [];
+        const strategySymbols = Array.isArray(state.strategies?.available)
+          ? state.strategies.available.map((strategy) => strategy.symbol).filter(Boolean)
+          : [];
+        return [...new Set([...statusSymbols, ...strategySymbols].map((symbol) => String(symbol).toUpperCase()))]
+          .filter(Boolean);
+      };
+
+      const ensureSelectedSymbol = () => {
+        const symbols = availableSymbols();
+        if (!state.selectedSymbol || !symbols.includes(state.selectedSymbol)) {
+          state.selectedSymbol = symbols[0] || "BTCUSDT";
+        }
+      };
+
+      const livePositions = () => (state.positions?.items || []).filter((position) => (
+        Number(position.total || position.available || 0) !== 0
+      ));
+
+      const currentUnrealizedPnl = () => livePositions()
+        .reduce((sum, position) => sum + (Number(position.unrealizedPL) || 0), 0);
+
+      const valueToneClass = (value) => {
+        const parsed = Number(value ?? 0);
+        if (parsed > 0) {
+          return "profit";
+        }
+        if (parsed < 0) {
+          return "loss";
+        }
+        return "";
+      };
+
+      const sideText = (value) => {
+        const text = String(value || "").toLowerCase();
+        if (text.includes("long") || text === "buy") {
+          return "Long";
+        }
+        if (text.includes("short") || text === "sell") {
+          return "Short";
+        }
+        return value || "-";
+      };
+
+      const sideClass = (value) => {
+        const text = String(value || "").toLowerCase();
+        if (text.includes("long") || text === "buy") {
+          return "long";
+        }
+        if (text.includes("short") || text === "sell") {
+          return "short";
+        }
+        return "";
+      };
+
       const setNotice = (message, tone = "") => {
         if (noticeTimer) {
           window.clearTimeout(noticeTimer);
@@ -2239,6 +2446,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         state.account = null;
         state.positions = null;
         state.logs = null;
+        state.candles = null;
+        state.selectedSymbol = "";
         state.errors = {};
         state.redactedIdentifier = "";
         els.loginForm.reset();
@@ -2276,6 +2485,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             guardedLoad("account", () => api("/users/me/account")),
             guardedLoad("positions", () => api("/users/me/positions"))
           ]);
+          ensureSelectedSymbol();
+          await guardedLoad(
+            "candles",
+            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=240`)
+          );
           state.lastUpdated = new Date();
           render();
           if (!silent) {
@@ -2303,9 +2517,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         const live = state.live || state.status?.live || {};
         const config = live.executionConfig || {};
         const accountItems = state.account?.items || [];
-        const positions = (state.positions?.items || []).filter((position) => (
-          Number(position.total || position.available || 0) !== 0
-        ));
+        const positions = livePositions();
         const equity = accountItems.reduce((sum, account) => sum + (Number(account.accountEquity) || 0), 0);
         const available = accountItems.reduce((sum, account) => sum + (Number(account.available) || 0), 0);
         const enabledCount = Array.isArray(strategies.enabledStrategyIDs) ? strategies.enabledStrategyIDs.length : 0;
@@ -2401,32 +2613,120 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         }).join("");
       };
 
-      const renderAccount = () => {
-        els.accountUpdated.textContent = "";
-        if (state.errors.account) {
-          els.accountSummary.innerHTML = empty(state.errors.account);
+      const renderChartControls = () => {
+        ensureSelectedSymbol();
+        const symbols = availableSymbols();
+        const options = (symbols.length ? symbols : [state.selectedSymbol || "BTCUSDT"])
+          .map((symbol) => `<option value="${escapeHTML(symbol)}">${escapeHTML(symbol)}</option>`)
+          .join("");
+        if (els.chartSymbol.innerHTML !== options) {
+          els.chartSymbol.innerHTML = options;
+        }
+        els.chartSymbol.value = state.selectedSymbol || symbols[0] || "BTCUSDT";
+        els.chartSymbol.disabled = !symbols.length || state.busy;
+      };
+
+      const renderChartMessage = (message) => {
+        const canvas = els.chartCanvas;
+        const rect = canvas.getBoundingClientRect();
+        const width = Math.max(320, Math.floor(rect.width || 640));
+        const height = Math.max(180, Math.floor(rect.height || 260));
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = "#151515";
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = "#a8a8a8";
+        ctx.font = "12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(message, 14, 24);
+      };
+
+      const renderChart = () => {
+        renderChartControls();
+        if (state.errors.candles) {
+          renderChartMessage(state.errors.candles);
           return;
         }
-        const items = state.account?.items || [];
-        if (!items.length) {
-          els.accountSummary.innerHTML = empty("계정 요약이 없습니다.");
+        const candles = (state.candles?.items || [])
+          .map((candle) => ({
+            open: Number(candle.open),
+            high: Number(candle.high),
+            low: Number(candle.low),
+            close: Number(candle.close)
+          }))
+          .filter((candle) => (
+            Number.isFinite(candle.open) &&
+            Number.isFinite(candle.high) &&
+            Number.isFinite(candle.low) &&
+            Number.isFinite(candle.close)
+          ))
+          .slice(-160);
+        if (!candles.length) {
+          renderChartMessage("표시할 캔들이 없습니다.");
           return;
         }
-        const totals = items.reduce((memo, account) => {
-          memo.available += Number(account.available) || 0;
-          memo.equity += Number(account.accountEquity) || 0;
-          memo.unrealized += Number(account.unrealizedPL) || 0;
-          return memo;
-        }, { available: 0, equity: 0, unrealized: 0 });
-        els.accountUpdated.textContent = timeText(items[0]?.updatedAt);
-        els.accountSummary.innerHTML = `
-          <div class="kv">
-            <div><span>Available</span><strong>${numberText(totals.available, 3)}</strong></div>
-            <div><span>Equity</span><strong>${numberText(totals.equity, 3)}</strong></div>
-            <div><span>Unrealized PnL</span><strong>${signedNumber(totals.unrealized)}</strong></div>
-            <div><span>Accounts</span><strong>${items.length}</strong></div>
-          </div>
-        `;
+
+        const canvas = els.chartCanvas;
+        const rect = canvas.getBoundingClientRect();
+        const width = Math.max(320, Math.floor(rect.width || 640));
+        const height = Math.max(180, Math.floor(rect.height || 260));
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = "#151515";
+        ctx.fillRect(0, 0, width, height);
+
+        const padX = 12;
+        const padY = 18;
+        const chartWidth = width - padX * 2;
+        const chartHeight = height - padY * 2;
+        const highs = candles.map((candle) => candle.high);
+        const lows = candles.map((candle) => candle.low);
+        const maxPrice = Math.max(...highs);
+        const minPrice = Math.min(...lows);
+        const range = Math.max(maxPrice - minPrice, maxPrice * 0.001, 1);
+        const y = (price) => padY + ((maxPrice - price) / range) * chartHeight;
+
+        ctx.strokeStyle = "#2c2c2c";
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i += 1) {
+          const gy = padY + (chartHeight / 4) * i;
+          ctx.beginPath();
+          ctx.moveTo(padX, gy);
+          ctx.lineTo(width - padX, gy);
+          ctx.stroke();
+        }
+
+        const slot = chartWidth / candles.length;
+        const bodyWidth = Math.max(2, Math.min(8, slot * 0.58));
+        candles.forEach((candle, index) => {
+          const rising = candle.close >= candle.open;
+          const x = padX + slot * index + slot / 2;
+          const color = rising ? "#35d06f" : "#ff5b57";
+          const highY = y(candle.high);
+          const lowY = y(candle.low);
+          const openY = y(candle.open);
+          const closeY = y(candle.close);
+          const top = Math.min(openY, closeY);
+          const bodyHeight = Math.max(Math.abs(openY - closeY), 1.5);
+
+          ctx.strokeStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(x, highY);
+          ctx.lineTo(x, lowY);
+          ctx.stroke();
+          ctx.fillStyle = color;
+          ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
+        });
+
+        ctx.fillStyle = "#a8a8a8";
+        ctx.font = "11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(numberText(maxPrice, 2), padX, 13);
+        ctx.fillText(numberText(minPrice, 2), padX, height - 6);
       };
 
       const renderPositions = () => {
@@ -2435,56 +2735,95 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           els.positions.innerHTML = empty(state.errors.positions);
           return;
         }
-        const items = (state.positions?.items || []).filter((position) => (
-          Number(position.total || position.available || 0) !== 0
-        ));
-        els.positionCount.textContent = `${items.length} open`;
+        const items = livePositions();
+        els.positionCount.textContent = `${items.length}개`;
         if (!items.length) {
           els.positions.innerHTML = empty("열린 포지션이 없습니다.");
           return;
         }
         els.positions.innerHTML = `
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th>Total</th>
-                  <th>Avg</th>
-                  <th>Mark</th>
-                  <th>PnL</th>
-                  <th>Lev</th>
-                  <th>TP/SL</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${items.map((position) => `
-                  <tr>
-                    <td>${escapeHTML(position.symbol || "-")}</td>
-                    <td>${escapeHTML(position.holdSide || "-")}</td>
-                    <td>${escapeHTML(numberText(position.total || position.available, 6))}</td>
-                    <td>${escapeHTML(numberText(position.openPriceAvg, 4))}</td>
-                    <td>${escapeHTML(numberText(position.markPrice, 4))}</td>
-                    <td>${escapeHTML(signedNumber(position.unrealizedPL))}</td>
-                    <td>${escapeHTML(position.leverage || "-")}</td>
-                    <td>${escapeHTML(position.takeProfit || "-")} / ${escapeHTML(position.stopLoss || "-")}</td>
-                  </tr>
-                `).join("")}
-              </tbody>
-            </table>
+          <div class="position-list">
+            ${items.map((position) => {
+              const pnl = Number(position.unrealizedPL || 0);
+              return `
+                <article class="position-card">
+                  <div class="position-top">
+                    <div>
+                      <div class="position-symbol">
+                        <span>${escapeHTML(position.symbol || "-")}</span>
+                        <span class="side-chip ${sideClass(position.holdSide)}">${escapeHTML(sideText(position.holdSide))}</span>
+                      </div>
+                      <div class="position-meta">
+                        ${escapeHTML(position.marginMode || "-")} · ${escapeHTML(position.leverage || "-")}x · ${escapeHTML(numberText(position.total || position.available, 6))}
+                      </div>
+                    </div>
+                    <div class="position-pnl ${valueToneClass(pnl)}">${escapeHTML(signedNumber(pnl))}</div>
+                  </div>
+                  <div class="position-metrics">
+                    <div><span>Entry</span><strong>${escapeHTML(numberText(position.openPriceAvg, 4))}</strong></div>
+                    <div><span>Mark</span><strong>${escapeHTML(numberText(position.markPrice, 4))}</strong></div>
+                    <div><span>Size</span><strong>${escapeHTML(numberText(position.total || position.available, 6))}</strong></div>
+                    <div><span>Liq</span><strong>${escapeHTML(numberText(position.liquidationPrice, 4))}</strong></div>
+                    <div><span>TP1</span><strong>${escapeHTML(position.partialTakeProfit || "-")}</strong></div>
+                    <div><span>TP2</span><strong>${escapeHTML(position.takeProfit || "-")}</strong></div>
+                    <div><span>SL</span><strong>${escapeHTML(position.stopLoss || "-")}</strong></div>
+                    <div><span>Mode</span><strong>${escapeHTML(position.posMode || "-")}</strong></div>
+                  </div>
+                </article>
+              `;
+            }).join("")}
           </div>
+        `;
+      };
+
+      const renderLogSummary = (items) => {
+        const riskCount = items.filter((item) => (
+          String(item.category || "").toLowerCase() === "risk" ||
+          String(item.severity || "").toLowerCase() === "error"
+        )).length;
+        const orderCount = items.filter((item) => String(item.category || "") === "liveOrder").length;
+        const unrealized = currentUnrealizedPnl();
+        const latest = items.length ? timeText(items[items.length - 1].timestamp) : "-";
+        els.logSummary.innerHTML = `
+          <div class="summary-cell">
+            <span>기록</span>
+            <strong>${items.length}</strong>
+          </div>
+          <div class="summary-cell">
+            <span>주문</span>
+            <strong>${orderCount}</strong>
+          </div>
+          <div class="summary-cell">
+            <span>승률</span>
+            <strong>-</strong>
+          </div>
+          <div class="summary-cell">
+            <span>미실현</span>
+            <strong class="${valueToneClass(unrealized)}">${signedNumber(unrealized)}</strong>
+          </div>
+          <div class="summary-cell">
+            <span>최근</span>
+            <strong>${escapeHTML(latest)}</strong>
+          </div>
+          ${riskCount ? `
+            <div class="summary-cell">
+              <span>주의</span>
+              <strong class="loss">${riskCount}</strong>
+            </div>
+          ` : ""}
         `;
       };
 
       const renderLogs = () => {
         if (state.errors.logs) {
           els.logCount.textContent = "";
+          els.logSummary.innerHTML = "";
           els.logs.innerHTML = empty(state.errors.logs);
           return;
         }
         const items = visibleTradeLogs();
         els.logCount.textContent = `${items.length}`;
+        renderLogSummary(items);
         if (!items.length) {
           els.logs.innerHTML = empty("실거래 매매기록이 없습니다.");
           return;
@@ -2534,8 +2873,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         renderMetrics();
         renderAutomation();
         renderStrategies();
-        renderAccount();
         renderPositions();
+        renderChart();
         renderLogs();
       };
 
@@ -2630,6 +2969,35 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         clearSession();
       });
 
+      els.chartSymbol.addEventListener("change", async (event) => {
+        if (state.busy || !token()) {
+          return;
+        }
+        state.selectedSymbol = String(event.target.value || "").toUpperCase();
+        setBusy(true);
+        try {
+          await guardedLoad(
+            "candles",
+            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=240`)
+          );
+          renderChart();
+        } catch (error) {
+          if (error.status === 401) {
+            clearSession();
+            render();
+            setNotice("Bitget 세션이 만료되었습니다.", "error");
+          } else {
+            setNotice(error.message || "차트 로딩 실패", "error");
+            renderChart();
+          }
+        } finally {
+          setBusy(false);
+          if (token()) {
+            render();
+          }
+        }
+      });
+
       document.addEventListener("click", async (event) => {
         const button = event.target.closest("button[data-action]");
         if (!button || state.busy) {
@@ -2664,6 +3032,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       render();
       refreshAll({ silent: true });
       window.setInterval(() => refreshAll({ silent: true }), REFRESH_MS);
+      window.addEventListener("resize", () => {
+        if (token()) {
+          renderChart();
+        }
+      });
     })();
   </script>
 </body>
