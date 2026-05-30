@@ -1432,12 +1432,17 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .panel-body { padding: 12px; }
     .notice {
       display: none;
-      margin-bottom: 10px;
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 20;
+      width: min(320px, calc(100vw - 36px));
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 9px 11px;
       color: var(--muted);
       background: #202020;
+      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
     }
     .notice.show { display: block; }
     .notice.error { border-color: #6f3232; color: #ffd5d5; }
@@ -1461,7 +1466,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .command-panel { margin-bottom: 12px; }
     .command-body {
       display: grid;
-      gap: 10px;
+      gap: 12px;
       padding: 12px;
     }
     .command-row {
@@ -1511,8 +1516,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       flex: 0 0 auto;
     }
     .command-footer {
-      display: grid;
-      gap: 7px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
     }
     .dashboard {
       display: grid;
@@ -1527,7 +1534,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       gap: 8px;
     }
     .metric {
-      min-height: 58px;
+      min-height: 56px;
       padding: 8px;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1659,23 +1666,54 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     td { font-size: 12px; }
     .strategy-list {
       display: grid;
-      gap: 8px;
+      gap: 6px;
       max-height: 360px;
       overflow: auto;
     }
     .strategy-item {
       display: grid;
       grid-template-columns: 18px 1fr;
-      gap: 8px;
-      align-items: start;
+      gap: 9px;
+      align-items: center;
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 9px;
+      padding: 8px;
       background: #222;
       color: var(--text);
-      font-size: 13px;
+      font-size: 12px;
     }
-    .strategy-item span { display: block; }
+    .strategy-item input { margin-top: 1px; }
+    .strategy-content {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .strategy-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .strategy-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .strategy-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .strategy-id {
+      color: var(--muted);
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .tagline {
       display: flex;
       flex-wrap: wrap;
@@ -1696,7 +1734,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       display: flex;
       align-items: flex-start;
       gap: 8px;
-      margin: 8px 0 10px;
+      margin: 0;
       color: var(--muted);
       font-size: 12px;
       line-height: 1.35;
@@ -1708,6 +1746,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       padding: 8px 10px;
       color: var(--muted);
       line-height: 1.45;
+      flex: 1 1 360px;
     }
     .automation-summary strong {
       display: inline;
@@ -1717,6 +1756,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       margin-right: 6px;
     }
     .automation-summary span { font-size: 12px; }
+    .setting-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin: 0;
+    }
     .empty {
       color: var(--muted);
       padding: 10px;
@@ -1908,6 +1953,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         busy: false,
         lastUpdated: null
       };
+      let noticeTimer = null;
 
       const els = {
         notice: document.getElementById("notice"),
@@ -2096,8 +2142,19 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       const visibleTradeLogs = () => (state.logs?.items || []).filter((item) => !isPaperLog(item));
 
       const setNotice = (message, tone = "") => {
+        if (noticeTimer) {
+          window.clearTimeout(noticeTimer);
+          noticeTimer = null;
+        }
         els.notice.textContent = message || "";
         els.notice.className = `notice${message ? " show" : ""}${tone ? ` ${tone}` : ""}`;
+        if (message && tone === "ok") {
+          noticeTimer = window.setTimeout(() => {
+            els.notice.textContent = "";
+            els.notice.className = "notice";
+            noticeTimer = null;
+          }, 2200);
+        }
       };
 
       const automationMode = () => {
@@ -2241,6 +2298,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           }
         } finally {
           setBusy(false);
+          if (token()) {
+            render();
+          }
         }
       };
 
@@ -2350,10 +2410,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           return `
             <label class="strategy-item">
               <input type="checkbox" data-strategy-id="${escapeHTML(strategy.id)}" ${strategy.enabled ? "checked" : ""}>
-              <span>
-                <strong>${escapeHTML(strategy.name || strategy.id)}</strong>
-                <span class="mini muted">${escapeHTML(strategy.id)}</span>
-                <span class="tagline">${tags.map((tag) => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</span>
+              <span class="strategy-content">
+                <span class="strategy-main">
+                  <span class="strategy-name">${escapeHTML(strategy.name || strategy.id)}</span>
+                  <span class="strategy-stats">${tags.map((tag) => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</span>
+                </span>
+                <span class="strategy-id">${escapeHTML(strategy.id)}</span>
               </span>
             </label>
           `;
