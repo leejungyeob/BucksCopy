@@ -5,7 +5,10 @@
       "name": "Friend Example",
       "accessKey": "replace-with-friend-access-key",
       "allowedStrategyIDs": [
-        "btc-15m-vacuum-pulse"
+        "btc-15m-vacuum-pulse",
+        "btc-15m-regime-session-fade",
+        "btc-15m-bull-pullback-long",
+        "eth-15m-vacuum-pulse"
       ]
     }
   ]
