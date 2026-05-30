@@ -1324,22 +1324,1102 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BucksCopy</title>
   <style>
-    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; min-height: 100vh; background: #111; color: #eee; display: grid; place-items: center; }
-    main { width: min(520px, calc(100vw - 40px)); }
-    h1 { margin: 0 0 10px; font-size: 26px; }
-    p { margin: 0 0 18px; color: #aaa; line-height: 1.5; }
-    button { height: 38px; border: 0; border-radius: 8px; padding: 0 14px; background: #333; color: #eee; font: inherit; cursor: pointer; }
+    :root {
+      color-scheme: dark;
+      --bg: #10100f;
+      --panel: #181817;
+      --panel-2: #20201e;
+      --line: #343430;
+      --text: #f4f1eb;
+      --muted: #aaa49a;
+      --green: #3fb16b;
+      --green-strong: #237a48;
+      --amber: #d7a642;
+      --red: #e05f5f;
+      --blue: #65a6d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    button, input { font: inherit; }
+    button {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 12px;
+      background: #242421;
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:hover { border-color: #55554f; background: #2c2c29; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.primary { background: var(--green-strong); border-color: var(--green-strong); }
+    button.danger { border-color: #6f3232; color: #ffd5d5; }
+    input {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #121211;
+      color: var(--text);
+      padding: 0 10px;
+    }
+    input[type="checkbox"] {
+      width: 16px;
+      min-height: 16px;
+      height: 16px;
+      accent-color: var(--green);
+    }
+    label { color: var(--muted); font-size: 12px; }
+    .shell {
+      width: min(1180px, calc(100vw - 28px));
+      margin: 0 auto;
+      padding: 18px 0 26px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.1;
+      font-weight: 800;
+    }
+    .eyebrow {
+      margin: 0 0 3px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .top-actions, .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 42px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .panel-body { padding: 12px; }
+    .notice {
+      display: none;
+      margin-bottom: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 11px;
+      color: var(--muted);
+      background: #171715;
+    }
+    .notice.show { display: block; }
+    .notice.error { border-color: #6f3232; color: #ffd5d5; }
+    .notice.ok { border-color: #2f6948; color: #cef5dc; }
+    .login-card {
+      width: min(560px, 100%);
+      margin-top: 18px;
+    }
+    .login-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .field { display: grid; gap: 5px; }
+    .login-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 12px;
+      align-items: start;
+    }
+    .full { grid-column: 1 / -1; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .metric {
+      min-height: 72px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+    }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 6px;
+    }
+    .metric strong {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 18px;
+      line-height: 1.1;
+    }
+    .metric small {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      line-height: 1.25;
+    }
+    .status-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .ok .dot, .dot.ok { background: var(--green); }
+    .warn .dot, .dot.warn { background: var(--amber); }
+    .bad .dot, .dot.bad { background: var(--red); }
+    .info .dot, .dot.info { background: var(--blue); }
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+    .compact-list {
+      display: grid;
+      gap: 8px;
+      max-height: 350px;
+      overflow: auto;
+    }
+    .row-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      background: #151514;
+    }
+    .row-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 5px;
+    }
+    .row-title strong {
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .muted { color: var(--muted); }
+    .mini { font-size: 12px; }
+    .kv {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .kv div {
+      min-width: 0;
+      border-top: 1px solid #2b2b28;
+      padding-top: 6px;
+    }
+    .kv span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 2px;
+    }
+    .kv strong {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: 310px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 540px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 8px;
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      background: #151514;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    td { font-size: 12px; }
+    .strategy-list {
+      display: grid;
+      gap: 8px;
+      max-height: 360px;
+      overflow: auto;
+    }
+    .strategy-item {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 8px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      background: #151514;
+      color: var(--text);
+      font-size: 13px;
+    }
+    .strategy-item span { display: block; }
+    .tagline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 5px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      border-radius: 999px;
+      padding: 0 7px;
+      background: #252521;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .risk-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 8px 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .empty {
+      color: var(--muted);
+      padding: 10px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #151514;
+    }
+    [hidden] { display: none !important; }
+    @media (max-width: 900px) {
+      .dashboard, .metrics { grid-template-columns: 1fr; }
+      .login-grid { grid-template-columns: 1fr; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .top-actions { width: 100%; }
+      .top-actions button, .top-actions form { flex: 1; }
+      .top-actions form button { width: 100%; }
+      table { min-width: 460px; }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h1>BucksCopy Web</h1>
-    <p>접속 키 통과 완료. 다음 단계에서 이 화면을 자동매매 대시보드로 연결합니다.</p>
-    <form method="post" action="/web/access/logout">
-      <button type="submit">잠금</button>
-    </form>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">BucksCopy Web</p>
+        <h1>Server Runner</h1>
+      </div>
+      <div class="top-actions">
+        <button type="button" data-action="refresh">새로고침</button>
+        <button type="button" data-action="bitget-logout" class="danger">Bitget 로그아웃</button>
+        <form id="lock-form" method="post" action="/web/access/logout">
+          <button type="submit">접속 잠금</button>
+        </form>
+      </div>
+    </header>
+
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+
+    <section id="login-panel" class="panel login-card">
+      <div class="panel-head">
+        <h2 class="panel-title">Bitget 연결</h2>
+        <span class="pill bad"><span class="dot"></span>세션 없음</span>
+      </div>
+      <div class="panel-body">
+        <form id="bitget-login-form" autocomplete="off">
+          <div class="login-grid">
+            <div class="field">
+              <label for="api-key">API Key</label>
+              <input id="api-key" name="apiKey" type="password" autocomplete="off" required>
+            </div>
+            <div class="field">
+              <label for="secret-key">API Secret</label>
+              <input id="secret-key" name="secretKey" type="password" autocomplete="off" required>
+            </div>
+            <div class="field">
+              <label for="passphrase">Passphrase</label>
+              <input id="passphrase" name="passphrase" type="password" autocomplete="off" required>
+            </div>
+          </div>
+          <div class="login-actions">
+            <button type="submit" class="primary">로그인</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="dashboard" hidden>
+      <div class="metrics" id="metrics"></div>
+
+      <div class="dashboard">
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">자동매매</h2>
+              <div class="status-line" id="runner-status"></div>
+            </div>
+            <div class="panel-body">
+              <div class="button-row">
+                <button type="button" data-action="runner-start" class="primary">시작</button>
+                <button type="button" data-action="runner-stop">중단</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">실거래 게이트</h2>
+              <div class="status-line" id="live-status"></div>
+            </div>
+            <div class="panel-body">
+              <div id="live-config" class="kv"></div>
+              <label class="risk-row">
+                <input id="risk-ack" type="checkbox">
+                <span>실거래 주문 위험과 서버 게이트 조건을 확인했습니다.</span>
+              </label>
+              <div class="button-row">
+                <button type="button" data-action="live-start" class="primary">Start Live</button>
+                <button type="button" data-action="live-stop">Stop Live</button>
+              </div>
+              <div id="live-blockers" class="tagline"></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">전략 선택</h2>
+              <button type="button" data-action="strategies-save">저장</button>
+            </div>
+            <div class="panel-body">
+              <div id="strategy-list" class="strategy-list"></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">계정 요약</h2>
+              <span class="mini muted" id="account-updated"></span>
+            </div>
+            <div class="panel-body" id="account-summary"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">현재 포지션</h2>
+              <span class="mini muted" id="position-count"></span>
+            </div>
+            <div class="panel-body" id="positions"></div>
+          </section>
+        </div>
+
+        <section class="panel full">
+          <div class="panel-head">
+            <h2 class="panel-title">매매기록</h2>
+            <span class="mini muted" id="log-count"></span>
+          </div>
+          <div class="panel-body">
+            <div id="logs" class="compact-list"></div>
+          </div>
+        </section>
+      </div>
+    </section>
   </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const TOKEN_KEY = "bucksCopy.paperRunner.authToken";
+      const REFRESH_MS = 60000;
+      const SAFE_DETAIL_KEYS = new Set([
+        "strategyID",
+        "timeframe",
+        "symbol",
+        "side",
+        "entry",
+        "stopLoss",
+        "partialTakeProfit",
+        "takeProfit",
+        "profitLockStopLossAfterPartialTakeProfit",
+        "plannedRewardRiskRatio",
+        "leverage",
+        "mode",
+        "reason",
+        "filledSize",
+        "averagePrice",
+        "size",
+        "marginUSDT",
+        "availableBalanceRatio",
+        "tp1",
+        "tp2",
+        "protectionOrders",
+        "enabledStrategies",
+        "enabledCount",
+        "symbols",
+        "savedCandles",
+        "evaluations",
+        "skippedEvaluations",
+        "enabled",
+        "signals",
+        "failures"
+      ]);
+
+      const state = {
+        status: null,
+        control: null,
+        live: null,
+        strategies: null,
+        account: null,
+        positions: null,
+        logs: null,
+        errors: {},
+        redactedIdentifier: "",
+        busy: false,
+        lastUpdated: null
+      };
+
+      const els = {
+        notice: document.getElementById("notice"),
+        loginPanel: document.getElementById("login-panel"),
+        dashboard: document.getElementById("dashboard"),
+        metrics: document.getElementById("metrics"),
+        runnerStatus: document.getElementById("runner-status"),
+        liveStatus: document.getElementById("live-status"),
+        liveConfig: document.getElementById("live-config"),
+        liveBlockers: document.getElementById("live-blockers"),
+        strategyList: document.getElementById("strategy-list"),
+        accountSummary: document.getElementById("account-summary"),
+        accountUpdated: document.getElementById("account-updated"),
+        positionCount: document.getElementById("position-count"),
+        positions: document.getElementById("positions"),
+        logCount: document.getElementById("log-count"),
+        logs: document.getElementById("logs"),
+        loginForm: document.getElementById("bitget-login-form"),
+        lockForm: document.getElementById("lock-form"),
+        riskAck: document.getElementById("risk-ack")
+      };
+
+      class ApiError extends Error {
+        constructor(message, status) {
+          super(message);
+          this.status = status;
+        }
+      }
+
+      const token = () => localStorage.getItem(TOKEN_KEY) || "";
+      const setToken = (value) => {
+        if (value) {
+          localStorage.setItem(TOKEN_KEY, value);
+        } else {
+          localStorage.removeItem(TOKEN_KEY);
+        }
+      };
+
+      const escapeHTML = (value) => String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+
+      const numberText = (value, digits = 2) => {
+        const raw = String(value ?? "").trim();
+        if (!raw) {
+          return "-";
+        }
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) {
+          return raw;
+        }
+        return parsed.toLocaleString("ko-KR", { maximumFractionDigits: digits });
+      };
+
+      const signedNumber = (value) => {
+        const parsed = Number(value ?? 0);
+        if (!Number.isFinite(parsed)) {
+          return numberText(value);
+        }
+        const text = numberText(parsed, 3);
+        return parsed > 0 ? `+${text}` : text;
+      };
+
+      const timeText = (value) => {
+        if (value === null || value === undefined || value === "") {
+          return "-";
+        }
+        const raw = String(value);
+        const numeric = /^\\d{11,}$/.test(raw) ? Number(raw) : NaN;
+        const date = Number.isFinite(numeric) ? new Date(numeric) : new Date(raw);
+        if (Number.isNaN(date.getTime())) {
+          return raw;
+        }
+        return date.toLocaleString("ko-KR", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        });
+      };
+
+      const severityClass = (severity) => {
+        const text = String(severity || "").toLowerCase();
+        if (text === "error" || text === "critical") {
+          return "bad";
+        }
+        if (text === "warning" || text === "warn") {
+          return "warn";
+        }
+        if (text === "info") {
+          return "info";
+        }
+        return "ok";
+      };
+
+      const pill = (text, tone = "") => `
+        <span class="pill ${tone}">
+          <span class="dot ${tone}"></span>${escapeHTML(text)}
+        </span>
+      `;
+
+      const empty = (text) => `<div class="empty">${escapeHTML(text)}</div>`;
+
+      const setNotice = (message, tone = "") => {
+        els.notice.textContent = message || "";
+        els.notice.className = `notice${message ? " show" : ""}${tone ? ` ${tone}` : ""}`;
+      };
+
+      const api = async (path, options = {}) => {
+        const headers = { "Accept": "application/json" };
+        const body = options.body === undefined ? undefined : JSON.stringify(options.body);
+        if (body !== undefined) {
+          headers["Content-Type"] = "application/json";
+        }
+        const authToken = token();
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+        const response = await fetch(path, {
+          method: options.method || "GET",
+          headers,
+          body,
+          cache: "no-store"
+        });
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch {
+          payload = {};
+        }
+        if (!response.ok) {
+          throw new ApiError(payload.error || `${response.status} ${response.statusText}`, response.status);
+        }
+        return payload;
+      };
+
+      const setBusy = (busy) => {
+        state.busy = busy;
+        document.querySelectorAll("button").forEach((button) => {
+          if (button.dataset.action === "refresh") {
+            button.disabled = busy;
+          }
+        });
+      };
+
+      const clearSession = () => {
+        setToken("");
+        state.status = null;
+        state.control = null;
+        state.live = null;
+        state.strategies = null;
+        state.account = null;
+        state.positions = null;
+        state.logs = null;
+        state.errors = {};
+        state.redactedIdentifier = "";
+        els.loginForm.reset();
+      };
+
+      const guardedLoad = async (key, loader) => {
+        try {
+          state[key] = await loader();
+          state.errors[key] = "";
+        } catch (error) {
+          if (error.status === 401) {
+            throw error;
+          }
+          state[key] = null;
+          state.errors[key] = error.message || "요청 실패";
+        }
+      };
+
+      const refreshAll = async ({ silent = false } = {}) => {
+        if (!token()) {
+          render();
+          return;
+        }
+        setBusy(true);
+        if (!silent) {
+          setNotice("동기화 중입니다.");
+        }
+        try {
+          state.status = await api("/users/me/status");
+          await Promise.all([
+            guardedLoad("control", () => api("/users/me/control")),
+            guardedLoad("live", () => api("/users/me/live/status")),
+            guardedLoad("strategies", () => api("/users/me/strategies")),
+            guardedLoad("logs", () => api("/users/me/logs?limit=80")),
+            guardedLoad("account", () => api("/users/me/account")),
+            guardedLoad("positions", () => api("/users/me/positions"))
+          ]);
+          state.lastUpdated = new Date();
+          render();
+          if (!silent) {
+            setNotice("동기화 완료.", "ok");
+          }
+        } catch (error) {
+          if (error.status === 401) {
+            clearSession();
+            render();
+            setNotice("Bitget 세션이 만료되었습니다.", "error");
+          } else {
+            render();
+            setNotice(error.message || "동기화 실패", "error");
+          }
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const renderMetrics = () => {
+        const control = state.control || state.status?.control || {};
+        const live = state.live || state.status?.live || {};
+        const strategies = state.strategies || state.status?.strategies || {};
+        const accountItems = state.account?.items || [];
+        const positions = (state.positions?.items || []).filter((position) => (
+          Number(position.total || position.available || 0) !== 0
+        ));
+        const equity = accountItems.reduce((sum, account) => sum + (Number(account.accountEquity) || 0), 0);
+        const enabledCount = Array.isArray(strategies.enabledStrategyIDs) ? strategies.enabledStrategyIDs.length : 0;
+        const availableCount = Array.isArray(strategies.available) ? strategies.available.length : 0;
+        els.metrics.innerHTML = `
+          <article class="metric">
+            <span>자동매매</span>
+            <strong>${control.enabled ? "실행 중" : "중단"}</strong>
+            <small>${escapeHTML(timeText(control.updatedAt))}</small>
+          </article>
+          <article class="metric">
+            <span>실거래 게이트</span>
+            <strong>${live.control?.enabled ? "동의 켜짐" : "동의 꺼짐"}</strong>
+            <small>${live.ready ? "Ready" : `${(live.blockers || []).length} blockers`}</small>
+          </article>
+          <article class="metric">
+            <span>계정 Equity</span>
+            <strong>${accountItems.length ? numberText(equity, 3) : "-"}</strong>
+            <small>${state.errors.account ? escapeHTML(state.errors.account) : "USDT-M Futures"}</small>
+          </article>
+          <article class="metric">
+            <span>전략 / 포지션</span>
+            <strong>${enabledCount}/${availableCount} · ${positions.length}</strong>
+            <small>${escapeHTML(timeText(state.lastUpdated))}</small>
+          </article>
+        `;
+      };
+
+      const renderControl = () => {
+        const control = state.control || state.status?.control || {};
+        els.runnerStatus.innerHTML = [
+          pill(control.enabled ? "ON" : "OFF", control.enabled ? "ok" : "warn"),
+          pill(timeText(control.updatedAt), "info")
+        ].join("");
+      };
+
+      const renderLive = () => {
+        const live = state.live || state.status?.live || {};
+        const control = live.control || {};
+        const config = live.executionConfig || {};
+        const blockers = [...(live.blockers || []), ...(live.orderBlockers || [])];
+        els.liveStatus.innerHTML = [
+          pill(control.enabled ? "동의 ON" : "동의 OFF", control.enabled ? "ok" : "warn"),
+          pill(live.ready ? "Ready" : "Blocked", live.ready ? "ok" : "bad"),
+          pill(live.orderExecutionEnabled ? "Order ON" : "Order OFF", live.orderExecutionEnabled ? "ok" : "warn")
+        ].join("");
+        els.liveConfig.innerHTML = `
+          <div><span>Margin</span><strong>${escapeHTML(numberText(config.marginUSDT))} USDT</strong></div>
+          <div><span>Balance ratio</span><strong>${escapeHTML(numberText(config.availableBalanceRatio, 4))}</strong></div>
+          <div><span>Margin mode</span><strong>${escapeHTML(config.marginMode || "-")}</strong></div>
+          <div><span>Position mode</span><strong>${escapeHTML(config.positionMode || "-")}</strong></div>
+        `;
+        els.liveBlockers.innerHTML = blockers.length
+          ? blockers.map((item) => `<span class="tag">${escapeHTML(item)}</span>`).join("")
+          : `<span class="tag">No blockers</span>`;
+      };
+
+      const renderStrategies = () => {
+        if (state.errors.strategies) {
+          els.strategyList.innerHTML = empty(state.errors.strategies);
+          return;
+        }
+        const strategies = state.strategies || state.status?.strategies || {};
+        const available = Array.isArray(strategies.available) ? strategies.available : [];
+        if (!available.length) {
+          els.strategyList.innerHTML = empty("사용 가능한 전략이 없습니다.");
+          return;
+        }
+        els.strategyList.innerHTML = available.map((strategy) => {
+          const backtest = strategy.backtest || {};
+          const tags = [
+            strategy.symbol,
+            strategy.timeframe,
+            backtest.profitFactor ? `PF ${backtest.profitFactor}` : "",
+            backtest.winRatePercent ? `승률 ${backtest.winRatePercent}%` : "",
+            backtest.maxDrawdownPercent ? `MDD ${backtest.maxDrawdownPercent}%` : ""
+          ].filter(Boolean);
+          return `
+            <label class="strategy-item">
+              <input type="checkbox" data-strategy-id="${escapeHTML(strategy.id)}" ${strategy.enabled ? "checked" : ""}>
+              <span>
+                <strong>${escapeHTML(strategy.name || strategy.id)}</strong>
+                <span class="mini muted">${escapeHTML(strategy.id)}</span>
+                <span class="tagline">${tags.map((tag) => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</span>
+              </span>
+            </label>
+          `;
+        }).join("");
+      };
+
+      const renderAccount = () => {
+        els.accountUpdated.textContent = "";
+        if (state.errors.account) {
+          els.accountSummary.innerHTML = empty(state.errors.account);
+          return;
+        }
+        const items = state.account?.items || [];
+        if (!items.length) {
+          els.accountSummary.innerHTML = empty("계정 요약이 없습니다.");
+          return;
+        }
+        const totals = items.reduce((memo, account) => {
+          memo.available += Number(account.available) || 0;
+          memo.equity += Number(account.accountEquity) || 0;
+          memo.unrealized += Number(account.unrealizedPL) || 0;
+          return memo;
+        }, { available: 0, equity: 0, unrealized: 0 });
+        els.accountUpdated.textContent = timeText(items[0]?.updatedAt);
+        els.accountSummary.innerHTML = `
+          <div class="kv">
+            <div><span>Available</span><strong>${numberText(totals.available, 3)}</strong></div>
+            <div><span>Equity</span><strong>${numberText(totals.equity, 3)}</strong></div>
+            <div><span>Unrealized PnL</span><strong>${signedNumber(totals.unrealized)}</strong></div>
+            <div><span>Accounts</span><strong>${items.length}</strong></div>
+          </div>
+        `;
+      };
+
+      const renderPositions = () => {
+        if (state.errors.positions) {
+          els.positionCount.textContent = "";
+          els.positions.innerHTML = empty(state.errors.positions);
+          return;
+        }
+        const items = (state.positions?.items || []).filter((position) => (
+          Number(position.total || position.available || 0) !== 0
+        ));
+        els.positionCount.textContent = `${items.length} open`;
+        if (!items.length) {
+          els.positions.innerHTML = empty("열린 포지션이 없습니다.");
+          return;
+        }
+        els.positions.innerHTML = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Side</th>
+                  <th>Total</th>
+                  <th>Avg</th>
+                  <th>Mark</th>
+                  <th>PnL</th>
+                  <th>Lev</th>
+                  <th>TP/SL</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${items.map((position) => `
+                  <tr>
+                    <td>${escapeHTML(position.symbol || "-")}</td>
+                    <td>${escapeHTML(position.holdSide || "-")}</td>
+                    <td>${escapeHTML(numberText(position.total || position.available, 6))}</td>
+                    <td>${escapeHTML(numberText(position.openPriceAvg, 4))}</td>
+                    <td>${escapeHTML(numberText(position.markPrice, 4))}</td>
+                    <td>${escapeHTML(signedNumber(position.unrealizedPL))}</td>
+                    <td>${escapeHTML(position.leverage || "-")}</td>
+                    <td>${escapeHTML(position.takeProfit || "-")} / ${escapeHTML(position.stopLoss || "-")}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+      };
+
+      const renderLogs = () => {
+        if (state.errors.logs) {
+          els.logCount.textContent = "";
+          els.logs.innerHTML = empty(state.errors.logs);
+          return;
+        }
+        const items = state.logs?.items || [];
+        els.logCount.textContent = `${items.length} rows`;
+        if (!items.length) {
+          els.logs.innerHTML = empty("매매기록이 없습니다.");
+          return;
+        }
+        els.logs.innerHTML = items.slice().reverse().map((item) => {
+          const metadata = item.metadata || {};
+          const details = metadata.details || {};
+          const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+          const safeDetails = Object.entries(details)
+            .filter(([key]) => SAFE_DETAIL_KEYS.has(key))
+            .slice(0, 8);
+          return `
+            <article class="row-card">
+              <div class="row-title">
+                <div>
+                  <strong>${escapeHTML(metadata.title || item.category || "record")}</strong>
+                  <div class="mini muted">${escapeHTML(metadata.subtitle || item.message || "")}</div>
+                </div>
+                ${pill(item.severity || "info", severityClass(item.severity))}
+              </div>
+              <div class="tagline">
+                <span class="tag">${escapeHTML(timeText(item.timestamp))}</span>
+                ${item.symbol ? `<span class="tag">${escapeHTML(item.symbol)}</span>` : ""}
+                ${tags.slice(0, 5).map((tag) => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}
+              </div>
+              ${safeDetails.length ? `
+                <div class="kv">
+                  ${safeDetails.map(([key, value]) => `
+                    <div><span>${escapeHTML(key)}</span><strong>${escapeHTML(value)}</strong></div>
+                  `).join("")}
+                </div>
+              ` : ""}
+            </article>
+          `;
+        }).join("");
+      };
+
+      const render = () => {
+        const authenticated = Boolean(token());
+        els.loginPanel.hidden = authenticated;
+        els.dashboard.hidden = !authenticated;
+        document.querySelector('[data-action="bitget-logout"]').hidden = !authenticated;
+        if (!authenticated) {
+          els.metrics.innerHTML = "";
+          return;
+        }
+        renderMetrics();
+        renderControl();
+        renderLive();
+        renderStrategies();
+        renderAccount();
+        renderPositions();
+        renderLogs();
+      };
+
+      const saveStrategies = async () => {
+        const checked = [...els.strategyList.querySelectorAll("input[data-strategy-id]:checked")]
+          .map((input) => input.dataset.strategyId)
+          .filter(Boolean);
+        if (!checked.length) {
+          setNotice("최소 1개 전략을 선택해야 합니다.", "error");
+          return;
+        }
+        await api("/users/me/strategies", {
+          method: "POST",
+          body: { enabledStrategyIDs: checked }
+        });
+        await refreshAll();
+      };
+
+      const setRunnerEnabled = async (enabled) => {
+        await api("/users/me/control", {
+          method: "POST",
+          body: { enabled }
+        });
+        await refreshAll();
+      };
+
+      const setLiveEnabled = async (enabled) => {
+        if (enabled && !els.riskAck.checked) {
+          setNotice("Start Live 전에 실거래 위험 확인이 필요합니다.", "error");
+          return;
+        }
+        await api("/users/me/live/control", {
+          method: "POST",
+          body: { enabled, acknowledgedRisk: enabled ? true : false }
+        });
+        if (!enabled) {
+          els.riskAck.checked = false;
+        }
+        await refreshAll();
+      };
+
+      const logoutBitget = async () => {
+        try {
+          if (token()) {
+            await api("/users/me/session", { method: "DELETE" });
+          }
+        } catch {
+          // Remove the browser token even if the server already revoked it.
+        } finally {
+          clearSession();
+          render();
+          setNotice("Bitget 세션을 종료했습니다.", "ok");
+        }
+      };
+
+      els.loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = new FormData(els.loginForm);
+        const payload = {
+          apiKey: String(form.get("apiKey") || "").trim(),
+          secretKey: String(form.get("secretKey") || "").trim(),
+          passphrase: String(form.get("passphrase") || "").trim()
+        };
+        setBusy(true);
+        setNotice("Bitget 로그인 중입니다.");
+        try {
+          const response = await api("/auth/bitget/login", {
+            method: "POST",
+            body: payload
+          });
+          els.loginForm.reset();
+          if (!response.authToken) {
+            throw new ApiError("로그인 응답에 토큰이 없습니다.", 500);
+          }
+          setToken(response.authToken);
+          state.redactedIdentifier = response.redactedIdentifier || "";
+          setNotice("Bitget 로그인 완료.", "ok");
+          await refreshAll({ silent: true });
+        } catch (error) {
+          els.loginForm.reset();
+          setNotice(error.message || "Bitget 로그인 실패", "error");
+        } finally {
+          payload.apiKey = "";
+          payload.secretKey = "";
+          payload.passphrase = "";
+          setBusy(false);
+        }
+      });
+
+      els.lockForm.addEventListener("submit", () => {
+        clearSession();
+      });
+
+      document.addEventListener("click", async (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button || state.busy) {
+          return;
+        }
+        const action = button.dataset.action;
+        try {
+          if (action === "refresh") {
+            await refreshAll();
+          } else if (action === "bitget-logout") {
+            await logoutBitget();
+          } else if (action === "runner-start") {
+            await setRunnerEnabled(true);
+          } else if (action === "runner-stop") {
+            await setRunnerEnabled(false);
+          } else if (action === "live-start") {
+            await setLiveEnabled(true);
+          } else if (action === "live-stop") {
+            await setLiveEnabled(false);
+          } else if (action === "strategies-save") {
+            await saveStrategies();
+          }
+        } catch (error) {
+          if (error.status === 401) {
+            clearSession();
+            render();
+            setNotice("Bitget 세션이 만료되었습니다.", "error");
+          } else {
+            setNotice(error.message || "요청 실패", "error");
+          }
+        }
+      });
+
+      render();
+      refreshAll({ silent: true });
+      window.setInterval(() => refreshAll({ silent: true }), REFRESH_MS);
+    })();
+  </script>
 </body>
 </html>"""
 
