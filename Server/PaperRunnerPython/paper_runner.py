@@ -2131,8 +2131,13 @@ class PaperRunner:
         merged = {candle.key: candle for candle in candles}
         oldest_open_time = min(candle.open_time for candle in candles)
         pages = 0
+        self.save_candles(symbol, candles[-self.candle_limit :])
         while closed_count < required and pages < self.history_backfill_pages_per_cycle:
-            history = self.fetch_history_candles(symbol, oldest_open_time * 1000 - 1)
+            try:
+                history = self.fetch_history_candles(symbol, oldest_open_time * 1000 - 1)
+            except Exception:
+                self.save_candles(symbol, candles[-self.candle_limit :])
+                raise
             if not history:
                 break
             previous_oldest = oldest_open_time
@@ -2144,6 +2149,8 @@ class PaperRunner:
             pages += 1
             if oldest_open_time >= previous_oldest:
                 break
+            if pages % 25 == 0:
+                self.save_candles(symbol, candles[-self.candle_limit :])
             time.sleep(0.06)
         self.save_candles(symbol, candles[-self.candle_limit :])
         return candles[-self.candle_limit :]
