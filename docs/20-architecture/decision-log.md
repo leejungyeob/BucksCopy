@@ -818,4 +818,4 @@
 - Consequences:
   - BTC/ETH active symbol은 1000개 warmup에 갇히지 않고 4년급 closed candle history를 기준으로 평가할 수 있습니다.
   - 초기 배포 직후에는 과거 candle backfill 때문에 첫 cycle이 더 오래 걸릴 수 있지만, 이후에는 저장된 JSON을 재사용합니다.
-  - cycle당 history page 수는 계속 제한해 한 번의 runner cycle이 과도하게 오래 도는 것을 막지만, 저장 개수 자체는 제한하지 않습니다.
+  - cycle당 history page 수는 기본 `100`으로 제한해 한 심볼이 runner cycle을 오래 독점하지 않게 하지만, 저장 개수 자체는 제한하지 않습니다.

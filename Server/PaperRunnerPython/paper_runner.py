@@ -1088,7 +1088,7 @@ class PaperRunner:
         )
         self.history_backfill_pages_per_cycle = clamp_int(
             os.environ.get("BUCKS_COPY_HISTORY_BACKFILL_PAGES_PER_CYCLE"),
-            default=800,
+            default=100,
             minimum=0,
             maximum=2_000,
         )

@@ -41,13 +41,14 @@ Useful history settings:
 ```text
 BUCKS_COPY_CANDLE_LIMIT=0
 BUCKS_COPY_FETCH_CANDLE_LIMIT=1000
-BUCKS_COPY_HISTORY_BACKFILL_PAGES_PER_CYCLE=800
+BUCKS_COPY_HISTORY_BACKFILL_PAGES_PER_CYCLE=100
 ```
 
 `BUCKS_COPY_CANDLE_LIMIT=0` means the runner does not trim by candle count and
 keeps backfilling until Bitget returns no older rows. `BUCKS_COPY_FETCH_CANDLE_LIMIT`
 is only the per-request Bitget fetch size, so it should not be confused with the
-total history available to strategies.
+total history available to strategies. `BUCKS_COPY_HISTORY_BACKFILL_PAGES_PER_CYCLE`
+is a per-cycle request batch size, not a storage cap.
 
 The compose API port is bound to `127.0.0.1` on the server by default. It is
 intended for server-local checks or an SSH tunnel first, not direct internet
