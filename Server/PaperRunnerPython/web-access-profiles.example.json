@@ -1,11 +1,11 @@
 {
   "profiles": [
     {
-      "profileID": "friend-dynamic-top1",
-      "name": "Friend Dynamic Top1",
+      "profileID": "friend-example",
+      "name": "Friend Example",
       "accessKey": "replace-with-friend-access-key",
       "allowedStrategyIDs": [
-        "btc-15m-dynamic-top1"
+        "btc-15m-vacuum-pulse"
       ]
     }
   ]

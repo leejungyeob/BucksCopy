@@ -14,7 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, getcontext
+from decimal import Decimal, ROUND_DOWN, getcontext
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -54,10 +54,6 @@ def decimal_text(value: Decimal) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
-
-
-def decimal_clip(value: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
-    return min(max(value, minimum), maximum)
 
 
 def now_utc() -> datetime:
@@ -255,7 +251,6 @@ class Signal:
     take_profit: Decimal
     reason: str
     leverage: int
-    margin_fraction: Decimal = dec(1)
 
     @property
     def partial_take_profit(self) -> Decimal:
@@ -366,36 +361,6 @@ BTC_BULL_PULLBACK_LONG_PARAMS = {
     "leverage": 10,
 }
 
-BTC_DYNAMIC_TOP1_PARAMS = {
-    "strategy_id": "btc-15m-dynamic-top1",
-    "name": "BTC 15m Dynamic Top1",
-    "symbol": "BTCUSDT",
-    "target_natr": dec("0.004"),
-    "margin_min": dec("0.5"),
-    "margin_max": dec("1.0"),
-    "atr_period": 10,
-    "long_donchian_period": 3,
-    "short_donchian_period": 3,
-    "long_breakout_confirm": 4,
-    "short_breakout_confirm": 3,
-    "long_vol_lookback": 40,
-    "long_vol_min_quantile": dec("0.05"),
-    "long_sl_pct": dec("0.01"),
-    "long_tp_pct": dec("0.035"),
-    "short_sl_pct": dec("0.015"),
-    "short_tp_pct": dec("0.02"),
-    "long_lev_min": dec("1.5"),
-    "long_lev_max": dec("5.0"),
-    "short_lev_min": dec("1.0"),
-    "short_lev_max": dec("4.5"),
-    "long_natr_ref": dec("0.005"),
-    "short_natr_ref": dec("0.005"),
-    "long_natr_power": dec("0.75"),
-    "short_natr_power": dec("1.25"),
-    "long_strength_boost": dec("0.25"),
-    "short_strength_boost": dec("0.75"),
-}
-
 ETH_PULSE_PARAMS = {
     "strategy_id": "eth-15m-vacuum-pulse",
     "name": "ETH 15m Vacuum Pulse",
@@ -430,7 +395,6 @@ ACTIVE_STRATEGIES_BY_SYMBOL = {
         BTC_PULSE_PARAMS,
         BTC_REGIME_SESSION_FADE_PARAMS,
         BTC_BULL_PULLBACK_LONG_PARAMS,
-        BTC_DYNAMIC_TOP1_PARAMS,
     ],
     "ETHUSDT": [ETH_PULSE_PARAMS],
 }
@@ -469,15 +433,6 @@ STRATEGY_BACKTESTS = {
         "profitFactor": "2.66",
         "totalTrades": 173,
         "annualTrades": "43.3",
-    },
-    "btc-15m-dynamic-top1": {
-        "label": "최근 4년 · Dynamic leverage · full TP/SL",
-        "netReturnPercent": "+65.97",
-        "winRatePercent": "40.48",
-        "maxDrawdownPercent": "60.64",
-        "profitFactor": "1.12",
-        "totalTrades": 210,
-        "annualTrades": "52.5",
     },
     "eth-15m-vacuum-pulse": {
         "label": "최근 4년 · 10x · 5% risk",
@@ -844,228 +799,6 @@ def candle_week_hour(candle: Candle) -> int:
     return dt.weekday() * 24 + dt.hour
 
 
-def join_hourly_bucket(open_time: int, bucket: list[Candle]) -> Candle:
-    return Candle(
-        symbol=bucket[-1].symbol,
-        open_time=open_time,
-        open=bucket[0].open,
-        high=max(candle.high for candle in bucket),
-        low=min(candle.low for candle in bucket),
-        close=bucket[-1].close,
-        volume=sum((candle.volume for candle in bucket), dec(0)),
-        is_closed=True,
-    )
-
-
-def completed_hourly_candles_before(candles: list[Candle], open_time: int) -> list[Candle]:
-    cutoff_hour = open_time - open_time % 3600
-    hourly: list[Candle] = []
-    bucket: list[Candle] = []
-    current_hour: int | None = None
-    for candle in candles:
-        if candle.open_time >= cutoff_hour:
-            break
-        hour = candle.open_time - candle.open_time % 3600
-        if current_hour is None:
-            current_hour = hour
-        if hour != current_hour:
-            if len(bucket) == 4:
-                hourly.append(join_hourly_bucket(current_hour, bucket))
-            bucket = []
-            current_hour = hour
-        bucket.append(candle)
-    if current_hour is not None and len(bucket) == 4:
-        hourly.append(join_hourly_bucket(current_hour, bucket))
-    return hourly
-
-
-def return_std(candles: list[Candle], ending_at: int, period: int) -> Decimal | None:
-    if period <= 0 or ending_at - period + 1 <= 0:
-        return None
-    values: list[Decimal] = []
-    for index in range(ending_at - period + 1, ending_at + 1):
-        previous_close = candles[index - 1].close
-        if previous_close <= 0:
-            return None
-        values.append(candles[index].close / previous_close - dec(1))
-    average = sum(values, dec(0)) / dec(period)
-    variance = sum(((value - average) ** 2 for value in values), dec(0)) / dec(period)
-    return variance.sqrt()
-
-
-def decimal_quantile(values: list[Decimal], q: Decimal) -> Decimal | None:
-    if not values:
-        return None
-    clean = sorted(values)
-    if len(clean) == 1:
-        return clean[0]
-    position = (len(clean) - 1) * float(q)
-    lower = int(position)
-    upper = lower if position.is_integer() else lower + 1
-    if upper >= len(clean):
-        return clean[-1]
-    if lower == upper:
-        return clean[lower]
-    weight = dec(str(position - lower))
-    return clean[lower] * (dec(1) - weight) + clean[upper] * weight
-
-
-def confirmed_donchian_breakout(
-    candles: list[Candle],
-    ending_at: int,
-    period: int,
-    confirm: int,
-    side: str,
-) -> bool:
-    start = ending_at - confirm
-    if period <= 0 or start < period:
-        return False
-    for index in range(start, ending_at + 1):
-        previous = candles[index - period:index]
-        if len(previous) != period:
-            return False
-        if side == "buy" and candles[index].close <= max(candle.high for candle in previous):
-            return False
-        if side == "sell" and candles[index].close >= min(candle.low for candle in previous):
-            return False
-    return True
-
-
-def dynamic_top1_long_vol_allowed(candles: list[Candle], ending_at: int, lookback: int, q: Decimal) -> bool:
-    current = return_std(candles, ending_at, lookback)
-    if current is None:
-        return False
-    values: list[Decimal] = []
-    start = max(0, ending_at - lookback + 1)
-    for index in range(start, ending_at + 1):
-        value = return_std(candles, index, lookback)
-        if value is not None:
-            values.append(value)
-    threshold = decimal_quantile(values, q)
-    return threshold is not None and current > threshold
-
-
-def dynamic_top1_strengths(candles: list[Candle], open_time: int) -> tuple[Decimal | None, Decimal | None, Decimal, Decimal]:
-    hourly = completed_hourly_candles_before(candles, open_time)
-    ema20 = exponential_moving_average(hourly, 20)
-    ema100 = exponential_moving_average(hourly, 100)
-    if ema20 is None or ema100 is None or ema100 <= 0:
-        return ema20, ema100, dec(0), dec(0)
-    strength_up = decimal_clip(((ema20 - ema100) / ema100) * dec(100) / dec(5), dec(0), dec(1))
-    strength_down = decimal_clip(((ema100 - ema20) / ema100) * dec(100) / dec(5), dec(0), dec(1))
-    return ema20, ema100, strength_up, strength_down
-
-
-def dynamic_top1_margin(params: dict[str, Any], natr: Decimal) -> Decimal:
-    if natr <= 0:
-        return dec(0)
-    return decimal_clip(params["target_natr"] / natr, params["margin_min"], params["margin_max"])
-
-
-def dynamic_top1_leverage(params: dict[str, Any], side: str, natr: Decimal, strength_up: Decimal, strength_down: Decimal) -> Decimal:
-    if natr <= 0:
-        return dec(0)
-    if side == "buy":
-        lev_min = params["long_lev_min"]
-        lev_max = params["long_lev_max"]
-        ref = params["long_natr_ref"]
-        power = params["long_natr_power"]
-        boost = dec(1) + strength_up * params["long_strength_boost"] * dec("0.25")
-    else:
-        lev_min = params["short_lev_min"]
-        lev_max = params["short_lev_max"]
-        ref = params["short_natr_ref"]
-        power = params["short_natr_power"]
-        boost = dec(1) + strength_down * params["short_strength_boost"] * dec("0.25")
-
-    base_ratio = float(decimal_clip(ref / natr, dec("0.1"), dec("10.0")))
-    powered = dec(str(base_ratio ** float(power)))
-    scaled = (decimal_clip(powered, dec("0.25"), dec("2.5")) - dec("0.25")) / (dec("2.5") - dec("0.25"))
-    leverage = lev_min + (lev_max - lev_min) * scaled
-    return decimal_clip(leverage * boost, lev_min, lev_max)
-
-
-def evaluate_btc_dynamic_top1(candles: list[Candle], params: dict[str, Any]) -> Signal | None:
-    latest_index = len(candles) - 1
-    minimum_candles = max(
-        params["atr_period"] + 1,
-        params["long_vol_lookback"] * 2,
-        params["long_donchian_period"] + params["long_breakout_confirm"] + 1,
-        params["short_donchian_period"] + params["short_breakout_confirm"] + 1,
-        400,
-    )
-    if latest_index < minimum_candles:
-        return None
-
-    latest = candles[-1]
-    atr = average_true_range(candles, params["atr_period"])
-    if atr is None or latest.close <= 0 or atr <= 0:
-        return None
-    natr = atr / latest.close
-    margin_fraction = dynamic_top1_margin(params, natr)
-    if margin_fraction <= 0:
-        return None
-
-    long_signal = (
-        confirmed_donchian_breakout(
-            candles,
-            latest_index,
-            params["long_donchian_period"],
-            params["long_breakout_confirm"],
-            "buy",
-        )
-        and dynamic_top1_long_vol_allowed(
-            candles,
-            latest_index,
-            params["long_vol_lookback"],
-            params["long_vol_min_quantile"],
-        )
-    )
-    ema20, ema100, strength_up, strength_down = dynamic_top1_strengths(candles, latest.open_time)
-    short_signal = (
-        confirmed_donchian_breakout(
-            candles,
-            latest_index,
-            params["short_donchian_period"],
-            params["short_breakout_confirm"],
-            "sell",
-        )
-        and ema20 is not None
-        and ema100 is not None
-        and ema20 < ema100
-    )
-    if long_signal == short_signal:
-        return None
-
-    side = "buy" if long_signal else "sell"
-    leverage_decimal = dynamic_top1_leverage(params, side, natr, strength_up, strength_down)
-    leverage = int(leverage_decimal.to_integral_value(rounding=ROUND_HALF_UP))
-    leverage = min(max(leverage, 1), 10)
-    entry = latest.close
-    if side == "buy":
-        stop = entry * (dec(1) - params["long_sl_pct"])
-        take_profit = entry * (dec(1) + params["long_tp_pct"])
-    else:
-        stop = entry * (dec(1) + params["short_sl_pct"])
-        take_profit = entry * (dec(1) - params["short_tp_pct"])
-
-    return Signal(
-        strategy_id=params["strategy_id"],
-        symbol=params["symbol"],
-        side=side,
-        entry=entry,
-        stop=stop,
-        take_profit=take_profit,
-        reason=(
-            f"{params['name']}: closed 15m Donchian breakout, "
-            f"marginFraction={decimal_text(margin_fraction)}, "
-            f"dynamicLeverage={decimal_text(leverage_decimal)}x"
-        ),
-        leverage=leverage,
-        margin_fraction=margin_fraction,
-    )
-
-
 def fixed_percent_signal(
     params: dict[str, Any],
     side: str,
@@ -1199,8 +932,6 @@ def evaluate_strategy(candles: list[Candle], params: dict[str, Any], generated_a
         signal = evaluate_btc_regime_session_fade(candles, params)
     elif params["strategy_id"] == BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"]:
         signal = evaluate_btc_bull_pullback_long(candles, params)
-    elif params["strategy_id"] == BTC_DYNAMIC_TOP1_PARAMS["strategy_id"]:
-        signal = evaluate_btc_dynamic_top1(candles, params)
     else:
         signal = evaluate_vacuum_pulse(candles, params, generated_at)
     if signal and risk_allowed(signal):
@@ -2271,7 +2002,6 @@ class PaperRunner:
             raise LiveExecutionError("live order margin is not configured")
         leverage = min(signal.leverage, int(contract_spec.get("maxLeverage") or signal.leverage))
         planned_margin = min(self.live_order_margin_usdt, account_available * self.live_available_balance_ratio)
-        planned_margin *= decimal_clip(signal.margin_fraction, dec(0), dec(1))
         if planned_margin <= 0:
             raise LiveExecutionError("USDT available balance is not enough for live order")
         notional = planned_margin * dec(leverage)
@@ -2603,7 +2333,6 @@ class PaperRunner:
                     "entry": decimal_text(signal.entry),
                     "size": decimal_text(size),
                     "marginUSDT": decimal_text(self.live_order_margin_usdt),
-                    "marginFraction": decimal_text(signal.margin_fraction),
                     "availableBalanceRatio": decimal_text(self.live_available_balance_ratio),
                     "leverage": f"{signal.leverage}x",
                     "tp1": decimal_text(signal.partial_take_profit),
