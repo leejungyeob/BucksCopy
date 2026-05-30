@@ -9,9 +9,9 @@ struct TradeLogPanel: View {
 
     var body: some View {
         DashboardPanel {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack {
-                    Text(language == .korean ? "매매기록" : "Trade History")
+                    Label(language == .korean ? "매매기록" : "Trade History", systemImage: "list.bullet.rectangle")
                         .font(.headline)
                     Badge(text: "\(logs.count)", color: logs.isEmpty ? .secondary : .blue)
                     Spacer()
@@ -24,7 +24,8 @@ struct TradeLogPanel: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 148)
+                    .controlSize(.small)
+                    .frame(width: 128)
                 }
 
                 TradeHistorySummaryStrip(
@@ -35,7 +36,7 @@ struct TradeLogPanel: View {
                 )
 
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
+                    LazyVStack(alignment: .leading, spacing: 4) {
                         if logs.isEmpty {
                             Text(language == .korean ? "아직 매매기록이 없습니다." : "No trades yet.")
                                 .foregroundStyle(.secondary)
@@ -63,17 +64,14 @@ private struct TradeHistorySummaryStrip: View {
     let language: TradeLogLanguage
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 5) {
+        HStack(alignment: .top, spacing: 4) {
             summaryCell(title: label("실현손익", "Realized"), value: realizedProfit.signedDashboardText, tone: realizedProfit >= 0 ? .green : .red)
             summaryCell(title: label("미실현", "Unrealized"), value: unrealizedProfit.signedDashboardText, tone: unrealizedProfit >= 0 ? .green : .red)
             summaryCell(title: label("승률", "Win Rate"), value: winRateText)
             summaryCell(title: label("청산", "Closed"), value: "\(wins)W \(losses)L")
             summaryCell(title: label("진입", "Entries"), value: "\(entryCount)")
         }
-    }
-
-    private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 82, maximum: 140), spacing: 5, alignment: .leading)]
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var scopedLogs: [TradeEventLog] {
@@ -145,17 +143,17 @@ private struct TradeHistorySummaryStrip: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Text(value)
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(tone)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.44))
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 
     private func label(_ korean: String, _ english: String) -> String {
@@ -193,7 +191,7 @@ private struct LogRow: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 if !display.detail.isEmpty {
                     Text(display.detail)
                         .font(.caption)
@@ -203,7 +201,7 @@ private struct LogRow: View {
                 }
 
                 if !display.tags.isEmpty {
-                    LogChipFlow(spacing: 6, rowSpacing: 5) {
+                    LogChipFlow(spacing: 5, rowSpacing: 4) {
                         ForEach(display.tags) { tag in
                             LogChip(text: tag.label, tone: tag.tone)
                         }
@@ -212,9 +210,9 @@ private struct LogRow: View {
 
                 if !display.details.isEmpty {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 118), spacing: 5, alignment: .topLeading)],
+                        columns: [GridItem(.adaptive(minimum: 96), spacing: 4, alignment: .topLeading)],
                         alignment: .leading,
-                        spacing: 5
+                        spacing: 4
                     ) {
                         ForEach(display.details) { detail in
                             LogDetailCell(detail: detail)
@@ -222,44 +220,78 @@ private struct LogRow: View {
                     }
                 }
             }
-            .padding(.top, 6)
+            .padding(.top, 5)
         } label: {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 5) {
-                    LogChipFlow(spacing: 5, rowSpacing: 4) {
-                        LogChip(
-                            text: log.timestamp.dashboardLogDateTime,
-                            tone: .neutral,
-                            monospaced: true
-                        )
-                        LogChip(text: display.category, tone: categoryTone)
+            HStack(alignment: .center, spacing: 6) {
+                Circle()
+                    .fill(rowAccent)
+                    .frame(width: 7, height: 7)
 
-                        if let symbol = log.symbol {
-                            LogChip(text: symbol.rawValue, tone: .accent, monospaced: true)
-                        }
+                Text(log.timestamp.dashboardDateTime)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 66, alignment: .leading)
+                    .lineLimit(1)
 
-                        if let severity = display.severity {
-                            LogChip(text: severity, tone: severityTone)
-                        }
-                    }
+                LogChip(text: display.category, tone: categoryTone)
 
-                    Text(display.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(log.severity == .error ? .red : .primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
+                if let symbol = log.symbol {
+                    LogChip(text: symbol.rawValue, tone: .accent, monospaced: true)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(display.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(log.severity == .error ? .red : .primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let profitLoss = closeProfitLoss {
+                    Text(profitLoss.signedDashboardText)
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(profitLoss >= 0 ? .green : .red)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
             }
             .contentShape(Rectangle())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(6)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
         .background(rowBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(borderColor, lineWidth: 0.8)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .stroke(borderColor, lineWidth: 0.6)
+        }
+    }
+
+    private var closeProfitLoss: Decimal? {
+        guard log.category == .liveOrder else { return nil }
+        let text = "\(log.metadata?.title ?? "") \(log.metadata?.subtitle ?? "") \(log.message)"
+        guard text.contains("청산") ||
+            text.contains("close submitted") ||
+            text.contains("External/manual close detected") else {
+            return nil
+        }
+        for label in ["실현 PnL", "청산 PnL", "청산 직전 PnL", "미실현 PnL"] {
+            if let value = log.metadata?.details.first(where: { $0.label == label })?.value,
+               let profitLoss = DecimalText.optional(value) {
+                return profitLoss
+            }
+        }
+        return nil
+    }
+
+    private var rowAccent: Color {
+        switch log.severity {
+        case .info:
+            return categoryTone.color
+        case .warning:
+            return .orange
+        case .error:
+            return .red
         }
     }
 
@@ -325,12 +357,12 @@ private struct LogChip: View {
         Text(text)
             .font(.caption2.weight(.semibold))
             .monospacedDigit()
-            .lineLimit(2)
+            .lineLimit(1)
             .foregroundStyle(foreground)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
             .background(background)
-            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .fixedSize(horizontal: true, vertical: true)
     }
 
@@ -371,16 +403,33 @@ private struct LogDetailCell: View {
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
         .background(valueColor.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 
     private var valueColor: Color {
         switch detail.tone {
         case .neutral:
             return .primary
+        case .accent:
+            return .blue
+        case .success:
+            return .green
+        case .warning:
+            return .orange
+        case .danger:
+            return .red
+        }
+    }
+}
+
+private extension TradeLogTone {
+    var color: Color {
+        switch self {
+        case .neutral:
+            return .secondary
         case .accent:
             return .blue
         case .success:

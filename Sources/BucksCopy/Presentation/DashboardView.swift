@@ -48,7 +48,7 @@ struct DashboardView: View {
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         }
-                        .frame(minWidth: 360, idealWidth: 440, maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
+                        .frame(minWidth: 500, idealWidth: 660, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                         TradeLogPanel(
                             logs: dashboardTradeLogs,
@@ -57,7 +57,7 @@ struct DashboardView: View {
                             language: viewModel.state.logLanguage,
                             onLanguageChange: viewModel.updateLogLanguage
                         )
-                        .frame(minWidth: 500, idealWidth: 760, maxHeight: .infinity)
+                        .frame(minWidth: 340, idealWidth: 390, maxWidth: 460, maxHeight: .infinity)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
