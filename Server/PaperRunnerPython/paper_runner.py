@@ -36,9 +36,8 @@ DEFAULT_BASE_URL = "https://api.bitget.com"
 DEFAULT_API_HOST = "0.0.0.0"
 DEFAULT_API_PORT = 8787
 DEFAULT_USER_ID = "local-admin"
-DEFAULT_CANDLE_STORAGE_LIMIT = 150_000
+DEFAULT_CANDLE_STORAGE_LIMIT = 0
 MAX_CANDLE_FETCH_LIMIT = 1_000
-REGIME_STRATEGY_MIN_CANDLES = 140_256
 USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 CREDENTIAL_ENCRYPTION_ALGORITHM = "AES-256-GCM"
 
@@ -1082,7 +1081,7 @@ class PaperRunner:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.symbols = self.parse_symbols(os.environ.get("BUCKS_COPY_SYMBOLS", "BTCUSDT,ETHUSDT"))
         configured_candle_limit = int(os.environ.get("BUCKS_COPY_CANDLE_LIMIT", str(DEFAULT_CANDLE_STORAGE_LIMIT)))
-        self.candle_limit = min(max(configured_candle_limit, 1), 1_000_000)
+        self.candle_limit = max(configured_candle_limit, 0)
         self.fetch_candle_limit = min(
             max(int(os.environ.get("BUCKS_COPY_FETCH_CANDLE_LIMIT", str(MAX_CANDLE_FETCH_LIMIT))), 1),
             MAX_CANDLE_FETCH_LIMIT,
@@ -2106,23 +2105,23 @@ class PaperRunner:
             )
         return sorted(candles, key=lambda candle: candle.open_time)
 
-    def required_candle_count(self, symbol: str) -> int:
-        required = self.fetch_candle_limit
-        for params in ACTIVE_STRATEGIES_BY_SYMBOL.get(symbol, []):
-            if params["strategy_id"] in {
-                BTC_REGIME_SESSION_FADE_PARAMS["strategy_id"],
-                BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"],
-            }:
-                required = max(required, REGIME_STRATEGY_MIN_CANDLES)
-            else:
-                required = max(required, int(params.get("slow_mean_period", self.fetch_candle_limit)) + 10)
-        return min(required, self.candle_limit)
+    def trimmed_candles(self, candles: list[Candle]) -> list[Candle]:
+        if self.candle_limit <= 0:
+            return candles
+        return candles[-self.candle_limit :]
+
+    def required_candle_count(self, symbol: str) -> int | None:
+        if symbol not in ACTIVE_STRATEGIES_BY_SYMBOL:
+            return self.fetch_candle_limit
+        if self.candle_limit <= 0:
+            return None
+        return self.candle_limit
 
     def backfill_history_if_needed(self, symbol: str, candles: list[Candle]) -> list[Candle]:
         required = self.required_candle_count(symbol)
         closed_count = len([candle for candle in candles if candle.is_closed])
-        if closed_count >= required or self.history_backfill_pages_per_cycle <= 0:
-            trimmed = candles[-self.candle_limit :]
+        if (required is not None and closed_count >= required) or self.history_backfill_pages_per_cycle <= 0:
+            trimmed = self.trimmed_candles(candles)
             self.save_candles(symbol, trimmed)
             return trimmed
         if not candles:
@@ -2131,12 +2130,12 @@ class PaperRunner:
         merged = {candle.key: candle for candle in candles}
         oldest_open_time = min(candle.open_time for candle in candles)
         pages = 0
-        self.save_candles(symbol, candles[-self.candle_limit :])
-        while closed_count < required and pages < self.history_backfill_pages_per_cycle:
+        self.save_candles(symbol, self.trimmed_candles(candles))
+        while (required is None or closed_count < required) and pages < self.history_backfill_pages_per_cycle:
             try:
                 history = self.fetch_history_candles(symbol, oldest_open_time * 1000 - 1)
             except Exception:
-                self.save_candles(symbol, candles[-self.candle_limit :])
+                self.save_candles(symbol, self.trimmed_candles(candles))
                 raise
             if not history:
                 break
@@ -2150,10 +2149,11 @@ class PaperRunner:
             if oldest_open_time >= previous_oldest:
                 break
             if pages % 25 == 0:
-                self.save_candles(symbol, candles[-self.candle_limit :])
+                self.save_candles(symbol, self.trimmed_candles(candles))
             time.sleep(0.06)
-        self.save_candles(symbol, candles[-self.candle_limit :])
-        return candles[-self.candle_limit :]
+        trimmed = self.trimmed_candles(candles)
+        self.save_candles(symbol, trimmed)
+        return trimmed
 
     def candles_path(self, symbol: str) -> Path:
         return self.data_dir / f"candles-{symbol}-{TIMEFRAME}.json"

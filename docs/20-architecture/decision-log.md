@@ -812,10 +812,10 @@
 - Decision:
   - `BTC 15m Regime Session Fade`와 `BTC 15m Bull Pullback Long`을 built-in strategy와 BTCUSDT 15m active route에 추가합니다.
   - 서버 paper/live runner도 동일 strategy ID와 조건을 Python으로 이식해 BTCUSDT 15m 평가 대상에 포함합니다.
-  - 서버 기본 candle 저장 한도는 `150000`개로 올리고, 1회 REST fetch 한도는 Bitget 제한에 맞춰 `1000`개로 유지합니다.
-  - 4년급 warmup이 필요한 BTC 전략이 활성화된 경우 서버는 `/market/history-candles`를 여러 페이지로 호출해 오래된 closed candle을 뒤로 채웁니다.
+  - 서버 기본 candle 저장 한도는 `0`으로 두며, `0`은 저장 개수 제한 없음으로 해석합니다. 1회 REST fetch 한도는 Bitget 제한에 맞춰 `1000`개로 유지합니다.
+  - active symbol은 전략별 최소 필요량이 아니라 Bitget이 더 이상 오래된 row를 주지 않을 때까지 `/market/history-candles`를 여러 페이지로 호출해 closed candle을 뒤로 채웁니다.
   - 상태의 `savedCandles`는 이번 cycle fetch row가 아니라 저장소에 실제 보관 중인 candle 수를 보여줍니다.
 - Consequences:
-  - 신규 BTC 전략은 1000개 warmup에 갇히지 않고 4년급 closed candle history를 기준으로 평가할 수 있습니다.
+  - BTC/ETH active symbol은 1000개 warmup에 갇히지 않고 4년급 closed candle history를 기준으로 평가할 수 있습니다.
   - 초기 배포 직후에는 과거 candle backfill 때문에 첫 cycle이 더 오래 걸릴 수 있지만, 이후에는 저장된 JSON을 재사용합니다.
-  - 저장 한도는 운영 실수로 무한 backfill이 되는 것을 막는 safety bound이며, 기본값은 현재 전략 요구량을 넘도록 설정합니다.
+  - cycle당 history page 수는 계속 제한해 한 번의 runner cycle이 과도하게 오래 도는 것을 막지만, 저장 개수 자체는 제한하지 않습니다.

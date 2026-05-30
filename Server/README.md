@@ -4,7 +4,7 @@
 
 - 현재 서버 단계는 실거래가 아니라 `paper-runner`입니다.
 - runner는 Bitget public REST로 `15m` candle을 받아 공용 JSON 파일에 저장하고, 사용자별 paper 상태/control/log를 분리합니다.
-- 저장 기본값은 15m candle `150000`개입니다. 1회 fetch는 Bitget API 한도 때문에 최대 `1000`개로 나누고, 오래된 candle은 history backfill로 여러 페이지를 이어 받습니다.
+- 저장 기본값은 개수 제한 없음(`BUCKS_COPY_CANDLE_LIMIT=0`)입니다. 1회 fetch는 Bitget API 한도 때문에 최대 `1000`개로 나누고, 오래된 candle은 history backfill로 여러 페이지를 이어 받습니다.
 - Bitget API key, secret, passphrase는 `/auth/bitget/login` 후 서버 메모리에 올리고, `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY`가 설정된 운영 환경에서는 AES-256-GCM으로 암호화해 사용자별 파일에 저장합니다.
 - Bitget credential 원문, 서명 payload, private response 원문은 디스크/env/log에 저장하지 않습니다.
 
@@ -39,12 +39,13 @@ docker compose --env-file .env -f Server/docker-compose.paper.yml logs -f
 Useful history settings:
 
 ```text
-BUCKS_COPY_CANDLE_LIMIT=150000
+BUCKS_COPY_CANDLE_LIMIT=0
 BUCKS_COPY_FETCH_CANDLE_LIMIT=1000
 BUCKS_COPY_HISTORY_BACKFILL_PAGES_PER_CYCLE=800
 ```
 
-`BUCKS_COPY_CANDLE_LIMIT` is the storage/warmup size. `BUCKS_COPY_FETCH_CANDLE_LIMIT`
+`BUCKS_COPY_CANDLE_LIMIT=0` means the runner does not trim by candle count and
+keeps backfilling until Bitget returns no older rows. `BUCKS_COPY_FETCH_CANDLE_LIMIT`
 is only the per-request Bitget fetch size, so it should not be confused with the
 total history available to strategies.
 
