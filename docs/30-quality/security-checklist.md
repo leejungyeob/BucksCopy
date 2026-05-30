@@ -26,6 +26,7 @@
 - macOS 앱의 server runner bearer token은 Keychain-facing Data adapter에만 저장되고 UI/log에는 redacted token만 표시되는가
 - public server runner API는 HTTPS reverse proxy 뒤에서만 공개되고, raw `8787` HTTP port가 internet-open 상태가 아닌가
 - public server runner API는 `BUCKS_COPY_REQUIRE_AUTH=true`를 강제하며 token 없는 `/users/me/*` 요청이 401로 실패하는가
+- browser dashboard를 공개 도메인에 노출할 경우 `BUCKS_COPY_WEB_ACCESS_KEY` 기반 1차 access gate가 활성화되어 URL만 아는 사용자가 `/app`에 접근할 수 없는가
 
 ### Keychain / Storage
 
@@ -59,6 +60,7 @@
 - server paper runner의 order path가 `BUCKS_COPY_LIVE_ORDER_EXECUTION_ENABLED=true`와 양수 `BUCKS_COPY_LIVE_ORDER_MARGIN_USDT` 없이는 비활성화되는가
 - server paper runner는 private WebSocket을 포함하지 않고, live order/protection client가 gate 뒤에서만 호출되는가
 - public server runner edge가 `/health`, `/auth/bitget/login`, `/users/me/*` 외 legacy local routes를 proxy하지 않는가
+- public server runner edge가 web dashboard 공개 시 `/`, `/app`, `/web/access/*`만 추가로 proxy하고, legacy local routes를 여전히 공개하지 않는가
 - strategy가 order API를 직접 호출하지 않는가
 - Watchlist에 없는 심볼로 order intent가 만들어지지 않는가
 - 다중 전략/시간봉이 동시에 signal을 만들 때 포트폴리오 중재 정책이 live order를 1개로 제한해 중복 주문과 과다 노출을 차단하는가

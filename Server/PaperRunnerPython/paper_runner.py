@@ -40,6 +40,8 @@ DEFAULT_CANDLE_STORAGE_LIMIT = 0
 MAX_CANDLE_FETCH_LIMIT = 1_000
 USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 CREDENTIAL_ENCRYPTION_ALGORITHM = "AES-256-GCM"
+WEB_ACCESS_COOKIE_NAME = "bucks_copy_web_access"
+DEFAULT_WEB_ACCESS_SESSION_SECONDS = 12 * 60 * 60
 
 
 def dec(value: str | int | float | Decimal) -> Decimal:
@@ -100,6 +102,10 @@ def redacted_identifier(value: str) -> str:
     if len(text) <= 8:
         return "****"
     return f"{text[:4]}...{text[-4:]}"
+
+
+def form_decode(value: str) -> str:
+    return parse_qs(value, keep_blank_values=True).get("accessKey", [""])[0]
 
 
 def bitget_signature(
@@ -916,13 +922,38 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         return
 
+    def do_HEAD(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path in {"/", "/app"}:
+            if not self.runner.web_access_gate_enabled:
+                self.send_response(HTTPStatus.SERVICE_UNAVAILABLE.value)
+            elif self.web_access_allowed():
+                self.send_response(HTTPStatus.OK.value)
+            else:
+                self.send_response(HTTPStatus.UNAUTHORIZED.value)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        self.send_response(HTTPStatus.NOT_FOUND.value)
+        self.end_headers()
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path in {"/", "/app"}:
+            if not self.runner.web_access_gate_enabled:
+                self.write_html(self.web_access_not_configured_page(), HTTPStatus.SERVICE_UNAVAILABLE)
+            elif self.web_access_allowed():
+                self.write_html(self.web_app_shell())
+            else:
+                self.write_html(self.web_access_page(), HTTPStatus.UNAUTHORIZED)
+            return
+
         if parsed.path == "/health":
             payload: dict[str, Any] = {
                 "ok": True,
                 "mode": "paper",
                 "authRequired": self.runner.auth_required,
+                "webAccessGateEnabled": self.runner.web_access_gate_enabled,
                 "configuredUsers": len(self.runner.auth_tokens_by_user_id),
                 "updatedAt": iso(now_utc()),
             }
@@ -984,6 +1015,13 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/web/access/login":
+            self.handle_web_access_login()
+            return
+        if parsed.path == "/web/access/logout":
+            self.handle_web_access_logout()
+            return
+
         if parsed.path == "/auth/bitget/login":
             self.handle_bitget_login()
             return
@@ -1043,6 +1081,29 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         control = self.runner.save_control(user_id, payload["enabled"], updated_by="api")
         self.write_json(control)
 
+    def handle_web_access_login(self) -> None:
+        access_key = self.read_access_key()
+        if not self.runner.web_access_gate_enabled:
+            self.write_html(self.web_access_not_configured_page(), HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        if not self.runner.web_access_key_matches(access_key):
+            self.write_html(self.web_access_page(failed=True), HTTPStatus.UNAUTHORIZED)
+            return
+
+        token, expires_at = self.runner.issue_web_access_token()
+        self.send_response(HTTPStatus.SEE_OTHER.value)
+        self.send_header("Location", "/app")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Set-Cookie", self.runner.web_access_cookie_header(token, expires_at))
+        self.end_headers()
+
+    def handle_web_access_logout(self) -> None:
+        self.send_response(HTTPStatus.SEE_OTHER.value)
+        self.send_header("Location", "/")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Set-Cookie", self.runner.expired_web_access_cookie_header())
+        self.end_headers()
+
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path != "/users/me/session":
@@ -1089,6 +1150,21 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             raise ValueError("json object body is required")
         return payload
 
+    def read_access_key(self) -> str:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        body = self.rfile.read(length) if length > 0 else b""
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type == "application/json":
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+            except json.JSONDecodeError:
+                return ""
+            return str(payload.get("accessKey", "")).strip() if isinstance(payload, dict) else ""
+        return form_decode(body.decode("utf-8")).strip()
+
     def route_action(self, path: str) -> str | None:
         legacy_routes = {
             "/status": "status",
@@ -1132,11 +1208,111 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return None
         return self.runner.default_user_id
 
+    def web_access_allowed(self) -> bool:
+        if not self.runner.web_access_gate_enabled:
+            return True
+        cookies = self.headers.get("Cookie", "")
+        token = self.runner.web_access_token_from_cookie(cookies)
+        return token is not None and self.runner.web_access_token_valid(token)
+
+    def web_access_page(self, failed: bool = False) -> str:
+        error = '<p class="error">키가 맞지 않습니다.</p>' if failed else ""
+        return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BucksCopy Access</title>
+  <style>
+    :root {{ color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111; color: #eee; }}
+    main {{ width: min(360px, calc(100vw - 40px)); }}
+    h1 {{ margin: 0 0 10px; font-size: 24px; }}
+    p {{ margin: 0 0 20px; color: #aaa; line-height: 1.5; }}
+    form {{ display: grid; gap: 10px; }}
+    input, button {{ height: 42px; border-radius: 8px; border: 1px solid #3a3a3a; font: inherit; }}
+    input {{ background: #1f1f1f; color: #fff; padding: 0 12px; }}
+    button {{ background: #2f7d46; color: #fff; border: 0; font-weight: 700; cursor: pointer; }}
+    .error {{ color: #ff6b6b; margin-bottom: 10px; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BucksCopy</h1>
+    <p>접속 키를 입력해야 대시보드로 이동할 수 있습니다.</p>
+    {error}
+    <form method="post" action="/web/access/login">
+      <input name="accessKey" type="password" autocomplete="current-password" autofocus required>
+      <button type="submit">입장</button>
+    </form>
+  </main>
+</body>
+</html>"""
+
+    def web_access_not_configured_page(self) -> str:
+        return """<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BucksCopy Locked</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111; color: #eee; }
+    main { width: min(460px, calc(100vw - 40px)); }
+    h1 { margin: 0 0 10px; font-size: 24px; }
+    p { margin: 0; color: #aaa; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BucksCopy Locked</h1>
+    <p>웹 접속 키가 서버에 설정되지 않아 대시보드를 열 수 없습니다.</p>
+  </main>
+</body>
+</html>"""
+
+    def web_app_shell(self) -> str:
+        return """<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BucksCopy</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; background: #111; color: #eee; display: grid; place-items: center; }
+    main { width: min(520px, calc(100vw - 40px)); }
+    h1 { margin: 0 0 10px; font-size: 26px; }
+    p { margin: 0 0 18px; color: #aaa; line-height: 1.5; }
+    button { height: 38px; border: 0; border-radius: 8px; padding: 0 14px; background: #333; color: #eee; font: inherit; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BucksCopy Web</h1>
+    <p>접속 키 통과 완료. 다음 단계에서 이 화면을 자동매매 대시보드로 연결합니다.</p>
+    <form method="post" action="/web/access/logout">
+      <button type="submit">잠금</button>
+    </form>
+  </main>
+</body>
+</html>"""
+
     def write_json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         self.send_response(status.value)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def write_html(self, payload: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+        body = payload.encode("utf-8")
+        self.send_response(status.value)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1195,6 +1371,21 @@ class PaperRunner:
             os.environ.get("BUCKS_COPY_AUTH_USERS_PATH", str(self.data_dir / "auth-users.json"))
         )
         self.require_auth = parse_bool(os.environ.get("BUCKS_COPY_REQUIRE_AUTH"), default=False)
+        self.web_access_key = os.environ.get("BUCKS_COPY_WEB_ACCESS_KEY", "").strip()
+        if self.web_access_key and len(self.web_access_key) < 8:
+            raise ValueError("BUCKS_COPY_WEB_ACCESS_KEY must be at least 8 characters.")
+        self.web_access_gate_enabled = bool(self.web_access_key)
+        self.web_access_session_seconds = clamp_int(
+            os.environ.get("BUCKS_COPY_WEB_ACCESS_SESSION_SECONDS"),
+            default=DEFAULT_WEB_ACCESS_SESSION_SECONDS,
+            minimum=60,
+            maximum=30 * 24 * 60 * 60,
+        )
+        self.web_access_cookie_name = os.environ.get("BUCKS_COPY_WEB_ACCESS_COOKIE_NAME", WEB_ACCESS_COOKIE_NAME).strip()
+        self.web_access_cookie_secure = parse_bool(os.environ.get("BUCKS_COPY_WEB_ACCESS_COOKIE_SECURE"), default=True)
+        self.web_access_session_secret = self.web_access_session_secret_from_env(
+            os.environ.get("BUCKS_COPY_WEB_ACCESS_SESSION_SECRET")
+        )
         self.credential_encryption_key = encryption_key_from_env(
             os.environ.get("BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY")
         )
@@ -1217,6 +1408,78 @@ class PaperRunner:
         if not symbols:
             raise ValueError("BUCKS_COPY_SYMBOLS must include at least one symbol.")
         return symbols
+
+    def web_access_session_secret_from_env(self, value: str | None) -> bytes:
+        if value is not None and value.strip():
+            text = value.strip()
+            if len(text) < 32:
+                raise ValueError("BUCKS_COPY_WEB_ACCESS_SESSION_SECRET must be at least 32 characters.")
+            return hashlib.sha256(text.encode("utf-8")).digest()
+        if self.web_access_gate_enabled:
+            return secrets.token_bytes(32)
+        return b""
+
+    def web_access_key_matches(self, access_key: str) -> bool:
+        if not self.web_access_gate_enabled:
+            return True
+        return secrets.compare_digest(access_key, self.web_access_key)
+
+    def issue_web_access_token(self) -> tuple[str, int]:
+        expires_at = int(time.time()) + self.web_access_session_seconds
+        nonce = secrets.token_urlsafe(24)
+        message = f"{expires_at}:{nonce}"
+        signature = base64.urlsafe_b64encode(
+            hmac.new(self.web_access_session_secret, message.encode("utf-8"), hashlib.sha256).digest()
+        ).decode("ascii").rstrip("=")
+        return f"v1:{message}:{signature}", expires_at
+
+    def web_access_token_valid(self, token: str) -> bool:
+        parts = token.split(":")
+        if len(parts) != 4 or parts[0] != "v1":
+            return False
+        try:
+            expires_at = int(parts[1])
+        except ValueError:
+            return False
+        if expires_at < int(time.time()):
+            return False
+        message = f"{parts[1]}:{parts[2]}"
+        expected = base64.urlsafe_b64encode(
+            hmac.new(self.web_access_session_secret, message.encode("utf-8"), hashlib.sha256).digest()
+        ).decode("ascii").rstrip("=")
+        return secrets.compare_digest(expected, parts[3])
+
+    def web_access_token_from_cookie(self, cookie_header: str) -> str | None:
+        for item in cookie_header.split(";"):
+            name, separator, value = item.strip().partition("=")
+            if separator and name == self.web_access_cookie_name and value:
+                return value
+        return None
+
+    def web_access_cookie_header(self, token: str, expires_at: int) -> str:
+        max_age = max(expires_at - int(time.time()), 0)
+        flags = [
+            f"{self.web_access_cookie_name}={token}",
+            "Path=/",
+            f"Max-Age={max_age}",
+            "HttpOnly",
+            "SameSite=Strict",
+        ]
+        if self.web_access_cookie_secure:
+            flags.append("Secure")
+        return "; ".join(flags)
+
+    def expired_web_access_cookie_header(self) -> str:
+        flags = [
+            f"{self.web_access_cookie_name}=",
+            "Path=/",
+            "Max-Age=0",
+            "HttpOnly",
+            "SameSite=Strict",
+        ]
+        if self.web_access_cookie_secure:
+            flags.append("Secure")
+        return "; ".join(flags)
 
     def load_auth_users(self) -> dict[str, str]:
         if not self.auth_users_path.exists():

@@ -162,6 +162,22 @@ BUCKS_COPY_HOST_CADDY_DATA_DIR=/home/ubuntu/bucks-copy-server/caddy-data
 BUCKS_COPY_HOST_CADDY_CONFIG_DIR=/home/ubuntu/bucks-copy-server/caddy-config
 ```
 
+Optional web access gate for browser use:
+
+```bash
+BUCKS_COPY_WEB_ACCESS_KEY=<the-key-you-type-before-opening-the-dashboard>
+BUCKS_COPY_WEB_ACCESS_SESSION_SECRET=<generated-random-string-at-least-32-characters>
+BUCKS_COPY_WEB_ACCESS_SESSION_SECONDS=43200
+BUCKS_COPY_WEB_ACCESS_COOKIE_SECURE=true
+```
+
+When `BUCKS_COPY_WEB_ACCESS_KEY` is set, `/` and `/app` require that key before
+showing the web dashboard shell. If the key is not set, the web dashboard fails
+closed with `503` instead of opening. A successful key check creates an HttpOnly
+`SameSite=Strict` cookie. This gate is only the first web-page lock; Bitget login
+and `/users/me/*` bearer-token auth remain separate and still protect private
+API data.
+
 Start the runner with the HTTPS proxy:
 
 ```bash
@@ -175,6 +191,7 @@ Smoke check:
 
 ```bash
 curl https://api.example.com/health
+curl -i https://api.example.com/app
 curl -i https://api.example.com/users/me/status
 curl -i https://api.example.com/users/me/status \
   -H 'Authorization: Bearer <token>'
@@ -183,6 +200,7 @@ curl -i https://api.example.com/users/me/status \
 Expected result:
 
 - `/health`: `200 OK`
+- `/app` with web access gate enabled and no cookie: `401`
 - `/users/me/status` without token: `401`
 - `/users/me/status` with token: `200 OK`
 
