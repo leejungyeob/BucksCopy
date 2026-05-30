@@ -1,0 +1,12 @@
+{
+  "profiles": [
+    {
+      "profileID": "friend-dynamic-top1",
+      "name": "Friend Dynamic Top1",
+      "accessKey": "replace-with-friend-access-key",
+      "allowedStrategyIDs": [
+        "btc-15m-dynamic-top1"
+      ]
+    }
+  ]
+}

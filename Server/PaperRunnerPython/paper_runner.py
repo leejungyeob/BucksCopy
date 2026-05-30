@@ -14,7 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_DOWN, getcontext
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, getcontext
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -42,6 +42,7 @@ USER_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 CREDENTIAL_ENCRYPTION_ALGORITHM = "AES-256-GCM"
 WEB_ACCESS_COOKIE_NAME = "bucks_copy_web_access"
 DEFAULT_WEB_ACCESS_SESSION_SECONDS = 12 * 60 * 60
+OWNER_WEB_ACCESS_PROFILE_ID = "owner"
 
 
 def dec(value: str | int | float | Decimal) -> Decimal:
@@ -53,6 +54,10 @@ def decimal_text(value: Decimal) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def decimal_clip(value: Decimal, minimum: Decimal, maximum: Decimal) -> Decimal:
+    return min(max(value, minimum), maximum)
 
 
 def now_utc() -> datetime:
@@ -218,6 +223,29 @@ class BitgetCredential:
 
 
 @dataclass(frozen=True)
+class WebAccessProfile:
+    profile_id: str
+    name: str
+    access_key: str
+    allowed_strategy_ids: tuple[str, ...]
+
+    @property
+    def allows_all_strategies(self) -> bool:
+        return "*" in self.allowed_strategy_ids
+
+    def public_record(self, active_strategy_ids: list[str]) -> dict[str, Any]:
+        allowed = active_strategy_ids if self.allows_all_strategies else [
+            strategy_id for strategy_id in active_strategy_ids if strategy_id in set(self.allowed_strategy_ids)
+        ]
+        return {
+            "profileID": self.profile_id,
+            "name": self.name,
+            "allowedStrategyIDs": allowed,
+            "allowsAllStrategies": self.allows_all_strategies,
+        }
+
+
+@dataclass(frozen=True)
 class Signal:
     strategy_id: str
     symbol: str
@@ -227,6 +255,7 @@ class Signal:
     take_profit: Decimal
     reason: str
     leverage: int
+    margin_fraction: Decimal = dec(1)
 
     @property
     def partial_take_profit(self) -> Decimal:
@@ -337,6 +366,36 @@ BTC_BULL_PULLBACK_LONG_PARAMS = {
     "leverage": 10,
 }
 
+BTC_DYNAMIC_TOP1_PARAMS = {
+    "strategy_id": "btc-15m-dynamic-top1",
+    "name": "BTC 15m Dynamic Top1",
+    "symbol": "BTCUSDT",
+    "target_natr": dec("0.004"),
+    "margin_min": dec("0.5"),
+    "margin_max": dec("1.0"),
+    "atr_period": 10,
+    "long_donchian_period": 3,
+    "short_donchian_period": 3,
+    "long_breakout_confirm": 4,
+    "short_breakout_confirm": 3,
+    "long_vol_lookback": 40,
+    "long_vol_min_quantile": dec("0.05"),
+    "long_sl_pct": dec("0.01"),
+    "long_tp_pct": dec("0.035"),
+    "short_sl_pct": dec("0.015"),
+    "short_tp_pct": dec("0.02"),
+    "long_lev_min": dec("1.5"),
+    "long_lev_max": dec("5.0"),
+    "short_lev_min": dec("1.0"),
+    "short_lev_max": dec("4.5"),
+    "long_natr_ref": dec("0.005"),
+    "short_natr_ref": dec("0.005"),
+    "long_natr_power": dec("0.75"),
+    "short_natr_power": dec("1.25"),
+    "long_strength_boost": dec("0.25"),
+    "short_strength_boost": dec("0.75"),
+}
+
 ETH_PULSE_PARAMS = {
     "strategy_id": "eth-15m-vacuum-pulse",
     "name": "ETH 15m Vacuum Pulse",
@@ -371,9 +430,17 @@ ACTIVE_STRATEGIES_BY_SYMBOL = {
         BTC_PULSE_PARAMS,
         BTC_REGIME_SESSION_FADE_PARAMS,
         BTC_BULL_PULLBACK_LONG_PARAMS,
+        BTC_DYNAMIC_TOP1_PARAMS,
     ],
     "ETHUSDT": [ETH_PULSE_PARAMS],
 }
+
+DEFAULT_OWNER_STRATEGY_IDS = (
+    BTC_PULSE_PARAMS["strategy_id"],
+    BTC_REGIME_SESSION_FADE_PARAMS["strategy_id"],
+    BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"],
+    ETH_PULSE_PARAMS["strategy_id"],
+)
 
 STRATEGY_BACKTESTS = {
     "btc-15m-vacuum-pulse": {
@@ -402,6 +469,15 @@ STRATEGY_BACKTESTS = {
         "profitFactor": "2.66",
         "totalTrades": 173,
         "annualTrades": "43.3",
+    },
+    "btc-15m-dynamic-top1": {
+        "label": "최근 4년 · Dynamic leverage · full TP/SL",
+        "netReturnPercent": "+65.97",
+        "winRatePercent": "40.48",
+        "maxDrawdownPercent": "60.64",
+        "profitFactor": "1.12",
+        "totalTrades": 210,
+        "annualTrades": "52.5",
     },
     "eth-15m-vacuum-pulse": {
         "label": "최근 4년 · 10x · 5% risk",
@@ -768,6 +844,228 @@ def candle_week_hour(candle: Candle) -> int:
     return dt.weekday() * 24 + dt.hour
 
 
+def join_hourly_bucket(open_time: int, bucket: list[Candle]) -> Candle:
+    return Candle(
+        symbol=bucket[-1].symbol,
+        open_time=open_time,
+        open=bucket[0].open,
+        high=max(candle.high for candle in bucket),
+        low=min(candle.low for candle in bucket),
+        close=bucket[-1].close,
+        volume=sum((candle.volume for candle in bucket), dec(0)),
+        is_closed=True,
+    )
+
+
+def completed_hourly_candles_before(candles: list[Candle], open_time: int) -> list[Candle]:
+    cutoff_hour = open_time - open_time % 3600
+    hourly: list[Candle] = []
+    bucket: list[Candle] = []
+    current_hour: int | None = None
+    for candle in candles:
+        if candle.open_time >= cutoff_hour:
+            break
+        hour = candle.open_time - candle.open_time % 3600
+        if current_hour is None:
+            current_hour = hour
+        if hour != current_hour:
+            if len(bucket) == 4:
+                hourly.append(join_hourly_bucket(current_hour, bucket))
+            bucket = []
+            current_hour = hour
+        bucket.append(candle)
+    if current_hour is not None and len(bucket) == 4:
+        hourly.append(join_hourly_bucket(current_hour, bucket))
+    return hourly
+
+
+def return_std(candles: list[Candle], ending_at: int, period: int) -> Decimal | None:
+    if period <= 0 or ending_at - period + 1 <= 0:
+        return None
+    values: list[Decimal] = []
+    for index in range(ending_at - period + 1, ending_at + 1):
+        previous_close = candles[index - 1].close
+        if previous_close <= 0:
+            return None
+        values.append(candles[index].close / previous_close - dec(1))
+    average = sum(values, dec(0)) / dec(period)
+    variance = sum(((value - average) ** 2 for value in values), dec(0)) / dec(period)
+    return variance.sqrt()
+
+
+def decimal_quantile(values: list[Decimal], q: Decimal) -> Decimal | None:
+    if not values:
+        return None
+    clean = sorted(values)
+    if len(clean) == 1:
+        return clean[0]
+    position = (len(clean) - 1) * float(q)
+    lower = int(position)
+    upper = lower if position.is_integer() else lower + 1
+    if upper >= len(clean):
+        return clean[-1]
+    if lower == upper:
+        return clean[lower]
+    weight = dec(str(position - lower))
+    return clean[lower] * (dec(1) - weight) + clean[upper] * weight
+
+
+def confirmed_donchian_breakout(
+    candles: list[Candle],
+    ending_at: int,
+    period: int,
+    confirm: int,
+    side: str,
+) -> bool:
+    start = ending_at - confirm
+    if period <= 0 or start < period:
+        return False
+    for index in range(start, ending_at + 1):
+        previous = candles[index - period:index]
+        if len(previous) != period:
+            return False
+        if side == "buy" and candles[index].close <= max(candle.high for candle in previous):
+            return False
+        if side == "sell" and candles[index].close >= min(candle.low for candle in previous):
+            return False
+    return True
+
+
+def dynamic_top1_long_vol_allowed(candles: list[Candle], ending_at: int, lookback: int, q: Decimal) -> bool:
+    current = return_std(candles, ending_at, lookback)
+    if current is None:
+        return False
+    values: list[Decimal] = []
+    start = max(0, ending_at - lookback + 1)
+    for index in range(start, ending_at + 1):
+        value = return_std(candles, index, lookback)
+        if value is not None:
+            values.append(value)
+    threshold = decimal_quantile(values, q)
+    return threshold is not None and current > threshold
+
+
+def dynamic_top1_strengths(candles: list[Candle], open_time: int) -> tuple[Decimal | None, Decimal | None, Decimal, Decimal]:
+    hourly = completed_hourly_candles_before(candles, open_time)
+    ema20 = exponential_moving_average(hourly, 20)
+    ema100 = exponential_moving_average(hourly, 100)
+    if ema20 is None or ema100 is None or ema100 <= 0:
+        return ema20, ema100, dec(0), dec(0)
+    strength_up = decimal_clip(((ema20 - ema100) / ema100) * dec(100) / dec(5), dec(0), dec(1))
+    strength_down = decimal_clip(((ema100 - ema20) / ema100) * dec(100) / dec(5), dec(0), dec(1))
+    return ema20, ema100, strength_up, strength_down
+
+
+def dynamic_top1_margin(params: dict[str, Any], natr: Decimal) -> Decimal:
+    if natr <= 0:
+        return dec(0)
+    return decimal_clip(params["target_natr"] / natr, params["margin_min"], params["margin_max"])
+
+
+def dynamic_top1_leverage(params: dict[str, Any], side: str, natr: Decimal, strength_up: Decimal, strength_down: Decimal) -> Decimal:
+    if natr <= 0:
+        return dec(0)
+    if side == "buy":
+        lev_min = params["long_lev_min"]
+        lev_max = params["long_lev_max"]
+        ref = params["long_natr_ref"]
+        power = params["long_natr_power"]
+        boost = dec(1) + strength_up * params["long_strength_boost"] * dec("0.25")
+    else:
+        lev_min = params["short_lev_min"]
+        lev_max = params["short_lev_max"]
+        ref = params["short_natr_ref"]
+        power = params["short_natr_power"]
+        boost = dec(1) + strength_down * params["short_strength_boost"] * dec("0.25")
+
+    base_ratio = float(decimal_clip(ref / natr, dec("0.1"), dec("10.0")))
+    powered = dec(str(base_ratio ** float(power)))
+    scaled = (decimal_clip(powered, dec("0.25"), dec("2.5")) - dec("0.25")) / (dec("2.5") - dec("0.25"))
+    leverage = lev_min + (lev_max - lev_min) * scaled
+    return decimal_clip(leverage * boost, lev_min, lev_max)
+
+
+def evaluate_btc_dynamic_top1(candles: list[Candle], params: dict[str, Any]) -> Signal | None:
+    latest_index = len(candles) - 1
+    minimum_candles = max(
+        params["atr_period"] + 1,
+        params["long_vol_lookback"] * 2,
+        params["long_donchian_period"] + params["long_breakout_confirm"] + 1,
+        params["short_donchian_period"] + params["short_breakout_confirm"] + 1,
+        400,
+    )
+    if latest_index < minimum_candles:
+        return None
+
+    latest = candles[-1]
+    atr = average_true_range(candles, params["atr_period"])
+    if atr is None or latest.close <= 0 or atr <= 0:
+        return None
+    natr = atr / latest.close
+    margin_fraction = dynamic_top1_margin(params, natr)
+    if margin_fraction <= 0:
+        return None
+
+    long_signal = (
+        confirmed_donchian_breakout(
+            candles,
+            latest_index,
+            params["long_donchian_period"],
+            params["long_breakout_confirm"],
+            "buy",
+        )
+        and dynamic_top1_long_vol_allowed(
+            candles,
+            latest_index,
+            params["long_vol_lookback"],
+            params["long_vol_min_quantile"],
+        )
+    )
+    ema20, ema100, strength_up, strength_down = dynamic_top1_strengths(candles, latest.open_time)
+    short_signal = (
+        confirmed_donchian_breakout(
+            candles,
+            latest_index,
+            params["short_donchian_period"],
+            params["short_breakout_confirm"],
+            "sell",
+        )
+        and ema20 is not None
+        and ema100 is not None
+        and ema20 < ema100
+    )
+    if long_signal == short_signal:
+        return None
+
+    side = "buy" if long_signal else "sell"
+    leverage_decimal = dynamic_top1_leverage(params, side, natr, strength_up, strength_down)
+    leverage = int(leverage_decimal.to_integral_value(rounding=ROUND_HALF_UP))
+    leverage = min(max(leverage, 1), 10)
+    entry = latest.close
+    if side == "buy":
+        stop = entry * (dec(1) - params["long_sl_pct"])
+        take_profit = entry * (dec(1) + params["long_tp_pct"])
+    else:
+        stop = entry * (dec(1) + params["short_sl_pct"])
+        take_profit = entry * (dec(1) - params["short_tp_pct"])
+
+    return Signal(
+        strategy_id=params["strategy_id"],
+        symbol=params["symbol"],
+        side=side,
+        entry=entry,
+        stop=stop,
+        take_profit=take_profit,
+        reason=(
+            f"{params['name']}: closed 15m Donchian breakout, "
+            f"marginFraction={decimal_text(margin_fraction)}, "
+            f"dynamicLeverage={decimal_text(leverage_decimal)}x"
+        ),
+        leverage=leverage,
+        margin_fraction=margin_fraction,
+    )
+
+
 def fixed_percent_signal(
     params: dict[str, Any],
     side: str,
@@ -901,6 +1199,8 @@ def evaluate_strategy(candles: list[Candle], params: dict[str, Any], generated_a
         signal = evaluate_btc_regime_session_fade(candles, params)
     elif params["strategy_id"] == BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"]:
         signal = evaluate_btc_bull_pullback_long(candles, params)
+    elif params["strategy_id"] == BTC_DYNAMIC_TOP1_PARAMS["strategy_id"]:
+        signal = evaluate_btc_dynamic_top1(candles, params)
     else:
         signal = evaluate_vacuum_pulse(candles, params, generated_at)
     if signal and risk_allowed(signal):
@@ -1086,11 +1386,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if not self.runner.web_access_gate_enabled:
             self.write_html(self.web_access_not_configured_page(), HTTPStatus.SERVICE_UNAVAILABLE)
             return
-        if not self.runner.web_access_key_matches(access_key):
+        profile = self.runner.web_access_profile_for_key(access_key)
+        if profile is None:
             self.write_html(self.web_access_page(failed=True), HTTPStatus.UNAUTHORIZED)
             return
 
-        token, expires_at = self.runner.issue_web_access_token()
+        token, expires_at = self.runner.issue_web_access_token(profile.profile_id)
         self.send_response(HTTPStatus.SEE_OTHER.value)
         self.send_header("Location", "/app")
         self.send_header("Cache-Control", "no-store")
@@ -1130,7 +1431,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            self.write_json(self.runner.login_with_bitget(api_key, secret_key, passphrase))
+            self.write_json(self.runner.login_with_bitget(
+                api_key,
+                secret_key,
+                passphrase,
+                web_access_profile_id=self.web_access_profile_id(),
+            ))
         except BitgetLoginError as error:
             self.write_json({"error": str(error)}, HTTPStatus.UNAUTHORIZED)
         except Exception:
@@ -1214,6 +1520,13 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         cookies = self.headers.get("Cookie", "")
         token = self.runner.web_access_token_from_cookie(cookies)
         return token is not None and self.runner.web_access_token_valid(token)
+
+    def web_access_profile_id(self) -> str | None:
+        if not self.runner.web_access_gate_enabled:
+            return OWNER_WEB_ACCESS_PROFILE_ID
+        cookies = self.headers.get("Cookie", "")
+        token = self.runner.web_access_token_from_cookie(cookies)
+        return self.runner.web_access_profile_id_from_token(token) if token else None
 
     def web_access_page(self, failed: bool = False) -> str:
         error = '<p class="error">키가 맞지 않습니다.</p>' if failed else ""
@@ -1374,7 +1687,11 @@ class PaperRunner:
         self.web_access_key = os.environ.get("BUCKS_COPY_WEB_ACCESS_KEY", "").strip()
         if self.web_access_key and len(self.web_access_key) < 8:
             raise ValueError("BUCKS_COPY_WEB_ACCESS_KEY must be at least 8 characters.")
-        self.web_access_gate_enabled = bool(self.web_access_key)
+        self.web_access_profiles_path = Path(
+            os.environ.get("BUCKS_COPY_WEB_ACCESS_PROFILES_PATH", str(self.data_dir / "web-access-profiles.json"))
+        )
+        self.web_access_profiles_by_id = self.load_web_access_profiles()
+        self.web_access_gate_enabled = bool(self.web_access_key or self.web_access_profiles_by_id)
         self.web_access_session_seconds = clamp_int(
             os.environ.get("BUCKS_COPY_WEB_ACCESS_SESSION_SECONDS"),
             default=DEFAULT_WEB_ACCESS_SESSION_SECONDS,
@@ -1419,35 +1736,124 @@ class PaperRunner:
             return secrets.token_bytes(32)
         return b""
 
-    def web_access_key_matches(self, access_key: str) -> bool:
-        if not self.web_access_gate_enabled:
-            return True
-        return secrets.compare_digest(access_key, self.web_access_key)
+    def owner_web_access_profile(self) -> WebAccessProfile:
+        return WebAccessProfile(
+            profile_id=OWNER_WEB_ACCESS_PROFILE_ID,
+            name="Owner",
+            access_key=self.web_access_key,
+            allowed_strategy_ids=tuple(DEFAULT_OWNER_STRATEGY_IDS),
+        )
 
-    def issue_web_access_token(self) -> tuple[str, int]:
+    def all_web_access_profiles_by_id(self) -> dict[str, WebAccessProfile]:
+        profiles = dict(self.web_access_profiles_by_id)
+        profiles[OWNER_WEB_ACCESS_PROFILE_ID] = self.owner_web_access_profile()
+        return profiles
+
+    def load_web_access_profiles(self) -> dict[str, WebAccessProfile]:
+        if not self.web_access_profiles_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.web_access_profiles_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ValueError("web access profiles file must be valid JSON.") from error
+        profiles = payload.get("profiles", []) if isinstance(payload, dict) else []
+        if not isinstance(profiles, list):
+            raise ValueError("web access profiles file must contain a profiles array.")
+
+        active_ids = set(self.active_strategy_ids())
+        loaded: dict[str, WebAccessProfile] = {}
+        access_keys: set[str] = set()
+        for item in profiles:
+            if not isinstance(item, dict):
+                raise ValueError("web access profile entries must be objects.")
+            raw_profile_id = item.get("profileID") or item.get("profileId")
+            name = item.get("name")
+            access_key = item.get("accessKey")
+            raw_allowed = item.get("allowedStrategyIDs") or item.get("allowedStrategyIds")
+            if not isinstance(raw_profile_id, str) or not isinstance(name, str) or not isinstance(access_key, str):
+                raise ValueError("web access profiles require profileID, name, and accessKey strings.")
+            profile_id = validate_user_id(raw_profile_id)
+            if profile_id == OWNER_WEB_ACCESS_PROFILE_ID:
+                raise ValueError("owner web access profile is reserved for BUCKS_COPY_WEB_ACCESS_KEY.")
+            if profile_id in loaded:
+                raise ValueError(f"duplicate web access profileID: {profile_id}")
+            access_key = access_key.strip()
+            if len(access_key) < 8:
+                raise ValueError("web access profile accessKey must be at least 8 characters.")
+            if access_key in access_keys:
+                raise ValueError("duplicate web access profile accessKey.")
+            access_keys.add(access_key)
+
+            if raw_allowed == "*":
+                allowed_strategy_ids = ("*",)
+            elif isinstance(raw_allowed, list) and all(isinstance(value, str) for value in raw_allowed):
+                allowed_strategy_ids = tuple(strategy_id.strip() for strategy_id in raw_allowed if strategy_id.strip())
+            else:
+                raise ValueError("web access profile allowedStrategyIDs must be a string array or '*'.")
+            unknown = sorted(set(allowed_strategy_ids) - active_ids - {"*"})
+            if unknown:
+                raise ValueError(f"web access profile references unknown strategy id: {unknown[0]}")
+            loaded[profile_id] = WebAccessProfile(
+                profile_id=profile_id,
+                name=name.strip() or profile_id,
+                access_key=access_key,
+                allowed_strategy_ids=allowed_strategy_ids,
+            )
+        return loaded
+
+    def web_access_profile_for_key(self, access_key: str) -> WebAccessProfile | None:
+        if not self.web_access_gate_enabled:
+            return self.owner_web_access_profile()
+        if self.web_access_key and secrets.compare_digest(access_key, self.web_access_key):
+            return self.owner_web_access_profile()
+        for profile in self.web_access_profiles_by_id.values():
+            if secrets.compare_digest(access_key, profile.access_key):
+                return profile
+        return None
+
+    def issue_web_access_token(self, profile_id: str) -> tuple[str, int]:
         expires_at = int(time.time()) + self.web_access_session_seconds
         nonce = secrets.token_urlsafe(24)
-        message = f"{expires_at}:{nonce}"
+        message = f"{profile_id}:{expires_at}:{nonce}"
         signature = base64.urlsafe_b64encode(
             hmac.new(self.web_access_session_secret, message.encode("utf-8"), hashlib.sha256).digest()
         ).decode("ascii").rstrip("=")
-        return f"v1:{message}:{signature}", expires_at
+        return f"v2:{message}:{signature}", expires_at
 
-    def web_access_token_valid(self, token: str) -> bool:
+    def web_access_profile_id_from_token(self, token: str) -> str | None:
         parts = token.split(":")
-        if len(parts) != 4 or parts[0] != "v1":
-            return False
+        if len(parts) == 4 and parts[0] == "v1":
+            try:
+                expires_at = int(parts[1])
+            except ValueError:
+                return None
+            if expires_at < int(time.time()):
+                return None
+            message = f"{parts[1]}:{parts[2]}"
+            expected = base64.urlsafe_b64encode(
+                hmac.new(self.web_access_session_secret, message.encode("utf-8"), hashlib.sha256).digest()
+            ).decode("ascii").rstrip("=")
+            return OWNER_WEB_ACCESS_PROFILE_ID if secrets.compare_digest(expected, parts[3]) else None
+
+        if len(parts) != 5 or parts[0] != "v2":
+            return None
+        profile_id = parts[1]
+        if profile_id not in self.all_web_access_profiles_by_id():
+            return None
         try:
-            expires_at = int(parts[1])
+            expires_at = int(parts[2])
         except ValueError:
-            return False
+            return None
         if expires_at < int(time.time()):
-            return False
-        message = f"{parts[1]}:{parts[2]}"
+            return None
+        message = f"{parts[1]}:{parts[2]}:{parts[3]}"
         expected = base64.urlsafe_b64encode(
             hmac.new(self.web_access_session_secret, message.encode("utf-8"), hashlib.sha256).digest()
         ).decode("ascii").rstrip("=")
-        return secrets.compare_digest(expected, parts[3])
+        return profile_id if secrets.compare_digest(expected, parts[4]) else None
+
+    def web_access_token_valid(self, token: str) -> bool:
+        return self.web_access_profile_id_from_token(token) is not None
 
     def web_access_token_from_cookie(self, cookie_header: str) -> str | None:
         for item in cookie_header.split(";"):
@@ -1532,7 +1938,13 @@ class PaperRunner:
     def persistent_credential_enabled(self) -> bool:
         return self.credential_encryption_key is not None
 
-    def login_with_bitget(self, api_key: str, secret_key: str, passphrase: str) -> dict[str, Any]:
+    def login_with_bitget(
+        self,
+        api_key: str,
+        secret_key: str,
+        passphrase: str,
+        web_access_profile_id: str | None = None,
+    ) -> dict[str, Any]:
         credential = BitgetCredential(
             api_key=api_key,
             secret_key=secret_key,
@@ -1549,6 +1961,8 @@ class PaperRunner:
                 self.user_ids = sorted(set(self.user_ids + [user_id]))
             self.ensure_user_storage(user_id)
             self.evaluated_keys_by_user.setdefault(user_id, self.load_evaluated_keys(user_id))
+            if web_access_profile_id is not None:
+                self.assign_web_access_profile(user_id, web_access_profile_id)
             self.save_persistent_credential(user_id, credential)
             self.save_auth_users()
         return {
@@ -1557,6 +1971,7 @@ class PaperRunner:
             "credentialScope": "encrypted" if self.persistent_credential_enabled else "memory",
             "redactedIdentifier": credential.redacted_identifier,
             "userID": user_id,
+            "accessProfile": self.web_access_profile_public_record(user_id),
             "accounts": accounts,
             "updatedAt": iso(now_utc()),
         }
@@ -1856,6 +2271,7 @@ class PaperRunner:
             raise LiveExecutionError("live order margin is not configured")
         leverage = min(signal.leverage, int(contract_spec.get("maxLeverage") or signal.leverage))
         planned_margin = min(self.live_order_margin_usdt, account_available * self.live_available_balance_ratio)
+        planned_margin *= decimal_clip(signal.margin_fraction, dec(0), dec(1))
         if planned_margin <= 0:
             raise LiveExecutionError("USDT available balance is not enough for live order")
         notional = planned_margin * dec(leverage)
@@ -2187,6 +2603,7 @@ class PaperRunner:
                     "entry": decimal_text(signal.entry),
                     "size": decimal_text(size),
                     "marginUSDT": decimal_text(self.live_order_margin_usdt),
+                    "marginFraction": decimal_text(signal.margin_fraction),
                     "availableBalanceRatio": decimal_text(self.live_available_balance_ratio),
                     "leverage": f"{signal.leverage}x",
                     "tp1": decimal_text(signal.partial_take_profit),
@@ -2231,6 +2648,51 @@ class PaperRunner:
 
     def user_dir(self, user_id: str) -> Path:
         return self.data_dir / "users" / validate_user_id(user_id)
+
+    def web_access_profile_assignment_path(self, user_id: str) -> Path:
+        return self.user_dir(user_id) / "web-access-profile.json"
+
+    def assign_web_access_profile(self, user_id: str, profile_id: str) -> None:
+        profiles = self.all_web_access_profiles_by_id()
+        if profile_id not in profiles:
+            raise ValueError("web access profile is not configured")
+        profile = profiles[profile_id]
+        self.atomic_write_json(
+            self.web_access_profile_assignment_path(user_id),
+            {
+                "profileID": profile.profile_id,
+                "name": profile.name,
+                "assignedAt": iso(now_utc()),
+            },
+            pretty=True,
+        )
+
+    def assigned_web_access_profile_id(self, user_id: str) -> str | None:
+        payload = read_json_file(self.web_access_profile_assignment_path(user_id), {})
+        profile_id = payload.get("profileID")
+        return str(profile_id) if isinstance(profile_id, str) and profile_id.strip() else None
+
+    def web_access_profile_for_user(self, user_id: str) -> WebAccessProfile | None:
+        profile_id = self.assigned_web_access_profile_id(user_id)
+        if profile_id is None:
+            return self.owner_web_access_profile()
+        return self.all_web_access_profiles_by_id().get(profile_id)
+
+    def web_access_profile_public_record(self, user_id: str) -> dict[str, Any] | None:
+        active_ids = self.active_strategy_ids()
+        profile_id = self.assigned_web_access_profile_id(user_id)
+        profile = self.web_access_profile_for_user(user_id)
+        if profile is None:
+            return {
+                "profileID": profile_id,
+                "name": "Missing profile",
+                "allowedStrategyIDs": [],
+                "allowsAllStrategies": False,
+                "configured": False,
+            }
+        record = profile.public_record(active_ids)
+        record["configured"] = True
+        return record
 
     def ensure_user_storage(self, user_id: str) -> None:
         directory = self.user_dir(user_id)
@@ -2369,8 +2831,20 @@ class PaperRunner:
                 ids.append(strategy_id)
         return ids
 
-    def load_enabled_strategy_ids(self, user_id: str) -> list[str]:
+    def allowed_strategy_ids_for_user(self, user_id: str) -> list[str]:
         active_ids = self.active_strategy_ids()
+        profile = self.web_access_profile_for_user(user_id)
+        if profile is None:
+            return []
+        if profile.allows_all_strategies:
+            return active_ids
+        allowed_set = set(profile.allowed_strategy_ids)
+        return [strategy_id for strategy_id in active_ids if strategy_id in allowed_set]
+
+    def load_enabled_strategy_ids(self, user_id: str) -> list[str]:
+        active_ids = self.allowed_strategy_ids_for_user(user_id)
+        if not active_ids:
+            return []
         active_set = set(active_ids)
         payload = read_json_file(self.strategy_selection_path(user_id), {})
         raw_ids = payload.get("enabledStrategyIDs")
@@ -2388,11 +2862,14 @@ class PaperRunner:
     def strategy_status(self, user_id: str) -> dict[str, Any]:
         enabled_ids = self.load_enabled_strategy_ids(user_id)
         enabled_set = set(enabled_ids)
+        allowed_ids = set(self.allowed_strategy_ids_for_user(user_id))
         selection = read_json_file(self.strategy_selection_path(user_id), {})
         available: list[dict[str, Any]] = []
         for symbol in self.symbols:
             for params in ACTIVE_STRATEGIES_BY_SYMBOL.get(symbol, []):
                 strategy_id = str(params["strategy_id"])
+                if strategy_id not in allowed_ids:
+                    continue
                 available.append({
                     "id": strategy_id,
                     "name": str(params.get("name") or strategy_id),
@@ -2404,6 +2881,7 @@ class PaperRunner:
         return {
             "available": available,
             "enabledStrategyIDs": enabled_ids,
+            "accessProfile": self.web_access_profile_public_record(user_id),
             "updatedAt": selection.get("updatedAt"),
             "updatedBy": selection.get("updatedBy"),
         }
@@ -2414,12 +2892,14 @@ class PaperRunner:
         enabled_strategy_ids: list[str],
         updated_by: str,
     ) -> dict[str, Any]:
-        active_ids = self.active_strategy_ids()
+        active_ids = self.allowed_strategy_ids_for_user(user_id)
         active_set = set(active_ids)
         requested_ids = [strategy_id.strip() for strategy_id in enabled_strategy_ids if strategy_id.strip()]
         unknown_ids = sorted(set(requested_ids) - active_set)
         if unknown_ids:
-            raise ValueError(f"unknown strategy id: {unknown_ids[0]}")
+            raise ValueError(f"strategy is not available for this account: {unknown_ids[0]}")
+        if not active_ids:
+            raise ValueError("no strategies are available for this account")
 
         enabled: list[str] = []
         seen: set[str] = set()
