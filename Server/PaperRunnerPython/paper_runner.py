@@ -1389,7 +1389,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       align-items: center;
       justify-content: space-between;
       gap: 14px;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
     }
     h1 {
       margin: 0;
@@ -1516,10 +1516,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       flex: 0 0 auto;
     }
     .command-footer {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px;
+      min-height: 0;
     }
     .dashboard {
       display: grid;
@@ -1730,37 +1727,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       color: var(--muted);
       font-size: 11px;
     }
-    .risk-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      margin: 0;
+    .alert-text {
       color: var(--muted);
       font-size: 12px;
       line-height: 1.35;
-    }
-    .automation-summary {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #222;
-      padding: 8px 10px;
-      color: var(--muted);
-      line-height: 1.45;
-      flex: 1 1 360px;
-    }
-    .automation-summary strong {
-      display: inline;
-      color: var(--text);
-      font-size: 13px;
-      line-height: 1.2;
-      margin-right: 6px;
-    }
-    .automation-summary span { font-size: 12px; }
-    .setting-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-      margin: 0;
     }
     .empty {
       color: var(--muted);
@@ -1788,7 +1758,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     <header class="topbar">
       <div>
         <p class="eyebrow">BucksCopy Web</p>
-        <h1>서버 자동매매</h1>
       </div>
       <div class="top-actions">
         <span class="pill ok"><span class="dot"></span>접속키 통과됨</span>
@@ -1847,13 +1816,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           </div>
           <div class="metrics" id="metrics"></div>
           <div class="command-footer">
-            <div id="automation-summary" class="automation-summary"></div>
-            <div id="live-config" class="kv"></div>
-            <label class="risk-row">
-              <input id="risk-ack" type="checkbox">
-              <span>시작하면 다음 전략 신호부터 실제 Bitget 주문이 나갈 수 있음을 확인합니다.</span>
-            </label>
-            <div id="live-blockers" class="tagline"></div>
+            <div id="live-blockers" class="alert-text"></div>
           </div>
         </div>
       </section>
@@ -1963,9 +1926,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         automationIcon: document.getElementById("automation-icon"),
         automationTitle: document.getElementById("automation-title"),
         runnerStatus: document.getElementById("runner-status"),
-        automationSummary: document.getElementById("automation-summary"),
         automationToggle: document.getElementById("automation-toggle"),
-        liveConfig: document.getElementById("live-config"),
         liveBlockers: document.getElementById("live-blockers"),
         strategyList: document.getElementById("strategy-list"),
         accountSummary: document.getElementById("account-summary"),
@@ -1975,8 +1936,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         logCount: document.getElementById("log-count"),
         logs: document.getElementById("logs"),
         loginForm: document.getElementById("bitget-login-form"),
-        lockForm: document.getElementById("lock-form"),
-        riskAck: document.getElementById("risk-ack")
+        lockForm: document.getElementById("lock-form")
       };
 
       class ApiError extends Error {
@@ -2125,6 +2085,40 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
       const empty = (text) => `<div class="empty">${escapeHTML(text)}</div>`;
 
+      const friendlyErrorText = (message, key = "") => {
+        const text = String(message || "").trim();
+        const lower = text.toLowerCase();
+        const isGatewayError = lower.includes("502") || lower.includes("bad gateway") || lower.includes("gateway");
+        const isServerError = isGatewayError || /^5\\d\\d\\b/.test(lower);
+        if (isServerError) {
+          if (key === "positions") {
+            return "포지션 정보를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.";
+          }
+          if (key === "account") {
+            return "계정 정보를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.";
+          }
+          return "서버 응답이 지연 중입니다. 잠시 후 새로고침해 주세요.";
+        }
+        return text || "요청을 완료하지 못했습니다.";
+      };
+
+      const localizedLiveBlocker = (text) => {
+        switch (text) {
+          case "live order execution env switch is disabled":
+            return "서버 실주문 스위치 꺼짐";
+          case "live order margin USDT is not configured":
+            return "주문한도 미설정";
+          case "live consent is disabled":
+            return "자동매매 실주문 동의 꺼짐";
+          case "Bitget credential is not loaded":
+            return "Bitget 로그인 필요";
+          case "fresh account/position snapshot is required":
+            return "계정/포지션 최신 정보 대기";
+          default:
+            return friendlyErrorText(text);
+        }
+      };
+
       const isPaperLog = (item) => {
         const metadata = item.metadata || {};
         const details = metadata.details || {};
@@ -2259,7 +2253,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             throw error;
           }
           state[key] = null;
-          state.errors[key] = error.message || "요청 실패";
+          state.errors[key] = friendlyErrorText(error.message, key);
         }
       };
 
@@ -2364,27 +2358,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           pill(live.orderExecutionEnabled ? "실주문" : "대기", live.orderExecutionEnabled ? "warn" : "info"),
           pill(`${timeText(state.lastUpdated)} 갱신`, "info")
         ].join("");
-        els.automationSummary.innerHTML = `
-          <strong>${escapeHTML(orderLimitText(config))}</strong>
-          <span>${escapeHTML(mode.note)}</span>
-        `;
-        els.liveConfig.innerHTML = `
-          <div><span>주문한도</span><strong>${escapeHTML(orderLimitText(config))}</strong></div>
-          <div><span>마진/포지션</span><strong>${escapeHTML(config.marginMode || "-")} · ${escapeHTML(config.positionMode || "-")}</strong></div>
-        `;
-        els.liveBlockers.innerHTML = blockers.length
-          ? blockers.map((item) => `<span class="tag">${escapeHTML(item)}</span>`).join("")
-          : `<span class="tag">실행 조건 충족</span>`;
-        els.riskAck.checked = Boolean(live.control?.acknowledgedRisk);
-        const shouldStop = mode.id === "live" || mode.id === "blocked";
+        els.liveBlockers.textContent = blockers.length ? `대기 사유: ${localizedLiveBlocker(blockers[0])}` : "";
+        const shouldStop = Boolean(control.enabled);
         els.automationToggle.textContent = shouldStop ? "자동매매 중단" : "자동매매 시작";
         els.automationToggle.className = shouldStop ? "danger" : "primary";
         els.automationToggle.dataset.intent = shouldStop ? "stop" : "start";
         els.automationToggle.disabled = state.busy;
-        els.riskAck.disabled = state.busy || shouldStop;
-        if (shouldStop) {
-          els.riskAck.checked = true;
-        }
       };
 
       const renderStrategies = () => {
@@ -2576,10 +2555,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       };
 
       const startAutomation = async () => {
-        if (!els.riskAck.checked) {
-          setNotice("자동매매 시작 전에 실제 주문 동의가 필요합니다.", "error");
-          return;
-        }
         await api("/users/me/control", {
           method: "POST",
           body: { enabled: true }
@@ -2600,7 +2575,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           method: "POST",
           body: { enabled: false }
         });
-        els.riskAck.checked = false;
         await refreshAll();
       };
 
