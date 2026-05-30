@@ -16,7 +16,6 @@ struct DashboardView: View {
                         isConnected: isAuthenticated,
                         account: dashboardAccount,
                         positions: displayPositions,
-                        logs: dashboardTradeLogs,
                         onRefreshServer: viewModel.refreshServerRunnerStatus,
                         onRefreshPositions: {
                             Task { await viewModel.refreshPositions() }
@@ -368,7 +367,6 @@ private struct TradingCommandPanel: View {
     let isConnected: Bool
     let account: AccountSnapshot?
     let positions: [PositionSnapshot]
-    let logs: [TradeEventLog]
     let onRefreshServer: () -> Void
     let onRefreshPositions: () -> Void
     let onToggleAutomation: () -> Void
@@ -440,10 +438,8 @@ private struct TradingCommandPanel: View {
                     LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 8) {
                         TradingCommandMetric(title: "경과", value: elapsedText(now: context.date), tone: statusTint)
                         TradingCommandMetric(title: "최근 마감", value: latestClosedText)
-                        TradingCommandMetric(title: "승률", value: winRateText, footnote: closeRecordText)
-                        TradingCommandMetric(title: "실현손익", value: realizedProfitText, tone: realizedProfitTone)
-                        TradingCommandMetric(title: "미실현", value: unrealizedProfitText, tone: unrealizedProfitTone)
                         TradingCommandMetric(title: "포지션", value: "\(positions.count)개", footnote: positionFootnote)
+                        TradingCommandMetric(title: "전략", value: strategyCountText, footnote: "활성 전략")
                         TradingCommandMetric(title: "Equity", value: account?.accountEquity.dashboardText ?? "-")
                         TradingCommandMetric(title: "가용", value: account?.available.dashboardText ?? "-", footnote: liveLimitText)
                     }
@@ -554,98 +550,13 @@ private struct TradingCommandPanel: View {
         return "\(minutes)m"
     }
 
-    private var closeSummary: (wins: Int, losses: Int, breakevens: Int) {
-        performanceLogs.reduce(into: (wins: 0, losses: 0, breakevens: 0)) { result, log in
-            if let profitLoss = Self.closeProfitLoss(in: log) {
-                if profitLoss > 0 {
-                    result.wins += 1
-                } else if profitLoss < 0 {
-                    result.losses += 1
-                } else {
-                    result.breakevens += 1
-                }
-                return
-            }
-
-            guard let outcome = log.metadata?.detailValue(for: "청산 판정") else { return }
-            if outcome.contains("승") {
-                result.wins += 1
-            } else if outcome.contains("패") {
-                result.losses += 1
-            } else {
-                result.breakevens += 1
-            }
-        }
-    }
-
-    private var performanceLogs: [TradeEventLog] {
-        guard let startedAt = status?.control?.updatedAt else { return logs }
-        return logs.filter { $0.timestamp >= startedAt }
-    }
-
-    private var realizedProfit: Decimal {
-        performanceLogs.reduce(Decimal(0)) { partial, log in
-            partial + (Self.closeProfitLoss(in: log) ?? 0)
-        }
-    }
-
-    private var unrealizedProfit: Decimal {
-        positions.reduce(Decimal(0)) { $0 + $1.unrealizedProfitLoss }
-    }
-
-    private var realizedProfitText: String {
-        realizedProfit.signedDashboardText
-    }
-
-    private var unrealizedProfitText: String {
-        unrealizedProfit.signedDashboardText
-    }
-
-    private var realizedProfitTone: Color {
-        realizedProfit >= 0 ? .green : .red
-    }
-
-    private var unrealizedProfitTone: Color {
-        unrealizedProfit >= 0 ? .green : .red
-    }
-
-    private var winRateText: String {
-        let summary = closeSummary
-        let total = summary.wins + summary.losses
-        guard total > 0 else { return "-" }
-        let rate = Decimal(summary.wins) / Decimal(total) * 100
-        return "\(rate.dashboardText)%"
-    }
-
-    private var closeRecordText: String {
-        let summary = closeSummary
-        guard summary.wins + summary.losses + summary.breakevens > 0 else {
-            return "확정 청산 대기"
-        }
-        return "\(summary.wins)승 \(summary.losses)패"
-    }
-
-    private static func closeProfitLoss(in log: TradeEventLog) -> Decimal? {
-        guard isCloseLog(log) else { return nil }
-        for label in ["실현 PnL", "청산 PnL", "청산 직전 PnL", "미실현 PnL"] {
-            if let value = log.metadata?.detailValue(for: label),
-               let profitLoss = DecimalText.optional(value) {
-                return profitLoss
-            }
-        }
-        return nil
-    }
-
-    private static func isCloseLog(_ log: TradeEventLog) -> Bool {
-        guard log.category == .liveOrder else { return false }
-        let text = "\(log.metadata?.title ?? "") \(log.metadata?.subtitle ?? "") \(log.message)"
-        return text.contains("청산") ||
-            text.contains("close submitted") ||
-            text.contains("External/manual close detected")
-    }
-
     private var positionFootnote: String {
-        "미실현 \(unrealizedProfit.signedDashboardText)"
+        "열린 포지션"
+    }
+
+    private var strategyCountText: String {
+        guard let strategies = status?.strategies else { return "-" }
+        return "\(strategies.enabledCount)/\(strategies.available.count)"
     }
 
     private var liveLimitText: String {
@@ -780,10 +691,11 @@ private struct StrategySelectionRow: View {
     let isEnabled: Bool
     let disableToggle: Bool
     let onToggle: (Bool) -> Void
+    @State private var isExpanded = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            HStack(alignment: .top, spacing: 7) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .center, spacing: 8) {
                 Toggle("", isOn: Binding(
                     get: { isEnabled },
                     set: onToggle
@@ -792,33 +704,42 @@ private struct StrategySelectionRow: View {
                 .labelsHidden()
                 .disabled(disableToggle)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 5) {
-                        Text(strategy.name)
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                        Badge(text: strategy.symbol, color: .secondary)
-                        Badge(text: strategy.timeframe, color: .secondary)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(alignment: .center, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 5) {
+                                Text(strategy.name)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.72)
+                                Badge(text: strategy.symbol, color: .secondary)
+                                Badge(text: strategy.timeframe, color: .secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let backtest = strategy.backtest {
+                            summaryMetric("수익", "\(backtest.netReturnPercent)%", tone: .green)
+                            summaryMetric("승률", "\(backtest.winRatePercent)%")
+                        }
+
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 12)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .buttonStyle(.plain)
             }
-            .frame(width: 158, alignment: .leading)
 
-            if let backtest = strategy.backtest {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 40), spacing: 5, alignment: .leading)],
-                    alignment: .leading,
-                    spacing: 3
-                ) {
-                    strategyMetric("수익", "\(backtest.netReturnPercent)%", tone: .green)
-                    strategyMetric("승률", "\(backtest.winRatePercent)%")
-                    strategyMetric("MDD", "\(backtest.maxDrawdownPercent)%", tone: .orange)
-                    strategyMetric("거래", "\(backtest.totalTrades)")
-                    strategyMetric("PF", backtest.profitFactor)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if isExpanded {
+                StrategyBacktestDetail(backtest: strategy.backtest)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.horizontal, 8)
@@ -832,7 +753,7 @@ private struct StrategySelectionRow: View {
         }
     }
 
-    private func strategyMetric(_ label: String, _ value: String, tone: Color = .primary) -> some View {
+    private func summaryMetric(_ label: String, _ value: String, tone: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.caption2)
@@ -844,7 +765,60 @@ private struct StrategySelectionRow: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
         }
+        .frame(width: 58, alignment: .leading)
+    }
+}
+
+private struct StrategyBacktestDetail: View {
+    let backtest: ServerStrategyBacktestSummary?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let backtest {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 72), spacing: 6, alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 6
+                ) {
+                    detailMetric("수익률", "\(backtest.netReturnPercent)%", tone: .green)
+                    detailMetric("승률", "\(backtest.winRatePercent)%")
+                    detailMetric("MDD", "\(backtest.maxDrawdownPercent)%", tone: .orange)
+                    detailMetric("거래수", "\(backtest.totalTrades)")
+                    detailMetric("연간거래", backtest.annualTrades ?? "-")
+                    detailMetric("PF", backtest.profitFactor)
+                }
+
+                Text(backtest.label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("백테스트 결과가 아직 없습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.leading, 24)
+        .padding(.top, 2)
+    }
+
+    private func detailMetric(_ label: String, _ value: String, tone: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tone)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 }
 
