@@ -284,6 +284,39 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state.serverRunnerStatus?.symbols, ["BTCUSDT"])
     }
 
+    func testServerStrategySelectionUpdatesEnabledStrategies() async throws {
+        let configurationStore = InMemoryServerRunnerConfigurationStore()
+        let service = StubServerPaperRunnerService()
+        let viewModel = makeViewModel(
+            credentialStore: InMemoryCredentialStore(),
+            serverRunnerConfigurationStore: configurationStore,
+            serverPaperRunnerServiceFactory: { _ in service }
+        )
+
+        viewModel.saveServerRunnerConnection(
+            endpoint: "http://127.0.0.1:8787",
+            authToken: "abcdefgh12345678"
+        )
+        try await waitUntil {
+            viewModel.state.serverRunnerStatus?.strategies != nil
+        }
+
+        viewModel.setServerStrategyEnabled(
+            strategyID: BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
+            enabled: false
+        )
+
+        try await waitUntil {
+            service.updatedStrategySelections.isEmpty == false
+        }
+        XCTAssertEqual(service.updatedStrategySelections.last, [
+            BTCFifteenMinuteVacuumPulseStrategy.identifier
+        ])
+        XCTAssertEqual(viewModel.state.serverRunnerStatus?.strategies?.enabledStrategyIDs, [
+            BTCFifteenMinuteVacuumPulseStrategy.identifier
+        ])
+    }
+
     func testDeleteServerRunnerConnectionClearsState() throws {
         let configurationStore = InMemoryServerRunnerConfigurationStore()
         try configurationStore.save(ServerRunnerConfiguration(
@@ -1277,6 +1310,11 @@ private final class TestCandleStreamService: CandleStreamService {
 private final class StubServerPaperRunnerService: ServerPaperRunnerService {
     var updatedEnabledValues: [Bool] = []
     var updatedLiveEnabledValues: [Bool] = []
+    var updatedStrategySelections: [[String]] = []
+    var enabledStrategyIDs = [
+        BTCFifteenMinuteVacuumPulseStrategy.identifier,
+        BTCFifteenMinuteRegimeSessionFadeStrategy.identifier
+    ]
     var logoutCallCount = 0
     var accounts: [AccountSnapshot] = [
         AccountSnapshot(
@@ -1338,6 +1376,29 @@ private final class StubServerPaperRunnerService: ServerPaperRunnerService {
                 mode: "paper",
                 updatedAt: Date(timeIntervalSince1970: 1),
                 updatedBy: "test"
+            ),
+            strategies: ServerStrategySelectionStatus(
+                available: [
+                    ServerRunnerStrategy(
+                        id: BTCFifteenMinuteVacuumPulseStrategy.identifier,
+                        name: "BTC 15m Vacuum Pulse",
+                        symbol: "BTCUSDT",
+                        timeframe: "15m",
+                        enabled: enabledStrategyIDs.contains(BTCFifteenMinuteVacuumPulseStrategy.identifier),
+                        backtest: nil
+                    ),
+                    ServerRunnerStrategy(
+                        id: BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
+                        name: "BTC 15m Regime Session Fade",
+                        symbol: "BTCUSDT",
+                        timeframe: "15m",
+                        enabled: enabledStrategyIDs.contains(BTCFifteenMinuteRegimeSessionFadeStrategy.identifier),
+                        backtest: nil
+                    )
+                ],
+                enabledStrategyIDs: enabledStrategyIDs,
+                updatedAt: nil,
+                updatedBy: nil
             )
         )
     }
@@ -1353,6 +1414,36 @@ private final class StubServerPaperRunnerService: ServerPaperRunnerService {
         return ServerPaperRunnerControl(
             enabled: enabled,
             mode: "paper",
+            updatedAt: Date(timeIntervalSince1970: 2),
+            updatedBy: "test"
+        )
+    }
+
+    func updateStrategies(enabledStrategyIDs: [String]) async throws -> ServerStrategySelectionStatus {
+        await MainActor.run {
+            updatedStrategySelections.append(enabledStrategyIDs)
+            self.enabledStrategyIDs = enabledStrategyIDs
+        }
+        return ServerStrategySelectionStatus(
+            available: [
+                ServerRunnerStrategy(
+                    id: BTCFifteenMinuteVacuumPulseStrategy.identifier,
+                    name: "BTC 15m Vacuum Pulse",
+                    symbol: "BTCUSDT",
+                    timeframe: "15m",
+                    enabled: enabledStrategyIDs.contains(BTCFifteenMinuteVacuumPulseStrategy.identifier),
+                    backtest: nil
+                ),
+                ServerRunnerStrategy(
+                    id: BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
+                    name: "BTC 15m Regime Session Fade",
+                    symbol: "BTCUSDT",
+                    timeframe: "15m",
+                    enabled: enabledStrategyIDs.contains(BTCFifteenMinuteRegimeSessionFadeStrategy.identifier),
+                    backtest: nil
+                )
+            ],
+            enabledStrategyIDs: enabledStrategyIDs,
             updatedAt: Date(timeIntervalSince1970: 2),
             updatedBy: "test"
         )

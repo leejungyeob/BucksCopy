@@ -71,6 +71,19 @@ final class ServerPaperRunnerHTTPClient: ServerPaperRunnerService {
         return try decoder.decode(ControlDTO.self, from: data).domain
     }
 
+    func updateStrategies(enabledStrategyIDs: [String]) async throws -> ServerStrategySelectionStatus {
+        let body = try JSONEncoder().encode(StrategySelectionUpdateDTO(
+            enabledStrategyIDs: enabledStrategyIDs
+        ))
+        let data = try await request(
+            path: "users/me/strategies",
+            method: "POST",
+            body: body,
+            headers: ["Content-Type": "application/json"]
+        )
+        return try decoder.decode(StrategySelectionDTO.self, from: data).domain
+    }
+
     func updateLiveControl(enabled: Bool, acknowledgedRisk: Bool) async throws -> ServerLiveStatus {
         let body = try JSONEncoder().encode(LiveControlUpdateDTO(
             enabled: enabled,
@@ -243,6 +256,10 @@ private struct ControlUpdateDTO: Encodable {
     let enabled: Bool
 }
 
+private struct StrategySelectionUpdateDTO: Encodable {
+    let enabledStrategyIDs: [String]
+}
+
 private struct LiveControlUpdateDTO: Encodable {
     let enabled: Bool
     let acknowledgedRisk: Bool
@@ -277,6 +294,7 @@ private struct StatusDTO: Decodable {
     let failures: [String]
     let storagePath: String?
     let control: ControlDTO?
+    let strategies: StrategySelectionDTO?
     let live: LiveStatusDTO?
 
     var domain: ServerPaperRunnerStatus {
@@ -293,7 +311,66 @@ private struct StatusDTO: Decodable {
             failures: failures,
             storagePath: storagePath,
             control: control?.domain,
+            strategies: strategies?.domain,
             live: live?.domain
+        )
+    }
+}
+
+private struct StrategySelectionDTO: Decodable {
+    let available: [ServerStrategyDTO]?
+    let enabledStrategyIDs: [String]?
+    let updatedAt: String?
+    let updatedBy: String?
+
+    var domain: ServerStrategySelectionStatus {
+        ServerStrategySelectionStatus(
+            available: (available ?? []).map(\.domain),
+            enabledStrategyIDs: enabledStrategyIDs ?? [],
+            updatedAt: ServerRunnerDateParser.date(from: updatedAt),
+            updatedBy: updatedBy
+        )
+    }
+}
+
+private struct ServerStrategyDTO: Decodable {
+    let id: String
+    let name: String?
+    let symbol: String?
+    let timeframe: String?
+    let enabled: Bool?
+    let backtest: StrategyBacktestDTO?
+
+    var domain: ServerRunnerStrategy {
+        ServerRunnerStrategy(
+            id: id,
+            name: name ?? id,
+            symbol: symbol ?? "-",
+            timeframe: timeframe ?? "-",
+            enabled: enabled ?? false,
+            backtest: backtest?.domain
+        )
+    }
+}
+
+private struct StrategyBacktestDTO: Decodable {
+    let label: String?
+    let netReturnPercent: String?
+    let winRatePercent: String?
+    let maxDrawdownPercent: String?
+    let profitFactor: String?
+    let totalTrades: Int?
+    let annualTrades: String?
+
+    var domain: ServerStrategyBacktestSummary {
+        ServerStrategyBacktestSummary(
+            label: label ?? "Backtest",
+            netReturnPercent: netReturnPercent ?? "-",
+            winRatePercent: winRatePercent ?? "-",
+            maxDrawdownPercent: maxDrawdownPercent ?? "-",
+            profitFactor: profitFactor ?? "-",
+            totalTrades: totalTrades ?? 0,
+            annualTrades: annualTrades
         )
     }
 }

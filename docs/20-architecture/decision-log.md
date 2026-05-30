@@ -819,3 +819,21 @@
   - BTC/ETH active symbol은 1000개 warmup에 갇히지 않고 4년급 closed candle history를 기준으로 평가할 수 있습니다.
   - 초기 배포 직후에는 과거 candle backfill 때문에 첫 cycle이 더 오래 걸릴 수 있지만, 이후에는 저장된 JSON을 재사용합니다.
   - cycle당 history page 수는 기본 `100`으로 제한해 한 심볼이 runner cycle을 오래 독점하지 않게 하지만, 저장 개수 자체는 제한하지 않습니다.
+
+## 0046. Server Strategy Selection And Backtest Summaries
+
+- Status: accepted
+- Date: 2026-05-30
+- Context:
+  - 사용자는 앱에서 적용할 자동매매 전략을 직접 다중 선택하고, 전략별 백테스트 결과를 한 화면에서 확인하길 원했습니다.
+  - `BTC 15m Phase Vacuum Reclaim`과 `BTC 15m Vacuum Pulse`는 최신 수락 결과가 동일하므로 둘 다 active route에 남기면 중복 평가/중복 후보가 됩니다.
+  - 전략을 켜는 순간 이미 마감된 과거 봉을 즉시 평가하면, 사용자가 의도하지 않은 오래된 신호가 실주문 후보로 넘어갈 수 있습니다.
+- Decision:
+  - 서버는 `/users/me/strategies` endpoint를 제공해 user별 enabled strategy ID 목록을 저장하고 조회합니다.
+  - 앱은 서버 strategy status를 받아 전략별 체크박스와 4년 백테스트 요약을 표시합니다.
+  - `BTC 15m Vacuum Pulse`만 유지하고 `BTC 15m Phase Vacuum Reclaim`은 current active/recommended route에서 제외합니다. 구현체는 재현 가능한 과거 비교를 위해 registry에 남깁니다.
+  - 새로 enabled 된 전략은 최신 closed 15m candle을 `strategy enabled after latest closed candle; waiting for next close`로 priming하여 다음 봉 마감부터 평가합니다.
+- Consequences:
+  - 앱을 꺼도 서버는 저장된 user strategy selection을 기준으로 자동매매 평가를 계속합니다.
+  - 사용자는 전략별 백테스트 결과를 보면서 여러 전략을 켜고 끌 수 있으며, 최소 1개 전략은 항상 유지됩니다.
+  - registry에 남은 pruned strategy는 백테스트/연구에는 사용 가능하지만 live route에는 명시적으로 재활성화하기 전까지 들어가지 않습니다.

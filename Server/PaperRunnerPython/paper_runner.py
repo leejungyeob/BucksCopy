@@ -362,12 +362,50 @@ ETH_PULSE_PARAMS = {
 
 ACTIVE_STRATEGIES_BY_SYMBOL = {
     "BTCUSDT": [
-        BTC_PHASE_PARAMS,
         BTC_PULSE_PARAMS,
         BTC_REGIME_SESSION_FADE_PARAMS,
         BTC_BULL_PULLBACK_LONG_PARAMS,
     ],
     "ETHUSDT": [ETH_PULSE_PARAMS],
+}
+
+STRATEGY_BACKTESTS = {
+    "btc-15m-vacuum-pulse": {
+        "label": "최근 4년 · 10x · 5% risk",
+        "netReturnPercent": "+708.64",
+        "winRatePercent": "51.28",
+        "maxDrawdownPercent": "33.77",
+        "profitFactor": "1.59",
+        "totalTrades": 156,
+        "annualTrades": "39.03",
+    },
+    "btc-15m-regime-session-fade": {
+        "label": "최근 4년 · 10x · 5% risk",
+        "netReturnPercent": "+718824.26",
+        "winRatePercent": "58.91",
+        "maxDrawdownPercent": "33.16",
+        "profitFactor": "1.78",
+        "totalTrades": 696,
+        "annualTrades": "174.2",
+    },
+    "btc-15m-bull-pullback-long": {
+        "label": "최근 4년 · 10x · 5% risk",
+        "netReturnPercent": "+2054.93",
+        "winRatePercent": "68.21",
+        "maxDrawdownPercent": "21.91",
+        "profitFactor": "2.66",
+        "totalTrades": 173,
+        "annualTrades": "43.3",
+    },
+    "eth-15m-vacuum-pulse": {
+        "label": "최근 4년 · 10x · 5% risk",
+        "netReturnPercent": "+537.45",
+        "winRatePercent": "49.15",
+        "maxDrawdownPercent": "22.00",
+        "profitFactor": "1.47",
+        "totalTrades": 118,
+        "annualTrades": "29.52",
+    },
 }
 
 
@@ -909,6 +947,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if action == "control":
             self.write_json(self.runner.load_control(user_id))
             return
+        if action == "strategies":
+            self.write_json(self.runner.strategy_status(user_id))
+            return
         if action == "logs":
             query = parse_qs(parsed.query)
             limit = clamp_int(query.get("limit", [None])[0], default=50, minimum=1, maximum=500)
@@ -948,7 +989,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return
 
         action = self.route_action(parsed.path)
-        if action not in {"control", "live/control"}:
+        if action not in {"control", "live/control", "strategies"}:
             self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
         user_id = self.authorize_user()
@@ -979,6 +1020,21 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
                 acknowledged_risk=bool(payload.get("acknowledgedRisk", False)),
                 updated_by="api",
             ))
+            return
+
+        if action == "strategies":
+            enabled_strategy_ids = payload.get("enabledStrategyIDs")
+            if not isinstance(enabled_strategy_ids, list) or not all(isinstance(item, str) for item in enabled_strategy_ids):
+                self.write_json({"error": "enabledStrategyIDs string array is required"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                self.write_json(self.runner.save_strategy_selection(
+                    user_id,
+                    enabled_strategy_ids=enabled_strategy_ids,
+                    updated_by="api",
+                ))
+            except ValueError as error:
+                self.write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             return
 
         if "enabled" not in payload or not isinstance(payload["enabled"], bool):
@@ -1047,7 +1103,17 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if not path.startswith(prefix):
             return None
         action = path[len(prefix) :]
-        if action in {"status", "control", "logs", "candles", "account", "positions", "live/status", "live/control"}:
+        if action in {
+            "status",
+            "control",
+            "strategies",
+            "logs",
+            "candles",
+            "account",
+            "positions",
+            "live/status",
+            "live/control",
+        }:
             return action
         return None
 
@@ -2021,6 +2087,154 @@ class PaperRunner:
             },
         }
 
+    def strategy_selection_path(self, user_id: str) -> Path:
+        return self.user_dir(user_id) / "server-strategy-selection.json"
+
+    def configured_strategy_params(self) -> list[dict[str, Any]]:
+        params: list[dict[str, Any]] = []
+        for symbol in self.symbols:
+            params.extend(ACTIVE_STRATEGIES_BY_SYMBOL.get(symbol, []))
+        return params
+
+    def active_strategy_ids(self) -> list[str]:
+        ids: list[str] = []
+        seen: set[str] = set()
+        for params in self.configured_strategy_params():
+            strategy_id = str(params["strategy_id"])
+            if strategy_id not in seen:
+                seen.add(strategy_id)
+                ids.append(strategy_id)
+        return ids
+
+    def load_enabled_strategy_ids(self, user_id: str) -> list[str]:
+        active_ids = self.active_strategy_ids()
+        active_set = set(active_ids)
+        payload = read_json_file(self.strategy_selection_path(user_id), {})
+        raw_ids = payload.get("enabledStrategyIDs")
+        if not isinstance(raw_ids, list):
+            return active_ids
+        enabled: list[str] = []
+        seen: set[str] = set()
+        for raw_id in raw_ids:
+            strategy_id = str(raw_id)
+            if strategy_id in active_set and strategy_id not in seen:
+                seen.add(strategy_id)
+                enabled.append(strategy_id)
+        return enabled or active_ids
+
+    def strategy_status(self, user_id: str) -> dict[str, Any]:
+        enabled_ids = self.load_enabled_strategy_ids(user_id)
+        enabled_set = set(enabled_ids)
+        selection = read_json_file(self.strategy_selection_path(user_id), {})
+        available: list[dict[str, Any]] = []
+        for symbol in self.symbols:
+            for params in ACTIVE_STRATEGIES_BY_SYMBOL.get(symbol, []):
+                strategy_id = str(params["strategy_id"])
+                available.append({
+                    "id": strategy_id,
+                    "name": str(params.get("name") or strategy_id),
+                    "symbol": symbol,
+                    "timeframe": TIMEFRAME,
+                    "enabled": strategy_id in enabled_set,
+                    "backtest": STRATEGY_BACKTESTS.get(strategy_id),
+                })
+        return {
+            "available": available,
+            "enabledStrategyIDs": enabled_ids,
+            "updatedAt": selection.get("updatedAt"),
+            "updatedBy": selection.get("updatedBy"),
+        }
+
+    def save_strategy_selection(
+        self,
+        user_id: str,
+        enabled_strategy_ids: list[str],
+        updated_by: str,
+    ) -> dict[str, Any]:
+        active_ids = self.active_strategy_ids()
+        active_set = set(active_ids)
+        requested_ids = [strategy_id.strip() for strategy_id in enabled_strategy_ids if strategy_id.strip()]
+        unknown_ids = sorted(set(requested_ids) - active_set)
+        if unknown_ids:
+            raise ValueError(f"unknown strategy id: {unknown_ids[0]}")
+
+        enabled: list[str] = []
+        seen: set[str] = set()
+        for strategy_id in active_ids:
+            if strategy_id in requested_ids and strategy_id not in seen:
+                seen.add(strategy_id)
+                enabled.append(strategy_id)
+        if not enabled:
+            raise ValueError("at least one strategy must be enabled")
+
+        previous_enabled = set(self.load_enabled_strategy_ids(user_id))
+        newly_enabled = set(enabled) - previous_enabled
+        with self.lock:
+            self.user_dir(user_id).mkdir(parents=True, exist_ok=True)
+            self.atomic_write_json(
+                self.strategy_selection_path(user_id),
+                {
+                    "enabledStrategyIDs": enabled,
+                    "updatedAt": iso(now_utc()),
+                    "updatedBy": updated_by,
+                },
+                pretty=True,
+            )
+            self.prime_newly_enabled_strategies(user_id, newly_enabled)
+            self.record_strategy_selection_event(user_id, enabled)
+        return self.strategy_status(user_id)
+
+    def prime_newly_enabled_strategies(self, user_id: str, strategy_ids: set[str]) -> None:
+        if not strategy_ids:
+            return
+        evaluated_at = now_utc()
+        for symbol in self.symbols:
+            closed_candles = [candle for candle in self.load_candles(symbol) if candle.is_closed]
+            if not closed_candles:
+                continue
+            latest_closed = closed_candles[-1]
+            for params in ACTIVE_STRATEGIES_BY_SYMBOL.get(symbol, []):
+                strategy_id = str(params["strategy_id"])
+                if strategy_id not in strategy_ids:
+                    continue
+                key = f"{symbol}:{TIMEFRAME}:{strategy_id}:{latest_closed.open_time}"
+                self.mark_evaluated(
+                    user_id,
+                    key,
+                    symbol,
+                    strategy_id,
+                    latest_closed.open_time,
+                    produced_signal=False,
+                    evaluated_at=evaluated_at,
+                    skipped_reason="strategy enabled after latest closed candle; waiting for next close",
+                )
+
+    def record_strategy_selection_event(self, user_id: str, enabled_strategy_ids: list[str]) -> None:
+        names = {
+            str(params["strategy_id"]): str(params.get("name") or params["strategy_id"])
+            for params in self.configured_strategy_params()
+        }
+        self.append_jsonl(
+            self.user_dir(user_id) / "trade-event-logs.jsonl",
+            {
+                "id": str(uuid.uuid4()),
+                "timestamp": iso(now_utc()),
+                "category": "automation",
+                "severity": "info",
+                "symbol": None,
+                "message": f"Server strategy selection updated: {','.join(enabled_strategy_ids)}",
+                "metadata": {
+                    "title": "전략 선택 변경",
+                    "subtitle": "앱에서 선택한 전략만 다음 closed 15m candle부터 평가합니다.",
+                    "tags": ["LIVE", "STRATEGY", TIMEFRAME],
+                    "details": {
+                        "enabledStrategies": ", ".join(names.get(strategy_id, strategy_id) for strategy_id in enabled_strategy_ids),
+                        "enabledCount": str(len(enabled_strategy_ids)),
+                    },
+                },
+            },
+        )
+
     def fetch_candles(self, symbol: str) -> list[Candle]:
         params = {
             "granularity": TIMEFRAME,
@@ -2243,6 +2457,7 @@ class PaperRunner:
                 "failures": [],
                 "storagePath": str(user_directory),
                 "marketStoragePath": str(self.data_dir),
+                "strategies": self.strategy_status(user_id),
             },
         )
 
@@ -2422,6 +2637,7 @@ class PaperRunner:
         for user_id in self.user_ids:
             control = self.load_control(user_id)
             strategy_enabled = bool(control["enabled"])
+            enabled_strategy_ids = set(self.load_enabled_strategy_ids(user_id))
             evaluations = 0
             skipped_evaluations = 0
             signals = 0
@@ -2436,6 +2652,8 @@ class PaperRunner:
                 latest_closed = closed_candles[-1]
                 for params in ACTIVE_STRATEGIES_BY_SYMBOL.get(symbol, []):
                     strategy_id = params["strategy_id"]
+                    if strategy_id not in enabled_strategy_ids:
+                        continue
                     key = f"{symbol}:{TIMEFRAME}:{strategy_id}:{latest_closed.open_time}"
                     if self.has_evaluated(user_id, key):
                         continue
@@ -2502,6 +2720,7 @@ class PaperRunner:
                 "marketStoragePath": str(self.data_dir),
                 "control": control,
                 "live": self.live_status(user_id),
+                "strategies": self.strategy_status(user_id),
                 "privateSnapshot": {
                     "updatedAt": private_snapshot.get("updatedAt"),
                     "accountCount": private_snapshot.get("accountCount", 0),

@@ -62,6 +62,7 @@ struct ServerPaperRunnerStatus: Equatable {
     let failures: [String]
     let storagePath: String?
     let control: ServerPaperRunnerControl?
+    let strategies: ServerStrategySelectionStatus?
     var live: ServerLiveStatus? = nil
 
     init(
@@ -76,7 +77,8 @@ struct ServerPaperRunnerStatus: Equatable {
         signals: Int,
         failures: [String],
         storagePath: String?,
-        control: ServerPaperRunnerControl?
+        control: ServerPaperRunnerControl?,
+        strategies: ServerStrategySelectionStatus? = nil
     ) {
         self.init(
             updatedAt: updatedAt,
@@ -91,6 +93,7 @@ struct ServerPaperRunnerStatus: Equatable {
             failures: failures,
             storagePath: storagePath,
             control: control,
+            strategies: strategies,
             live: nil
         )
     }
@@ -108,6 +111,7 @@ struct ServerPaperRunnerStatus: Equatable {
         failures: [String],
         storagePath: String?,
         control: ServerPaperRunnerControl?,
+        strategies: ServerStrategySelectionStatus? = nil,
         live: ServerLiveStatus?
     ) {
         self.updatedAt = updatedAt
@@ -122,8 +126,39 @@ struct ServerPaperRunnerStatus: Equatable {
         self.failures = failures
         self.storagePath = storagePath
         self.control = control
+        self.strategies = strategies
         self.live = live
     }
+}
+
+struct ServerStrategySelectionStatus: Equatable {
+    let available: [ServerRunnerStrategy]
+    let enabledStrategyIDs: [String]
+    let updatedAt: Date?
+    let updatedBy: String?
+
+    var enabledCount: Int {
+        enabledStrategyIDs.count
+    }
+}
+
+struct ServerRunnerStrategy: Equatable, Identifiable {
+    let id: String
+    let name: String
+    let symbol: String
+    let timeframe: String
+    let enabled: Bool
+    let backtest: ServerStrategyBacktestSummary?
+}
+
+struct ServerStrategyBacktestSummary: Equatable {
+    let label: String
+    let netReturnPercent: String
+    let winRatePercent: String
+    let maxDrawdownPercent: String
+    let profitFactor: String
+    let totalTrades: Int
+    let annualTrades: String?
 }
 
 struct ServerLiveStatus: Equatable {
@@ -155,6 +190,7 @@ protocol ServerPaperRunnerService {
     func fetchStatus() async throws -> ServerPaperRunnerStatus
     func fetchLogs(limit: Int) async throws -> [TradeEventLog]
     func updateControl(enabled: Bool) async throws -> ServerPaperRunnerControl
+    func updateStrategies(enabledStrategyIDs: [String]) async throws -> ServerStrategySelectionStatus
     func updateLiveControl(enabled: Bool, acknowledgedRisk: Bool) async throws -> ServerLiveStatus
     func logoutSession() async throws
 }

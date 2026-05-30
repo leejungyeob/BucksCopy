@@ -171,7 +171,6 @@ enum StrategyTimeframeRouting {
             baseIDs = [
                 XStrategy.identifier,
                 XFrequencyStrategy.identifier,
-                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
                 BTCFifteenMinuteVacuumPulseStrategy.identifier,
                 BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
                 BTCFifteenMinuteBullPullbackLongStrategy.identifier,
@@ -285,6 +284,11 @@ enum StrategyTimeframeRouting {
             strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
         ),
         StrategyRouteKey(
+            symbol: FuturesSymbol("BTCUSDT"),
+            timeframe: .fifteenMinutes,
+            strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
+        ),
+        StrategyRouteKey(
             symbol: FuturesSymbol("ETHUSDT"),
             timeframe: .fifteenMinutes,
             strategyID: BTCFifteenMinuteRegimeSessionFadeStrategy.identifier
@@ -327,11 +331,6 @@ enum StrategyTimeframeRouting {
     ]
 
     private static let symbolScopedLiveRoutes: Set<StrategyRouteKey> = [
-        StrategyRouteKey(
-            symbol: FuturesSymbol("BTCUSDT"),
-            timeframe: .fifteenMinutes,
-            strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier
-        ),
         StrategyRouteKey(
             symbol: FuturesSymbol("BTCUSDT"),
             timeframe: .fifteenMinutes,

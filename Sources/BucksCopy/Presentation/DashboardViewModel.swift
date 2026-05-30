@@ -290,7 +290,54 @@ final class DashboardViewModel: ObservableObject {
                         failures: status.failures,
                         storagePath: status.storagePath,
                         control: control,
+                        strategies: status.strategies,
                         live: live
+                    )
+                }
+                await self.loadServerRunnerSnapshot()
+            } catch {
+                self.state.serverRunnerConnectionState = .failed(message: self.sanitizedError(error))
+            }
+        }
+    }
+
+    func setServerStrategyEnabled(strategyID: String, enabled: Bool) {
+        guard serverRunnerConfiguration?.hasAuthToken == true,
+              let serverPaperRunnerService,
+              let strategyStatus = state.serverRunnerStatus?.strategies else { return }
+        var enabledIDs = strategyStatus.enabledStrategyIDs
+        if enabled {
+            if !enabledIDs.contains(strategyID) {
+                enabledIDs.append(strategyID)
+            }
+        } else {
+            enabledIDs.removeAll { $0 == strategyID }
+        }
+        guard !enabledIDs.isEmpty else { return }
+
+        state.serverRunnerConnectionState = .refreshing
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let updatedStrategies = try await serverPaperRunnerService.updateStrategies(
+                    enabledStrategyIDs: enabledIDs
+                )
+                if let status = self.state.serverRunnerStatus {
+                    self.state.serverRunnerStatus = ServerPaperRunnerStatus(
+                        updatedAt: status.updatedAt,
+                        mode: status.mode,
+                        symbols: status.symbols,
+                        latestClosedCandleOpenTime: status.latestClosedCandleOpenTime,
+                        latestClosedCandleOpenTimeDate: status.latestClosedCandleOpenTimeDate,
+                        savedCandles: status.savedCandles,
+                        evaluations: status.evaluations,
+                        skippedEvaluations: status.skippedEvaluations,
+                        signals: status.signals,
+                        failures: status.failures,
+                        storagePath: status.storagePath,
+                        control: status.control,
+                        strategies: updatedStrategies,
+                        live: status.live
                     )
                 }
                 await self.loadServerRunnerSnapshot()
@@ -1774,7 +1821,7 @@ final class DashboardViewModel: ObservableObject {
         state.serverRunnerConnectionState = .refreshing
         do {
             async let status = serverPaperRunnerService.fetchStatus()
-            async let logs = serverPaperRunnerService.fetchLogs(limit: 50)
+            async let logs = serverPaperRunnerService.fetchLogs(limit: 500)
             let snapshot = try await status
             let serverLogs = try await logs
             state.serverRunnerStatus = snapshot

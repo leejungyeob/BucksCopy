@@ -210,17 +210,15 @@ References:
 ## Strategy Research Notes
 
 - Current recommended routing is symbol-scoped and 15m-only after the latest requested simplification:
-  - `BTCUSDT 15m`: BTC 15m Phase Vacuum Reclaim, BTC 15m Vacuum Pulse, BTC 15m Regime Session Fade, BTC 15m Bull Pullback Long
+  - `BTCUSDT 15m`: BTC 15m Vacuum Pulse, BTC 15m Regime Session Fade, BTC 15m Bull Pullback Long
   - `ETHUSDT 15m`: ETH 15m Vacuum Pulse
   - higher timeframes: no Dashboard/Live route
 - Current active route maximum holding windows:
-  - `BTCUSDT 15m` Phase Vacuum Reclaim: `96` candles, about `24h`
   - `BTCUSDT 15m` Vacuum Pulse: `96` candles, about `24h`
   - `BTCUSDT 15m` Regime Session Fade: `12` candles, about `3h`
   - `BTCUSDT 15m` Bull Pullback Long: `12` candles, about `3h`
   - `ETHUSDT 15m` Vacuum Pulse: `96` candles, about `24h`
-- The active `BTCUSDT 15m` Phase Vacuum Reclaim route's latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$808.643489` from `$100`, with `+708.64%` net return, `51.28%` win rate, `156` trades, `33.77%` max drawdown, and `1.59` profit factor.
-- The active `BTCUSDT 15m` route is the BTC 15m Vacuum Pulse strategy. The latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$808.643489` from `$100`, with `+708.64%` net return, `68.69%` annualized return, `51.28%` win rate, `156` trades, `39.03` trades/year, `33.77%` max drawdown, and `1.59` profit factor.
+- The active `BTCUSDT 15m` Vacuum Pulse route has a latest local 4-year `10x` leverage / `5%` per-trade account-risk result of `$808.643489` from `$100`, with `+708.64%` net return, `68.69%` annualized return, `51.28%` win rate, `156` trades, `39.03` trades/year, `33.77%` max drawdown, and `1.59` profit factor. `BTC 15m Phase Vacuum Reclaim` remains implemented for historical comparison but is excluded from current active routing because the latest accepted result duplicated Vacuum Pulse.
 - The active `BTCUSDT 15m` Regime Session Fade route uses a 4-year-scale 15m warmup, market-regime hour sets, EMA192 trend-side filter, and a low-volatility near-high skip filter. Latest research result was `+718,824.26%` net return, `58.91%` win rate, `696` trades, `33.16%` max drawdown, and `1.78` profit factor under `10x` leverage / `5%` risk.
 - The active `BTCUSDT 15m` Bull Pullback Long route runs only in macro bull regimes, uses EMA192 pullback entries, and tightens reward/risk near highs. Latest research result was `+2,054.93%` net return, `68.21%` win rate, `173` trades, `21.91%` max drawdown, and `2.66` profit factor under `10x` leverage / `5%` risk.
 - The active `ETHUSDT 15m` route is the ETH 15m Vacuum Pulse strategy. The latest local 4-year `10x` leverage / `5%` per-trade account-risk backtest finished at `$637.452288` from `$100`, with `+537.45%` net return, `58.95%` annualized return, `49.15%` win rate, `118` trades, `29.52` trades/year, `22.00%` max drawdown, and `1.47` profit factor.

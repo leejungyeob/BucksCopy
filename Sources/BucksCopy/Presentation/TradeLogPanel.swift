@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TradeLogPanel: View {
     let logs: [TradeEventLog]
+    let positions: [PositionSnapshot]
+    let automationStartedAt: Date?
     let language: TradeLogLanguage
     let onLanguageChange: (TradeLogLanguage) -> Void
 
@@ -24,6 +26,13 @@ struct TradeLogPanel: View {
                     .frame(width: 148)
                 }
 
+                TradeHistorySummaryStrip(
+                    logs: logs,
+                    positions: positions,
+                    automationStartedAt: automationStartedAt,
+                    language: language
+                )
+
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         if logs.isEmpty {
@@ -43,6 +52,132 @@ struct TradeLogPanel: View {
             }
             .frame(maxHeight: .infinity, alignment: .topLeading)
         }
+    }
+}
+
+private struct TradeHistorySummaryStrip: View {
+    let logs: [TradeEventLog]
+    let positions: [PositionSnapshot]
+    let automationStartedAt: Date?
+    let language: TradeLogLanguage
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+            summaryCell(title: label("실현손익", "Realized"), value: realizedProfit.signedDashboardText, tone: realizedProfit >= 0 ? .green : .red)
+            summaryCell(title: label("미실현", "Unrealized"), value: unrealizedProfit.signedDashboardText, tone: unrealizedProfit >= 0 ? .green : .red)
+            summaryCell(title: label("승률", "Win Rate"), value: winRateText)
+            summaryCell(title: label("청산", "Closed"), value: "\(wins)W \(losses)L")
+            summaryCell(title: label("진입", "Entries"), value: "\(entryCount)")
+        }
+    }
+
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 88, maximum: 150), spacing: 6, alignment: .leading)]
+    }
+
+    private var scopedLogs: [TradeEventLog] {
+        guard let automationStartedAt else { return logs }
+        return logs.filter { $0.timestamp >= automationStartedAt }
+    }
+
+    private var entryCount: Int {
+        scopedLogs.filter { log in
+            let text = "\(log.metadata?.title ?? "") \(log.message)"
+            return text.contains("진입") ||
+                text.contains("entry") ||
+                text.contains("Paper signal")
+        }.count
+    }
+
+    private var realizedProfit: Decimal {
+        scopedLogs.reduce(Decimal(0)) { partial, log in
+            partial + (Self.closeProfitLoss(in: log) ?? 0)
+        }
+    }
+
+    private var unrealizedProfit: Decimal {
+        positions.reduce(Decimal(0)) { $0 + $1.unrealizedProfitLoss }
+    }
+
+    private var wins: Int {
+        closeOutcomes.wins
+    }
+
+    private var losses: Int {
+        closeOutcomes.losses
+    }
+
+    private var closeOutcomes: (wins: Int, losses: Int, breakevens: Int) {
+        scopedLogs.reduce(into: (wins: 0, losses: 0, breakevens: 0)) { result, log in
+            if let profitLoss = Self.closeProfitLoss(in: log) {
+                if profitLoss > 0 {
+                    result.wins += 1
+                } else if profitLoss < 0 {
+                    result.losses += 1
+                } else {
+                    result.breakevens += 1
+                }
+                return
+            }
+
+            guard let outcome = log.metadata?.details.first(where: { $0.label == "청산 판정" })?.value else { return }
+            if outcome.contains("승") {
+                result.wins += 1
+            } else if outcome.contains("패") {
+                result.losses += 1
+            } else {
+                result.breakevens += 1
+            }
+        }
+    }
+
+    private var winRateText: String {
+        let total = wins + losses
+        guard total > 0 else { return "-" }
+        return "\((Decimal(wins) / Decimal(total) * 100).dashboardText)%"
+    }
+
+    private func summaryCell(title: String, value: String, tone: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tone)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.44))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    private func label(_ korean: String, _ english: String) -> String {
+        language == .korean ? korean : english
+    }
+
+    private static func closeProfitLoss(in log: TradeEventLog) -> Decimal? {
+        guard isCloseLog(log) else { return nil }
+        for label in ["실현 PnL", "청산 PnL", "청산 직전 PnL", "미실현 PnL"] {
+            if let value = log.metadata?.details.first(where: { $0.label == label })?.value,
+               let profitLoss = DecimalText.optional(value) {
+                return profitLoss
+            }
+        }
+        return nil
+    }
+
+    private static func isCloseLog(_ log: TradeEventLog) -> Bool {
+        guard log.category == .liveOrder else { return false }
+        let text = "\(log.metadata?.title ?? "") \(log.metadata?.subtitle ?? "") \(log.message)"
+        return text.contains("청산") ||
+            text.contains("close submitted") ||
+            text.contains("External/manual close detected")
     }
 }
 

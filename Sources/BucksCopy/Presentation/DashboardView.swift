@@ -30,18 +30,31 @@ struct DashboardView: View {
                     )
 
                     HSplitView {
-                        PositionPanel(
-                            positions: displayPositions,
-                            partialTakeProfitByPositionID: positionPartialTakeProfitByPositionID,
-                            strategyContextByPositionID: positionStrategyContextByPositionID,
-                            onRefresh: {
-                                Task { await viewModel.refreshPositions() }
-                            }
-                        )
-                        .frame(minWidth: 340, idealWidth: 420, maxWidth: 560, maxHeight: .infinity, alignment: .topLeading)
+                        VStack(spacing: 12) {
+                            PositionPanel(
+                                positions: displayPositions,
+                                partialTakeProfitByPositionID: positionPartialTakeProfitByPositionID,
+                                strategyContextByPositionID: positionStrategyContextByPositionID,
+                                onRefresh: {
+                                    Task { await viewModel.refreshPositions() }
+                                }
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                            StrategySelectionPanel(
+                                strategies: viewModel.state.serverRunnerStatus?.strategies?.available ?? [],
+                                enabledStrategyIDs: viewModel.state.serverRunnerStatus?.strategies?.enabledStrategyIDs ?? [],
+                                isRefreshing: isServerRefreshing,
+                                onToggle: viewModel.setServerStrategyEnabled
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: 260, alignment: .topLeading)
+                        }
+                        .frame(minWidth: 360, idealWidth: 460, maxWidth: 620, maxHeight: .infinity, alignment: .topLeading)
 
                         TradeLogPanel(
                             logs: dashboardTradeLogs,
+                            positions: displayPositions,
+                            automationStartedAt: viewModel.state.serverRunnerStatus?.control?.updatedAt,
                             language: viewModel.state.logLanguage,
                             onLanguageChange: viewModel.updateLogLanguage
                         )
@@ -115,6 +128,13 @@ struct DashboardView: View {
             guard log.isAutomationTradingRecord else { return false }
             return !log.isServerHeartbeat
         }
+    }
+
+    private var isServerRefreshing: Bool {
+        if case .refreshing = viewModel.state.serverRunnerConnectionState {
+            return true
+        }
+        return false
     }
 }
 
@@ -416,6 +436,8 @@ private struct TradingCommandPanel: View {
                         TradingCommandMetric(title: "경과", value: elapsedText(now: context.date), tone: statusTint)
                         TradingCommandMetric(title: "최근 마감", value: latestClosedText)
                         TradingCommandMetric(title: "승률", value: winRateText, footnote: closeRecordText)
+                        TradingCommandMetric(title: "실현손익", value: realizedProfitText, tone: realizedProfitTone)
+                        TradingCommandMetric(title: "미실현", value: unrealizedProfitText, tone: unrealizedProfitTone)
                         TradingCommandMetric(title: "포지션", value: "\(positions.count)개", footnote: positionFootnote)
                         TradingCommandMetric(title: "Equity", value: account?.accountEquity.dashboardText ?? "-")
                         TradingCommandMetric(title: "가용", value: account?.available.dashboardText ?? "-", footnote: liveLimitText)
@@ -528,7 +550,7 @@ private struct TradingCommandPanel: View {
     }
 
     private var closeSummary: (wins: Int, losses: Int, breakevens: Int) {
-        logs.reduce(into: (wins: 0, losses: 0, breakevens: 0)) { result, log in
+        performanceLogs.reduce(into: (wins: 0, losses: 0, breakevens: 0)) { result, log in
             if let profitLoss = Self.closeProfitLoss(in: log) {
                 if profitLoss > 0 {
                     result.wins += 1
@@ -549,6 +571,37 @@ private struct TradingCommandPanel: View {
                 result.breakevens += 1
             }
         }
+    }
+
+    private var performanceLogs: [TradeEventLog] {
+        guard let startedAt = status?.control?.updatedAt else { return logs }
+        return logs.filter { $0.timestamp >= startedAt }
+    }
+
+    private var realizedProfit: Decimal {
+        performanceLogs.reduce(Decimal(0)) { partial, log in
+            partial + (Self.closeProfitLoss(in: log) ?? 0)
+        }
+    }
+
+    private var unrealizedProfit: Decimal {
+        positions.reduce(Decimal(0)) { $0 + $1.unrealizedProfitLoss }
+    }
+
+    private var realizedProfitText: String {
+        realizedProfit.signedDashboardText
+    }
+
+    private var unrealizedProfitText: String {
+        unrealizedProfit.signedDashboardText
+    }
+
+    private var realizedProfitTone: Color {
+        realizedProfit >= 0 ? .green : .red
+    }
+
+    private var unrealizedProfitTone: Color {
+        unrealizedProfit >= 0 ? .green : .red
     }
 
     private var winRateText: String {
@@ -587,8 +640,7 @@ private struct TradingCommandPanel: View {
     }
 
     private var positionFootnote: String {
-        let profit = positions.reduce(Decimal(0)) { $0 + $1.unrealizedProfitLoss }
-        return "미실현 \(profit.signedDashboardText)"
+        "미실현 \(unrealizedProfit.signedDashboardText)"
     }
 
     private var liveLimitText: String {
@@ -668,6 +720,125 @@ private struct TradingCommandMetric: View {
         .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.46))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
+private struct StrategySelectionPanel: View {
+    let strategies: [ServerRunnerStrategy]
+    let enabledStrategyIDs: [String]
+    let isRefreshing: Bool
+    let onToggle: (String, Bool) -> Void
+
+    var body: some View {
+        DashboardPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("매매전략")
+                        .font(.headline)
+                    Spacer()
+                    Badge(text: "\(enabledStrategyIDs.count)/\(strategies.count)", color: .blue)
+                }
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        if strategies.isEmpty {
+                            Text("서버 전략 정보를 불러오는 중입니다.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ForEach(strategies) { strategy in
+                                StrategySelectionRow(
+                                    strategy: strategy,
+                                    isEnabled: enabledStrategyIDs.contains(strategy.id),
+                                    disableToggle: isRefreshing || shouldDisableToggle(for: strategy),
+                                    onToggle: { isEnabled in
+                                        onToggle(strategy.id, isEnabled)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }
+        }
+    }
+
+    private func shouldDisableToggle(for strategy: ServerRunnerStrategy) -> Bool {
+        enabledStrategyIDs.contains(strategy.id) && enabledStrategyIDs.count <= 1
+    }
+}
+
+private struct StrategySelectionRow: View {
+    let strategy: ServerRunnerStrategy
+    let isEnabled: Bool
+    let disableToggle: Bool
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Toggle("", isOn: Binding(
+                    get: { isEnabled },
+                    set: onToggle
+                ))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .disabled(disableToggle)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(strategy.name)
+                            .font(.callout.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                        Badge(text: strategy.symbol, color: .secondary)
+                        Badge(text: strategy.timeframe, color: .secondary)
+                    }
+
+                    if let backtest = strategy.backtest {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 72), spacing: 6, alignment: .leading)],
+                            alignment: .leading,
+                            spacing: 5
+                        ) {
+                            strategyMetric("수익률", "\(backtest.netReturnPercent)%", tone: .green)
+                            strategyMetric("승률", "\(backtest.winRatePercent)%")
+                            strategyMetric("MDD", "\(backtest.maxDrawdownPercent)%", tone: .orange)
+                            strategyMetric("거래", "\(backtest.totalTrades)")
+                            strategyMetric("PF", backtest.profitFactor)
+                        }
+                        Text(backtest.label)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isEnabled ? Color.green.opacity(0.08) : Color(nsColor: .textBackgroundColor).opacity(0.38))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(isEnabled ? Color.green.opacity(0.25) : Color(nsColor: .separatorColor).opacity(0.35))
+        }
+    }
+
+    private func strategyMetric(_ label: String, _ value: String, tone: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tone)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

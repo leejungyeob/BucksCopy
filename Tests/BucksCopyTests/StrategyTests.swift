@@ -28,7 +28,6 @@ final class StrategyTests: XCTestCase {
             [
                 XStrategy.identifier,
                 XFrequencyStrategy.identifier,
-                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
                 BTCFifteenMinuteVacuumPulseStrategy.identifier,
                 BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
                 BTCFifteenMinuteBullPullbackLongStrategy.identifier,
@@ -84,13 +83,12 @@ final class StrategyTests: XCTestCase {
                 symbol: FuturesSymbol("BTCUSDT")
             ),
             [
-                BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
                 BTCFifteenMinuteVacuumPulseStrategy.identifier,
                 BTCFifteenMinuteRegimeSessionFadeStrategy.identifier,
                 BTCFifteenMinuteBullPullbackLongStrategy.identifier
             ]
         )
-        XCTAssertTrue(StrategyTimeframeRouting.isRecommended(
+        XCTAssertFalse(StrategyTimeframeRouting.isRecommended(
             strategyID: BTCFifteenMinutePhaseVacuumReclaimStrategy.identifier,
             for: .fifteenMinutes,
             symbol: FuturesSymbol("BTCUSDT")
