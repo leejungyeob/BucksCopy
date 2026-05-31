@@ -1336,7 +1336,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       --green-strong: #1f6f3d;
       --amber: #ff9f0a;
       --red: #ff453a;
-      --blue: #8e8e93;
+      --blue: #5ac8fa;
+      --cyan-soft: rgba(90, 200, 250, 0.14);
+      --green-soft: rgba(50, 215, 75, 0.13);
+      --amber-soft: rgba(255, 159, 10, 0.13);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     * { box-sizing: border-box; }
@@ -1362,6 +1365,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     button:hover { border-color: #555; background: #434343; }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     button.primary { background: var(--green-strong); border-color: var(--green-strong); }
+    button.primary:hover { background: #26864d; border-color: #2c9a59; }
     button.danger { border-color: #6f3232; color: #ffd5d5; }
     input {
       width: 100%;
@@ -1419,6 +1423,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel);
+      box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
     }
     .panel-head {
       display: flex;
@@ -1428,6 +1433,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       min-height: 42px;
       padding: 10px 12px;
       border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, rgba(90, 200, 250, 0.08), rgba(50, 215, 75, 0.035) 46%, transparent 78%);
     }
     .panel-title {
       margin: 0;
@@ -1532,7 +1538,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       gap: 6px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #202020;
+      background: linear-gradient(90deg, rgba(90, 200, 250, 0.06), #202020 36%);
       padding: 8px 10px;
     }
     .evaluation-main {
@@ -1580,7 +1586,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     .dashboard {
       display: grid;
-      grid-template-columns: minmax(360px, var(--left-pane-width, 62%)) 8px minmax(300px, 1fr);
+      grid-template-columns: minmax(360px, 1fr) 10px minmax(320px, var(--right-pane-width, 38%));
       gap: 0;
       align-items: start;
       min-height: calc(100vh - 184px);
@@ -1592,12 +1598,24 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       gap: 8px;
     }
     .metric {
+      position: relative;
       min-height: 56px;
       padding: 8px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel-2);
+      overflow: hidden;
     }
+    .metric::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 2px;
+      background: var(--blue);
+      opacity: 0.8;
+    }
+    .metric:nth-child(3n + 2)::before { background: var(--green); }
+    .metric:nth-child(3n)::before { background: var(--amber); }
     .metric span {
       display: block;
       color: var(--muted);
@@ -1634,6 +1652,26 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       font-size: 12px;
       white-space: nowrap;
     }
+    .pill.ok {
+      border-color: rgba(50, 215, 75, 0.34);
+      background: var(--green-soft);
+      color: #d8ffe3;
+    }
+    .pill.warn {
+      border-color: rgba(255, 159, 10, 0.34);
+      background: var(--amber-soft);
+      color: #ffe0a3;
+    }
+    .pill.bad {
+      border-color: rgba(255, 69, 58, 0.34);
+      background: rgba(255, 69, 58, 0.12);
+      color: #ffd4d1;
+    }
+    .pill.info {
+      border-color: rgba(90, 200, 250, 0.34);
+      background: var(--cyan-soft);
+      color: #d7f2ff;
+    }
     .dot {
       width: 7px;
       height: 7px;
@@ -1659,6 +1697,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     .right-stack { min-height: calc(100vh - 184px); }
     .trade-log-panel {
+      position: relative;
       min-height: 100%;
     }
     .trade-log-panel .panel-body {
@@ -1674,10 +1713,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .splitter::before {
       content: "";
       position: absolute;
-      inset: 2px;
+      inset: 2px 3px;
       border-radius: 999px;
-      background: #3d3d3d;
-      opacity: 0.35;
+      background: linear-gradient(180deg, rgba(90, 200, 250, 0.55), rgba(50, 215, 75, 0.32));
+      opacity: 0.42;
       transition: opacity 0.12s ease, background 0.12s ease;
     }
     .splitter:hover::before,
@@ -1695,6 +1734,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     .row-card {
       border: 1px solid var(--line);
+      border-left: 3px solid rgba(90, 200, 250, 0.42);
       border-radius: 8px;
       padding: 9px;
       background: #222;
@@ -1745,6 +1785,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       display: grid;
       gap: 8px;
       border: 1px solid var(--line);
+      border-left: 3px solid rgba(50, 215, 75, 0.42);
       border-radius: 8px;
       padding: 9px;
       background: #222;
@@ -1851,6 +1892,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       display: grid;
       gap: 9px;
       border: 1px solid var(--line);
+      border-left: 3px solid rgba(255, 159, 10, 0.42);
       border-radius: 8px;
       padding: 8px;
       background: #222;
@@ -2212,7 +2254,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           </section>
         </div>
 
-        <div class="splitter vertical-splitter" data-resize="columns"></div>
+        <div class="splitter vertical-splitter" data-resize="columns" title="매매기록 너비 조절" aria-label="매매기록 너비 조절"></div>
 
         <div class="stack right-stack">
           <section class="panel trade-log-panel">
@@ -2296,7 +2338,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           dragMode: "",
           wheelRemainder: 0,
           zoomRemainder: 0,
-          priceOffsetRatio: 0
+          priceOffsetRatio: 0,
+          activePointers: new Map(),
+          pinchDistance: 0,
+          pinchVisibleCount: DEFAULT_CHART_VISIBLE,
+          gestureVisibleCount: DEFAULT_CHART_VISIBLE
         },
         errors: {},
         redactedIdentifier: "",
@@ -2649,8 +2695,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       const applyLayout = () => {
         const layout = loadLayout();
         const root = document.documentElement;
-        if (layout.leftPaneWidth) {
-          root.style.setProperty("--left-pane-width", `${layout.leftPaneWidth}px`);
+        if (layout.rightPaneWidth) {
+          root.style.setProperty("--right-pane-width", `${layout.rightPaneWidth}px`);
         }
         if (layout.positionPaneHeight) {
           root.style.setProperty("--position-pane-height", `${layout.positionPaneHeight}px`);
@@ -3266,7 +3312,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           </span>
         `).join("");
         if (wrapper) {
-          wrapper.title = "차트 패널 어디서든 상하좌우 드래그 이동, 두 손가락 좌우 이동, 두 손가락 위/아래 확대/축소, 더블클릭으로 최신 봉 복귀";
+          wrapper.title = "차트 패널 어디서든 상하좌우 드래그 이동, 두 손가락 핀치 확대/축소, 트랙패드 위/아래 확대/축소, 더블클릭으로 최신 봉 복귀";
         }
       };
 
@@ -3494,9 +3540,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             const move = (moveEvent) => {
               if (mode === "columns" && dashboard) {
                 const rect = dashboard.getBoundingClientRect();
-                const width = clamp(moveEvent.clientX - rect.left, 360, rect.width - 320);
-                root.style.setProperty("--left-pane-width", `${width}px`);
-                saveLayout({ leftPaneWidth: Math.round(width) });
+                const width = clamp(rect.right - moveEvent.clientX, 320, rect.width - 360);
+                root.style.setProperty("--right-pane-width", `${width}px`);
+                saveLayout({ rightPaneWidth: Math.round(width) });
               } else if (mode === "position-chart" && leftStack) {
                 const rect = leftStack.getBoundingClientRect();
                 const height = clamp(moveEvent.clientY - rect.top, 96, rect.height - 390);
@@ -3575,17 +3621,58 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if (!wrapper || !surface) {
           return;
         }
+        const pointerDistance = () => {
+          const pointers = [...state.chart.activePointers.values()];
+          if (pointers.length < 2) {
+            return 0;
+          }
+          return Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+        };
+        const startPinch = () => {
+          state.chart.dragging = false;
+          state.chart.dragMode = "pinch";
+          state.chart.pinchDistance = pointerDistance();
+          state.chart.pinchVisibleCount = state.chart.visibleCount;
+        };
+        const updatePinch = () => {
+          const distance = pointerDistance();
+          if (state.chart.pinchDistance <= 0 || distance <= 0) {
+            startPinch();
+            return;
+          }
+          const ratio = distance / state.chart.pinchDistance;
+          if (!Number.isFinite(ratio) || ratio <= 0) {
+            return;
+          }
+          state.chart.visibleCount = Math.round(state.chart.pinchVisibleCount / ratio);
+          clampChartViewport();
+          renderChart();
+        };
         surface.addEventListener("pointerdown", (event) => {
           if (!token()) {
+            return;
+          }
+          state.chart.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          surface.setPointerCapture(event.pointerId);
+          if (state.chart.activePointers.size >= 2) {
+            event.preventDefault();
+            startPinch();
             return;
           }
           state.chart.dragging = true;
           state.chart.lastX = event.clientX;
           state.chart.lastY = event.clientY;
           state.chart.dragMode = "";
-          surface.setPointerCapture(event.pointerId);
         });
         surface.addEventListener("pointermove", (event) => {
+          if (state.chart.activePointers.has(event.pointerId)) {
+            state.chart.activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          }
+          if (state.chart.activePointers.size >= 2) {
+            event.preventDefault();
+            updatePinch();
+            return;
+          }
           if (!state.chart.dragging) {
             return;
           }
@@ -3618,12 +3705,21 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             renderChart();
           }
         });
-        const endDrag = () => {
+        const endDrag = (event) => {
+          if (event && state.chart.activePointers.has(event.pointerId)) {
+            state.chart.activePointers.delete(event.pointerId);
+          }
+          if (state.chart.activePointers.size >= 2) {
+            startPinch();
+            return;
+          }
           state.chart.dragging = false;
           state.chart.dragMode = "";
+          state.chart.pinchDistance = 0;
         };
         surface.addEventListener("pointerup", endDrag);
         surface.addEventListener("pointercancel", endDrag);
+        surface.addEventListener("lostpointercapture", endDrag);
         surface.addEventListener("wheel", (event) => {
           if (!token()) {
             return;
@@ -3648,6 +3744,26 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         surface.addEventListener("dblclick", () => {
           resetChartViewport();
         });
+        surface.addEventListener("gesturestart", (event) => {
+          if (!token()) {
+            return;
+          }
+          event.preventDefault();
+          state.chart.gestureVisibleCount = state.chart.visibleCount;
+        }, { passive: false });
+        surface.addEventListener("gesturechange", (event) => {
+          if (!token()) {
+            return;
+          }
+          event.preventDefault();
+          const scale = Number(event.scale || 1);
+          if (!Number.isFinite(scale) || scale <= 0) {
+            return;
+          }
+          state.chart.visibleCount = Math.round(state.chart.gestureVisibleCount / scale);
+          clampChartViewport();
+          renderChart();
+        }, { passive: false });
       };
 
       els.loginForm.addEventListener("submit", async (event) => {
