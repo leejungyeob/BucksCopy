@@ -3161,7 +3161,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           </span>
         `).join("");
         if (wrapper) {
-          wrapper.title = "드래그/휠로 좌우 이동, 버튼 또는 보조키+휠로 확대/축소, 더블클릭으로 최신 봉 복귀";
+          wrapper.title = "드래그로 자유 이동, 두 손가락 좌우로 이동, 두 손가락 위/아래로 확대/축소, 더블클릭으로 최신 봉 복귀";
         }
       };
 
@@ -3483,13 +3483,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           const deltaX = event.clientX - state.chart.lastX;
           const deltaY = event.clientY - state.chart.lastY;
           if (!state.chart.dragMode) {
-            if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 6) {
+            if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 4) {
               return;
             }
-            state.chart.dragMode = Math.abs(deltaX) >= Math.abs(deltaY) ? "pan" : "ignore";
-          }
-          if (state.chart.dragMode !== "pan") {
-            return;
+            state.chart.dragMode = "pan";
           }
           event.preventDefault();
           const slot = chartSlotWidth();
@@ -3511,16 +3508,15 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return;
           }
           event.preventDefault();
-          const primaryDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-          if (event.ctrlKey || event.metaKey || event.altKey) {
-            state.chart.zoomRemainder += primaryDelta;
+          if (Math.abs(event.deltaY) >= Math.abs(event.deltaX)) {
+            state.chart.zoomRemainder += event.deltaY;
             const zoomSteps = Math.trunc(state.chart.zoomRemainder / 80);
             if (zoomSteps) {
               state.chart.zoomRemainder -= zoomSteps * 80;
               zoomChartByCandles(zoomSteps * 12);
             }
           } else {
-            state.chart.wheelRemainder += primaryDelta;
+            state.chart.wheelRemainder += event.deltaX;
             const candleDelta = Math.trunc(state.chart.wheelRemainder / 24);
             if (candleDelta) {
               state.chart.wheelRemainder -= candleDelta * 24;
