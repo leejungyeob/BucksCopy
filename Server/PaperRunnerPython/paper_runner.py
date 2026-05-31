@@ -1960,6 +1960,18 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       align-items: center;
       gap: 6px;
     }
+    .chart-tools {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .chart-tools button {
+      min-width: 28px;
+      min-height: 28px;
+      padding: 0 8px;
+      font-size: 12px;
+      line-height: 1;
+    }
     select {
       min-height: 28px;
       border: 1px solid var(--line);
@@ -1970,10 +1982,15 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       font: inherit;
       font-size: 12px;
     }
+    .chart-panel-body {
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      gap: 6px;
+    }
     .chart-wrap {
       width: 100%;
-      height: 100%;
-      min-height: 220px;
+      height: auto;
+      min-height: 0;
       border-radius: 7px;
       background: #151515;
       overflow: hidden;
@@ -2071,7 +2088,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       .stack { gap: 8px; }
       .trade-log-panel { min-height: 0; }
       .compact-list { max-height: 360px; }
-      .chart-wrap { height: 280px; }
+      .chart-panel-body { grid-template-rows: 280px auto; }
       .strategy-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .log-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       table { min-width: 460px; }
@@ -2163,9 +2180,14 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
               <div class="chart-toolbar">
                 <select id="chart-symbol"></select>
                 <span class="pill info"><span class="dot"></span>15m</span>
+                <div class="chart-tools" aria-label="차트 조작">
+                  <button type="button" data-action="chart-zoom-out" title="축소">-</button>
+                  <button type="button" data-action="chart-reset" title="최신 봉으로 복귀">Reset</button>
+                  <button type="button" data-action="chart-zoom-in" title="확대">+</button>
+                </div>
               </div>
             </div>
-            <div class="panel-body">
+            <div class="panel-body chart-panel-body">
               <div class="chart-wrap">
                 <canvas id="chart-canvas"></canvas>
               </div>
@@ -2265,7 +2287,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           visibleCount: DEFAULT_CHART_VISIBLE,
           rightOffset: 0,
           dragging: false,
-          lastX: 0
+          lastX: 0,
+          lastY: 0,
+          dragMode: "",
+          wheelRemainder: 0,
+          zoomRemainder: 0
         },
         errors: {},
         redactedIdentifier: "",
@@ -3135,7 +3161,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           </span>
         `).join("");
         if (wrapper) {
-          wrapper.title = "드래그로 좌우 이동, 휠로 확대/축소, 더블클릭으로 최신 봉으로 복귀";
+          wrapper.title = "드래그/휠로 좌우 이동, 버튼 또는 보조키+휠로 확대/축소, 더블클릭으로 최신 봉 복귀";
         }
       };
 
@@ -3408,6 +3434,33 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         state.chart.rightOffset = clamp(state.chart.rightOffset, 0, maxOffset);
       };
 
+      const panChartByCandles = (delta) => {
+        if (!delta) {
+          return;
+        }
+        state.chart.rightOffset += delta;
+        clampChartViewport();
+        renderChart();
+      };
+
+      const zoomChartByCandles = (delta) => {
+        if (!delta) {
+          return;
+        }
+        state.chart.visibleCount += delta;
+        clampChartViewport();
+        renderChart();
+      };
+
+      const resetChartViewport = () => {
+        state.chart.rightOffset = 0;
+        state.chart.visibleCount = DEFAULT_CHART_VISIBLE;
+        state.chart.wheelRemainder = 0;
+        state.chart.zoomRemainder = 0;
+        clampChartViewport();
+        renderChart();
+      };
+
       const setupChartInteractions = () => {
         const wrapper = els.chartCanvas.parentElement;
         if (!wrapper) {
@@ -3419,6 +3472,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           }
           state.chart.dragging = true;
           state.chart.lastX = event.clientX;
+          state.chart.lastY = event.clientY;
+          state.chart.dragMode = "";
           wrapper.setPointerCapture(event.pointerId);
         });
         wrapper.addEventListener("pointermove", (event) => {
@@ -3426,17 +3481,28 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return;
           }
           const deltaX = event.clientX - state.chart.lastX;
+          const deltaY = event.clientY - state.chart.lastY;
+          if (!state.chart.dragMode) {
+            if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 6) {
+              return;
+            }
+            state.chart.dragMode = Math.abs(deltaX) >= Math.abs(deltaY) ? "pan" : "ignore";
+          }
+          if (state.chart.dragMode !== "pan") {
+            return;
+          }
+          event.preventDefault();
           const slot = chartSlotWidth();
           if (Math.abs(deltaX) >= slot) {
             const candleDelta = Math.trunc(deltaX / slot);
-            state.chart.rightOffset += candleDelta;
             state.chart.lastX = event.clientX;
-            clampChartViewport();
-            renderChart();
+            state.chart.lastY = event.clientY;
+            panChartByCandles(candleDelta);
           }
         });
         const endDrag = () => {
           state.chart.dragging = false;
+          state.chart.dragMode = "";
         };
         wrapper.addEventListener("pointerup", endDrag);
         wrapper.addEventListener("pointercancel", endDrag);
@@ -3445,19 +3511,25 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return;
           }
           event.preventDefault();
-          if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
-            state.chart.rightOffset += Math.trunc(event.deltaX / 18);
+          const primaryDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+          if (event.ctrlKey || event.metaKey || event.altKey) {
+            state.chart.zoomRemainder += primaryDelta;
+            const zoomSteps = Math.trunc(state.chart.zoomRemainder / 80);
+            if (zoomSteps) {
+              state.chart.zoomRemainder -= zoomSteps * 80;
+              zoomChartByCandles(zoomSteps * 12);
+            }
           } else {
-            state.chart.visibleCount += event.deltaY > 0 ? 12 : -12;
+            state.chart.wheelRemainder += primaryDelta;
+            const candleDelta = Math.trunc(state.chart.wheelRemainder / 24);
+            if (candleDelta) {
+              state.chart.wheelRemainder -= candleDelta * 24;
+              panChartByCandles(candleDelta);
+            }
           }
-          clampChartViewport();
-          renderChart();
         }, { passive: false });
         wrapper.addEventListener("dblclick", () => {
-          state.chart.rightOffset = 0;
-          state.chart.visibleCount = DEFAULT_CHART_VISIBLE;
-          clampChartViewport();
-          renderChart();
+          resetChartViewport();
         });
       };
 
@@ -3555,6 +3627,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
               card.classList.toggle("expanded");
               button.textContent = card.classList.contains("expanded") ? "접기" : "상세";
             }
+          } else if (action === "chart-zoom-in") {
+            zoomChartByCandles(-20);
+          } else if (action === "chart-zoom-out") {
+            zoomChartByCandles(20);
+          } else if (action === "chart-reset") {
+            resetChartViewport();
           }
         } catch (error) {
           if (error.status === 401) {
