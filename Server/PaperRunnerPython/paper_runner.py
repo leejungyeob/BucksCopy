@@ -1588,7 +1588,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       display: grid;
       grid-template-columns: minmax(360px, 1fr) 10px minmax(320px, var(--right-pane-width, 38%));
       gap: 0;
-      align-items: start;
+      align-items: stretch;
       min-height: calc(100vh - 184px);
     }
     .full { grid-column: 1 / -1; }
@@ -1691,7 +1691,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       grid-template-rows:
         minmax(96px, var(--position-pane-height, 150px))
         8px
-        minmax(220px, var(--chart-pane-height, 1fr))
+        minmax(220px, 1fr)
         8px
         minmax(150px, var(--strategy-pane-height, 230px));
     }
@@ -1709,6 +1709,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       z-index: 2;
       background: transparent;
       touch-action: none;
+      align-self: stretch;
     }
     .splitter::before {
       content: "";
@@ -1724,8 +1725,16 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       opacity: 1;
       background: #5a5a5a;
     }
-    .vertical-splitter { cursor: col-resize; }
-    .horizontal-splitter { cursor: row-resize; }
+    .vertical-splitter {
+      width: 10px;
+      min-height: 100%;
+      cursor: col-resize;
+    }
+    .horizontal-splitter {
+      height: 8px;
+      min-height: 8px;
+      cursor: row-resize;
+    }
     .compact-list {
       display: grid;
       gap: 8px;
@@ -2280,6 +2289,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       const LAYOUT_KEY = "bucksCopy.web.layout";
       const REFRESH_MS = 60000;
       const DEFAULT_CHART_VISIBLE = 160;
+      const MIN_CHART_VISIBLE = 5;
       const INDICATORS = [
         { key: "ma25", label: "MA25", period: 25, color: "#ff9f0a", type: "sma" },
         { key: "ma50", label: "MA50", period: 50, color: "#32d74b", type: "sma" },
@@ -2339,6 +2349,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           wheelRemainder: 0,
           zoomRemainder: 0,
           priceOffsetRatio: 0,
+          priceScaleRatio: 1,
           activePointers: new Map(),
           pinchDistance: 0,
           pinchVisibleCount: DEFAULT_CHART_VISIBLE,
@@ -2701,8 +2712,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if (layout.positionPaneHeight) {
           root.style.setProperty("--position-pane-height", `${layout.positionPaneHeight}px`);
         }
-        if (layout.chartPaneHeight) {
-          root.style.setProperty("--chart-pane-height", `${layout.chartPaneHeight}px`);
+        if (layout.strategyPaneHeight) {
+          root.style.setProperty("--strategy-pane-height", `${layout.strategyPaneHeight}px`);
         }
       };
 
@@ -2725,7 +2736,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
       const visibleChartWindow = (candles) => {
         const total = candles.length;
-        const visibleCount = Math.max(30, Math.min(state.chart.visibleCount, total || DEFAULT_CHART_VISIBLE));
+        const visibleCount = Math.max(MIN_CHART_VISIBLE, Math.round(Number(state.chart.visibleCount) || DEFAULT_CHART_VISIBLE));
         const minimumVisibleCandles = Math.min(total, 5);
         const maxFutureBlank = Math.max(visibleCount - minimumVisibleCandles, 0);
         const maxPastOffset = Math.max(total - minimumVisibleCandles, 0);
@@ -3187,9 +3198,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         const indicatorMin = indicatorValues.length ? Math.min(...indicatorValues) : minPrice;
         const upper = Math.max(maxPrice, indicatorMax);
         const lower = Math.min(minPrice, indicatorMin);
-        const range = Math.max(upper - lower, upper * 0.001, 1);
+        const baseRange = Math.max(upper - lower, upper * 0.001, 1);
+        const priceScale = Math.max(0.05, Number(state.chart.priceScaleRatio || 1));
+        const range = baseRange * priceScale;
+        const priceCenter = (upper + lower) / 2;
         const priceOffset = Number(state.chart.priceOffsetRatio || 0) * range;
-        const viewUpper = upper + priceOffset;
+        const viewUpper = priceCenter + range / 2 + priceOffset;
         const y = (price) => padTop + ((viewUpper - price) / range) * chartHeight;
 
         ctx.strokeStyle = "#2c2c2c";
@@ -3312,7 +3326,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           </span>
         `).join("");
         if (wrapper) {
-          wrapper.title = "차트 패널 어디서든 상하좌우 드래그 이동, 두 손가락 핀치 확대/축소, 트랙패드 위/아래 확대/축소, 더블클릭으로 최신 봉 복귀";
+          wrapper.title = "차트 패널 상하좌우 이동, 오른쪽 가격축 드래그로 가격 줌, 두 손가락 핀치/트랙패드 줌, 더블클릭으로 복귀";
         }
       };
 
@@ -3527,7 +3541,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         const root = document.documentElement;
         const dashboard = document.querySelector(".dashboard");
         const leftStack = document.querySelector(".left-stack");
-        const chartPanel = els.chartCanvas.closest(".panel");
         document.querySelectorAll(".splitter[data-resize]").forEach((splitter) => {
           splitter.addEventListener("pointerdown", (event) => {
             if (window.matchMedia("(max-width: 900px)").matches) {
@@ -3548,12 +3561,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
                 const height = clamp(moveEvent.clientY - rect.top, 96, rect.height - 390);
                 root.style.setProperty("--position-pane-height", `${height}px`);
                 saveLayout({ positionPaneHeight: Math.round(height) });
-              } else if (mode === "chart-strategy" && chartPanel && leftStack) {
-                const chartRect = chartPanel.getBoundingClientRect();
+              } else if (mode === "chart-strategy" && leftStack) {
                 const stackRect = leftStack.getBoundingClientRect();
-                const height = clamp(moveEvent.clientY - chartRect.top, 220, stackRect.bottom - chartRect.top - 150);
-                root.style.setProperty("--chart-pane-height", `${height}px`);
-                saveLayout({ chartPaneHeight: Math.round(height) });
+                const maxHeight = Math.max(150, stackRect.height - 330);
+                const height = clamp(stackRect.bottom - moveEvent.clientY, 150, maxHeight);
+                root.style.setProperty("--strategy-pane-height", `${height}px`);
+                saveLayout({ strategyPaneHeight: Math.round(height) });
               }
               renderChart();
             };
@@ -3580,7 +3593,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
       const clampChartViewport = () => {
         const total = chartCandles().length;
-        state.chart.visibleCount = clamp(state.chart.visibleCount, 30, Math.max(total, 30));
+        state.chart.visibleCount = Math.max(MIN_CHART_VISIBLE, Math.round(Number(state.chart.visibleCount) || DEFAULT_CHART_VISIBLE));
         const minimumVisibleCandles = Math.min(total, 5);
         const maxFutureBlank = Math.max(state.chart.visibleCount - minimumVisibleCandles, 0);
         const maxPastOffset = Math.max(total - minimumVisibleCandles, 0);
@@ -3609,6 +3622,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         state.chart.rightOffset = 0;
         state.chart.visibleCount = DEFAULT_CHART_VISIBLE;
         state.chart.priceOffsetRatio = 0;
+        state.chart.priceScaleRatio = 1;
         state.chart.wheelRemainder = 0;
         state.chart.zoomRemainder = 0;
         clampChartViewport();
@@ -3648,6 +3662,13 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           clampChartViewport();
           renderChart();
         };
+        const isPriceAxisPointer = (event) => {
+          const rect = els.chartCanvas.getBoundingClientRect();
+          return event.clientX >= rect.right - 70 &&
+            event.clientX <= rect.right &&
+            event.clientY >= rect.top &&
+            event.clientY <= rect.bottom;
+        };
         surface.addEventListener("pointerdown", (event) => {
           if (!token()) {
             return;
@@ -3657,6 +3678,14 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           if (state.chart.activePointers.size >= 2) {
             event.preventDefault();
             startPinch();
+            return;
+          }
+          if (isPriceAxisPointer(event)) {
+            event.preventDefault();
+            state.chart.dragging = true;
+            state.chart.lastX = event.clientX;
+            state.chart.lastY = event.clientY;
+            state.chart.dragMode = "priceZoom";
             return;
           }
           state.chart.dragging = true;
@@ -3678,6 +3707,15 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           }
           const deltaX = event.clientX - state.chart.lastX;
           const deltaY = event.clientY - state.chart.lastY;
+          if (state.chart.dragMode === "priceZoom") {
+            event.preventDefault();
+            if (Math.abs(deltaY) >= 1) {
+              state.chart.priceScaleRatio = Math.max(0.05, Number(state.chart.priceScaleRatio || 1) * Math.exp(deltaY / 160));
+              state.chart.lastY = event.clientY;
+              renderChart();
+            }
+            return;
+          }
           if (!state.chart.dragMode) {
             if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 4) {
               return;
@@ -3812,6 +3850,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         state.chart.rightOffset = 0;
         state.chart.visibleCount = DEFAULT_CHART_VISIBLE;
         state.chart.priceOffsetRatio = 0;
+        state.chart.priceScaleRatio = 1;
         setBusy(true);
         try {
           await guardedLoad(
