@@ -1020,12 +1020,16 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if action == "candles":
             query = parse_qs(parsed.query)
             symbol = query.get("symbol", [""])[0].upper()
-            limit = clamp_int(query.get("limit", [None])[0], default=100, minimum=1, maximum=1000)
+            raw_limit = str(query.get("limit", [None])[0] or "100").strip().lower()
+            all_candles = raw_limit in {"0", "all", "full", "none", "unlimited"}
+            limit = None if all_candles else clamp_int(raw_limit, default=100, minimum=1, maximum=1_000_000)
             if symbol not in self.runner.symbols:
                 self.write_json({"error": "symbol is not configured for this runner"}, HTTPStatus.BAD_REQUEST)
                 return
-            candles = [candle.to_record() for candle in self.runner.load_candles(symbol)[-limit:]]
-            self.write_json({"symbol": symbol, "timeframe": TIMEFRAME, "items": candles, "limit": limit})
+            loaded_candles = self.runner.load_candles(symbol)
+            selected_candles = loaded_candles if limit is None else loaded_candles[-limit:]
+            candles = [candle.to_record() for candle in selected_candles]
+            self.write_json({"symbol": symbol, "timeframe": TIMEFRAME, "items": candles, "limit": limit or 0})
             return
         if action == "account":
             try:
@@ -2927,7 +2931,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ensureSelectedSymbol();
           await guardedLoad(
             "candles",
-            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=1000`)
+            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=0`)
           );
           state.lastUpdated = new Date();
           render();
@@ -3855,7 +3859,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         try {
           await guardedLoad(
             "candles",
-            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=1000`)
+            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=0`)
           );
           renderChart();
         } catch (error) {
