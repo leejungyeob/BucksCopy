@@ -1986,7 +1986,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       display: grid;
       grid-template-rows: minmax(0, 1fr) auto;
       gap: 6px;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
     }
+    .chart-panel-body:active { cursor: grabbing; }
     .chart-wrap {
       width: 100%;
       height: auto;
@@ -2625,11 +2629,15 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       const visibleChartWindow = (candles) => {
         const total = candles.length;
         const visibleCount = Math.max(30, Math.min(state.chart.visibleCount, total || DEFAULT_CHART_VISIBLE));
-        const maxOffset = Math.max(total - visibleCount, 0);
-        state.chart.rightOffset = Math.max(0, Math.min(state.chart.rightOffset, maxOffset));
+        const minimumVisibleCandles = Math.min(total, 5);
+        const maxFutureBlank = Math.max(visibleCount - minimumVisibleCandles, 0);
+        const maxPastOffset = Math.max(total - minimumVisibleCandles, 0);
+        state.chart.rightOffset = Math.max(-maxFutureBlank, Math.min(state.chart.rightOffset, maxPastOffset));
         const end = total - state.chart.rightOffset;
-        const start = Math.max(0, end - visibleCount);
-        return { start, end, visibleCount };
+        const start = end - visibleCount;
+        const renderStart = Math.max(0, start);
+        const renderEnd = Math.min(total, end);
+        return { start, end, renderStart, renderEnd, visibleCount };
       };
 
       const movingAverageSeries = (candles, period, type) => {
@@ -3056,8 +3064,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         ctx.fillStyle = "#151515";
         ctx.fillRect(0, 0, width, height);
 
-        const { start, end } = visibleChartWindow(candles);
-        const visible = candles.slice(start, end);
+        const { start, renderStart, renderEnd, visibleCount } = visibleChartWindow(candles);
+        const visible = candles.slice(renderStart, renderEnd);
         const seriesByKey = Object.fromEntries(
           INDICATORS.map((indicator) => [
             indicator.key,
@@ -3065,7 +3073,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ])
         );
         const indicatorValues = INDICATORS.flatMap((indicator) => (
-          seriesByKey[indicator.key].slice(start, end).filter((value) => Number.isFinite(value))
+          seriesByKey[indicator.key].slice(renderStart, renderEnd).filter((value) => Number.isFinite(value))
         ));
 
         const padLeft = 12;
@@ -3099,11 +3107,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ctx.fillText(numberText(price, 2), width - padRight + 8, gy + 3);
         }
 
-        const slot = chartWidth / visible.length;
+        const slot = chartWidth / visibleCount;
         const bodyWidth = Math.max(2, Math.min(8, slot * 0.58));
         visible.forEach((candle, index) => {
+          const absoluteIndex = renderStart + index;
           const rising = candle.close >= candle.open;
-          const x = padLeft + slot * index + slot / 2;
+          const x = padLeft + slot * (absoluteIndex - start) + slot / 2;
           const color = rising ? "#35d06f" : "#ff5b57";
           const highY = y(candle.high);
           const lowY = y(candle.low);
@@ -3127,7 +3136,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ctx.lineWidth = indicator.type === "vwma" ? 1.45 : 1.1;
           ctx.beginPath();
           let started = false;
-          for (let absoluteIndex = start; absoluteIndex < end; absoluteIndex += 1) {
+          for (let absoluteIndex = renderStart; absoluteIndex < renderEnd; absoluteIndex += 1) {
             const value = values[absoluteIndex];
             if (!Number.isFinite(value)) {
               started = false;
@@ -3153,6 +3162,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if (state.chart.rightOffset > 0) {
           ctx.fillStyle = "#ff9f0a";
           ctx.fillText(`${state.chart.rightOffset}봉 전`, width - padRight - 54, height - 7);
+        } else if (state.chart.rightOffset < 0) {
+          ctx.fillStyle = "#8e8e93";
+          ctx.fillText(`${Math.abs(state.chart.rightOffset)}봉 여백`, width - padRight - 58, height - 7);
         }
 
         els.chartLegend.innerHTML = INDICATORS.map((indicator) => `
@@ -3161,7 +3173,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           </span>
         `).join("");
         if (wrapper) {
-          wrapper.title = "드래그로 자유 이동, 두 손가락 좌우로 이동, 두 손가락 위/아래로 확대/축소, 더블클릭으로 최신 봉 복귀";
+          wrapper.title = "차트 패널 어디서든 드래그 이동, 두 손가락 좌우 이동, 두 손가락 위/아래 확대/축소, 더블클릭으로 최신 봉 복귀";
         }
       };
 
@@ -3421,17 +3433,19 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
       const chartSlotWidth = () => {
         const candles = chartCandles();
-        const { start, end } = visibleChartWindow(candles);
+        const { visibleCount } = visibleChartWindow(candles);
         const rect = els.chartCanvas.getBoundingClientRect();
-        const count = Math.max(end - start, 1);
+        const count = Math.max(visibleCount, 1);
         return Math.max((rect.width - 74) / count, 2);
       };
 
       const clampChartViewport = () => {
         const total = chartCandles().length;
         state.chart.visibleCount = clamp(state.chart.visibleCount, 30, Math.max(total, 30));
-        const maxOffset = Math.max(total - state.chart.visibleCount, 0);
-        state.chart.rightOffset = clamp(state.chart.rightOffset, 0, maxOffset);
+        const minimumVisibleCandles = Math.min(total, 5);
+        const maxFutureBlank = Math.max(state.chart.visibleCount - minimumVisibleCandles, 0);
+        const maxPastOffset = Math.max(total - minimumVisibleCandles, 0);
+        state.chart.rightOffset = clamp(state.chart.rightOffset, -maxFutureBlank, maxPastOffset);
       };
 
       const panChartByCandles = (delta) => {
@@ -3463,10 +3477,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
 
       const setupChartInteractions = () => {
         const wrapper = els.chartCanvas.parentElement;
-        if (!wrapper) {
+        const surface = els.chartCanvas.closest(".chart-panel-body") || wrapper;
+        if (!wrapper || !surface) {
           return;
         }
-        wrapper.addEventListener("pointerdown", (event) => {
+        surface.addEventListener("pointerdown", (event) => {
           if (!token()) {
             return;
           }
@@ -3474,9 +3489,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           state.chart.lastX = event.clientX;
           state.chart.lastY = event.clientY;
           state.chart.dragMode = "";
-          wrapper.setPointerCapture(event.pointerId);
+          surface.setPointerCapture(event.pointerId);
         });
-        wrapper.addEventListener("pointermove", (event) => {
+        surface.addEventListener("pointermove", (event) => {
           if (!state.chart.dragging) {
             return;
           }
@@ -3501,9 +3516,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           state.chart.dragging = false;
           state.chart.dragMode = "";
         };
-        wrapper.addEventListener("pointerup", endDrag);
-        wrapper.addEventListener("pointercancel", endDrag);
-        wrapper.addEventListener("wheel", (event) => {
+        surface.addEventListener("pointerup", endDrag);
+        surface.addEventListener("pointercancel", endDrag);
+        surface.addEventListener("wheel", (event) => {
           if (!token()) {
             return;
           }
@@ -3524,7 +3539,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             }
           }
         }, { passive: false });
-        wrapper.addEventListener("dblclick", () => {
+        surface.addEventListener("dblclick", () => {
           resetChartViewport();
         });
       };
