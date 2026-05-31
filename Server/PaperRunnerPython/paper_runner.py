@@ -1380,9 +1380,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     label { color: var(--muted); font-size: 12px; }
     .shell {
-      width: min(1260px, calc(100vw - 24px));
+      width: 100%;
       margin: 0 auto;
-      padding: 12px 0 20px;
+      padding: 4px 0 0;
     }
     .topbar {
       display: flex;
@@ -1411,6 +1411,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       gap: 8px;
     }
     .panel {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel);
@@ -1429,7 +1434,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       font-size: 14px;
       font-weight: 750;
     }
-    .panel-body { padding: 12px; }
+    .panel-body {
+      min-height: 0;
+      overflow: hidden;
+      padding: 12px;
+    }
     .notice {
       display: none;
       position: fixed;
@@ -1466,8 +1475,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .command-panel { margin-bottom: 10px; }
     .command-body {
       display: grid;
-      gap: 12px;
-      padding: 12px;
+      gap: 8px;
+      padding: 10px;
     }
     .command-row {
       display: flex;
@@ -1518,11 +1527,63 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .command-footer {
       min-height: 0;
     }
+    .evaluation-strip {
+      display: grid;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #202020;
+      padding: 8px 10px;
+    }
+    .evaluation-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+    .evaluation-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 800;
+      font-size: 13px;
+    }
+    .evaluation-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .evaluation-items {
+      display: flex;
+      gap: 5px;
+      overflow: auto;
+      padding-bottom: 1px;
+    }
+    .evaluation-item {
+      flex: 0 0 auto;
+      max-width: 280px;
+      border: 1px solid #343434;
+      border-radius: 999px;
+      padding: 3px 8px;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      background: #262626;
+    }
+    .evaluation-item.signal {
+      color: #c9f5d5;
+      border-color: rgba(50, 215, 75, 0.36);
+      background: rgba(50, 215, 75, 0.10);
+    }
     .dashboard {
       display: grid;
-      grid-template-columns: minmax(520px, 1.45fr) minmax(340px, 0.85fr);
-      gap: 10px;
+      grid-template-columns: minmax(360px, var(--left-pane-width, 62%)) 8px minmax(300px, 1fr);
+      gap: 0;
       align-items: start;
+      min-height: calc(100vh - 184px);
     }
     .full { grid-column: 1 / -1; }
     .metrics {
@@ -1585,18 +1646,51 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .info .dot, .dot.info { background: var(--blue); }
     .stack {
       display: grid;
-      gap: 10px;
+      gap: 0;
+      min-height: 0;
     }
     .left-stack {
-      grid-template-rows: minmax(120px, auto) minmax(240px, 1fr) minmax(190px, auto);
+      grid-template-rows:
+        minmax(96px, var(--position-pane-height, 150px))
+        8px
+        minmax(220px, var(--chart-pane-height, 1fr))
+        8px
+        minmax(150px, var(--strategy-pane-height, 230px));
     }
+    .right-stack { min-height: calc(100vh - 184px); }
     .trade-log-panel {
-      min-height: 640px;
+      min-height: 100%;
     }
+    .trade-log-panel .panel-body {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+    .splitter {
+      position: relative;
+      z-index: 2;
+      background: transparent;
+      touch-action: none;
+    }
+    .splitter::before {
+      content: "";
+      position: absolute;
+      inset: 2px;
+      border-radius: 999px;
+      background: #3d3d3d;
+      opacity: 0.35;
+      transition: opacity 0.12s ease, background 0.12s ease;
+    }
+    .splitter:hover::before,
+    .splitter.dragging::before {
+      opacity: 1;
+      background: #5a5a5a;
+    }
+    .vertical-splitter { cursor: col-resize; }
+    .horizontal-splitter { cursor: row-resize; }
     .compact-list {
       display: grid;
       gap: 8px;
-      max-height: 555px;
+      max-height: calc(100vh - 312px);
       overflow: auto;
     }
     .row-card {
@@ -1644,7 +1738,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .position-list {
       display: grid;
       gap: 7px;
-      max-height: 220px;
+      max-height: 100%;
       overflow: auto;
     }
     .position-card {
@@ -1750,20 +1844,25 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .strategy-list {
       display: grid;
       gap: 6px;
-      max-height: 260px;
+      max-height: 100%;
       overflow: auto;
     }
     .strategy-item {
       display: grid;
-      grid-template-columns: 18px 1fr;
       gap: 9px;
-      align-items: center;
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 8px;
       background: #222;
       color: var(--text);
       font-size: 12px;
+    }
+    .strategy-top {
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      gap: 9px;
+      align-items: center;
+      min-width: 0;
     }
     .strategy-item input { margin-top: 1px; }
     .strategy-content {
@@ -1796,6 +1895,44 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .strategy-detail {
+      display: none;
+      border-top: 1px solid #363636;
+      padding-top: 8px;
+      color: var(--muted);
+    }
+    .strategy-item.expanded .strategy-detail {
+      display: grid;
+      gap: 7px;
+    }
+    .strategy-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 5px;
+    }
+    .strategy-detail-grid div {
+      min-width: 0;
+      border: 1px solid #343434;
+      border-radius: 7px;
+      padding: 6px;
+      background: #252525;
+    }
+    .strategy-detail-grid span {
+      display: block;
+      font-size: 10px;
+      margin-bottom: 2px;
+    }
+    .strategy-detail-grid strong {
+      display: block;
+      overflow-wrap: anywhere;
+      color: var(--text);
+      font-size: 12px;
+    }
+    .detail-toggle {
+      min-height: 26px;
+      padding: 0 8px;
+      font-size: 11px;
     }
     .tagline {
       display: flex;
@@ -1835,15 +1972,38 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     .chart-wrap {
       width: 100%;
-      height: 260px;
+      height: 100%;
+      min-height: 220px;
       border-radius: 7px;
       background: #151515;
       overflow: hidden;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
     }
+    .chart-wrap:active { cursor: grabbing; }
     #chart-canvas {
       width: 100%;
       height: 100%;
       display: block;
+    }
+    .chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .legend-swatch {
+      width: 14px;
+      height: 2px;
+      border-radius: 999px;
+      background: var(--muted);
     }
     .log-summary {
       display: grid;
@@ -1881,15 +2041,38 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     }
     [hidden] { display: none !important; }
     @media (max-width: 900px) {
+      .shell { padding: 0; }
       .dashboard, .metrics { grid-template-columns: 1fr; }
+      .dashboard { min-height: 0; }
       .login-grid { grid-template-columns: 1fr; }
+      .topbar { margin-bottom: 4px; }
       .topbar, .command-row { align-items: flex-start; flex-direction: column; }
+      .command-body { gap: 6px; padding: 8px; }
+      .command-row { gap: 8px; }
+      .command-state { gap: 8px; }
+      .state-icon { width: 28px; height: 28px; flex-basis: 28px; font-size: 13px; }
+      .state-title { font-size: 15px; margin-bottom: 4px; }
+      .metrics { gap: 5px; }
+      .metric { min-height: 44px; padding: 6px; }
+      .metric span { font-size: 10px; margin-bottom: 3px; }
+      .metric strong { font-size: 13px; }
+      .metric small { display: none; }
+      .evaluation-strip { padding: 6px; gap: 4px; }
+      .evaluation-main { align-items: flex-start; flex-direction: column; gap: 4px; }
+      .evaluation-title { white-space: normal; font-size: 12px; }
       .top-actions { width: 100%; }
       .top-actions button, .top-actions form { flex: 1; }
       .top-actions form button { width: 100%; }
       .command-actions { width: 100%; }
       .command-actions button { flex: 1; }
+      .splitter { display: none; }
+      .left-stack { grid-template-rows: auto; gap: 8px; }
+      .right-stack { min-height: 0; }
+      .stack { gap: 8px; }
       .trade-log-panel { min-height: 0; }
+      .compact-list { max-height: 360px; }
+      .chart-wrap { height: 280px; }
+      .strategy-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .log-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       table { min-width: 460px; }
     }
@@ -1955,6 +2138,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             </div>
           </div>
           <div class="metrics" id="metrics"></div>
+          <div class="evaluation-strip" id="last-evaluation"></div>
           <div class="command-footer">
             <div id="live-blockers" class="alert-text"></div>
           </div>
@@ -1971,6 +2155,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             <div class="panel-body" id="positions"></div>
           </section>
 
+          <div class="splitter horizontal-splitter" data-resize="position-chart"></div>
+
           <section class="panel">
             <div class="panel-head">
               <h2 class="panel-title">차트</h2>
@@ -1983,8 +2169,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
               <div class="chart-wrap">
                 <canvas id="chart-canvas"></canvas>
               </div>
+              <div class="chart-legend" id="chart-legend"></div>
             </div>
           </section>
+
+          <div class="splitter horizontal-splitter" data-resize="chart-strategy"></div>
 
           <section class="panel">
             <div class="panel-head">
@@ -1997,7 +2186,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           </section>
         </div>
 
-        <div class="stack">
+        <div class="splitter vertical-splitter" data-resize="columns"></div>
+
+        <div class="stack right-stack">
           <section class="panel trade-log-panel">
             <div class="panel-head">
               <h2 class="panel-title">매매기록</h2>
@@ -2018,7 +2209,16 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       "use strict";
 
       const TOKEN_KEY = "bucksCopy.paperRunner.authToken";
+      const LAYOUT_KEY = "bucksCopy.web.layout";
       const REFRESH_MS = 60000;
+      const DEFAULT_CHART_VISIBLE = 160;
+      const INDICATORS = [
+        { key: "ma25", label: "MA25", period: 25, color: "#ff9f0a", type: "sma" },
+        { key: "ma50", label: "MA50", period: 50, color: "#32d74b", type: "sma" },
+        { key: "ma100", label: "MA100", period: 100, color: "#5ac8fa", type: "sma" },
+        { key: "ma200", label: "MA200", period: 200, color: "#ff453a", type: "sma" },
+        { key: "vwma100", label: "VWMA100", period: 100, color: "#eeeeee", type: "vwma" }
+      ];
       const SAFE_DETAIL_KEYS = new Set([
         "strategyID",
         "timeframe",
@@ -2061,6 +2261,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         logs: null,
         candles: null,
         selectedSymbol: "",
+        chart: {
+          visibleCount: DEFAULT_CHART_VISIBLE,
+          rightOffset: 0,
+          dragging: false,
+          lastX: 0
+        },
         errors: {},
         redactedIdentifier: "",
         busy: false,
@@ -2078,8 +2284,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         runnerStatus: document.getElementById("runner-status"),
         automationToggle: document.getElementById("automation-toggle"),
         liveBlockers: document.getElementById("live-blockers"),
+        lastEvaluation: document.getElementById("last-evaluation"),
         chartSymbol: document.getElementById("chart-symbol"),
         chartCanvas: document.getElementById("chart-canvas"),
+        chartLegend: document.getElementById("chart-legend"),
         strategyList: document.getElementById("strategy-list"),
         positionCount: document.getElementById("position-count"),
         positions: document.getElementById("positions"),
@@ -2265,6 +2473,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return "Bitget 로그인 필요";
           case "fresh account/position snapshot is required":
             return "계정/포지션 최신 정보 대기";
+          case "paper runner disabled":
+            return "자동매매 꺼짐";
           default:
             return friendlyErrorText(text);
         }
@@ -2340,6 +2550,93 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           return "short";
         }
         return "";
+      };
+
+      const loadLayout = () => {
+        try {
+          return JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+        } catch {
+          return {};
+        }
+      };
+
+      const saveLayout = (next) => {
+        const layout = { ...loadLayout(), ...next };
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+      };
+
+      const applyLayout = () => {
+        const layout = loadLayout();
+        const root = document.documentElement;
+        if (layout.leftPaneWidth) {
+          root.style.setProperty("--left-pane-width", `${layout.leftPaneWidth}px`);
+        }
+        if (layout.positionPaneHeight) {
+          root.style.setProperty("--position-pane-height", `${layout.positionPaneHeight}px`);
+        }
+        if (layout.chartPaneHeight) {
+          root.style.setProperty("--chart-pane-height", `${layout.chartPaneHeight}px`);
+        }
+      };
+
+      const chartCandles = () => (state.candles?.items || [])
+        .map((candle) => ({
+          openTime: Number(candle.openTime),
+          openTimeISO: candle.openTimeISO,
+          open: Number(candle.open),
+          high: Number(candle.high),
+          low: Number(candle.low),
+          close: Number(candle.close),
+          volume: Number(candle.volume)
+        }))
+        .filter((candle) => (
+          Number.isFinite(candle.open) &&
+          Number.isFinite(candle.high) &&
+          Number.isFinite(candle.low) &&
+          Number.isFinite(candle.close)
+        ));
+
+      const visibleChartWindow = (candles) => {
+        const total = candles.length;
+        const visibleCount = Math.max(30, Math.min(state.chart.visibleCount, total || DEFAULT_CHART_VISIBLE));
+        const maxOffset = Math.max(total - visibleCount, 0);
+        state.chart.rightOffset = Math.max(0, Math.min(state.chart.rightOffset, maxOffset));
+        const end = total - state.chart.rightOffset;
+        const start = Math.max(0, end - visibleCount);
+        return { start, end, visibleCount };
+      };
+
+      const movingAverageSeries = (candles, period, type) => {
+        const values = new Array(candles.length).fill(null);
+        let sum = 0;
+        let volumeSum = 0;
+        let priceVolumeSum = 0;
+        for (let index = 0; index < candles.length; index += 1) {
+          const candle = candles[index];
+          if (type === "vwma") {
+            const volume = Number.isFinite(candle.volume) ? candle.volume : 0;
+            volumeSum += volume;
+            priceVolumeSum += candle.close * volume;
+            if (index >= period) {
+              const old = candles[index - period];
+              const oldVolume = Number.isFinite(old.volume) ? old.volume : 0;
+              volumeSum -= oldVolume;
+              priceVolumeSum -= old.close * oldVolume;
+            }
+            if (index >= period - 1 && volumeSum > 0) {
+              values[index] = priceVolumeSum / volumeSum;
+            }
+          } else {
+            sum += candle.close;
+            if (index >= period) {
+              sum -= candles[index - period].close;
+            }
+            if (index >= period - 1) {
+              values[index] = sum / period;
+            }
+          }
+        }
+        return values;
       };
 
       const setNotice = (message, tone = "") => {
@@ -2488,7 +2785,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ensureSelectedSymbol();
           await guardedLoad(
             "candles",
-            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=240`)
+            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=1000`)
           );
           state.lastUpdated = new Date();
           render();
@@ -2556,6 +2853,42 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         `;
       };
 
+      const renderLastEvaluation = () => {
+        const evaluation = state.status?.lastEvaluation;
+        if (!evaluation) {
+          els.lastEvaluation.innerHTML = `
+            <div class="evaluation-main">
+              <div class="evaluation-title">아직 표시할 15분봉 평가가 없습니다.</div>
+            </div>
+          `;
+          return;
+        }
+        const items = Array.isArray(evaluation.items) ? evaluation.items : [];
+        const headlineTone = Number(evaluation.signalCount || 0) > 0 ? "ok" : "info";
+        els.lastEvaluation.innerHTML = `
+          <div class="evaluation-main">
+            <div class="evaluation-title">
+              마지막 평가 · ${escapeHTML(evaluation.headline || "-")}
+            </div>
+            <div class="evaluation-meta">
+              ${pill(`${timeText(evaluation.candleCloseTimeISO)} 마감`, "info")}
+              ${pill(`평가 ${evaluation.evaluatedCount || 0}`, headlineTone)}
+              ${pill(`신호 ${evaluation.signalCount || 0}`, Number(evaluation.signalCount || 0) > 0 ? "ok" : "info")}
+              ${Number(evaluation.failureCount || 0) > 0 ? pill(`확인 ${evaluation.failureCount}`, "warn") : ""}
+            </div>
+          </div>
+          <div class="evaluation-items">
+            ${items.slice(0, 8).map((item) => {
+              const signal = item.signal || {};
+              const text = item.producedSignal
+                ? `${item.strategyName || item.strategyID} ${sideText(signal.side)} @ ${signal.entry || "-"}`
+                : `${item.strategyName || item.strategyID}: ${item.skippedReason ? localizedLiveBlocker(item.skippedReason) : "신호 없음"}`;
+              return `<span class="evaluation-item ${item.producedSignal ? "signal" : ""}">${escapeHTML(text)}</span>`;
+            }).join("")}
+          </div>
+        `;
+      };
+
       const renderAutomation = () => {
         const control = state.control || state.status?.control || {};
         const live = state.live || state.status?.live || {};
@@ -2591,6 +2924,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         }
         els.strategyList.innerHTML = available.map((strategy) => {
           const backtest = strategy.backtest || {};
+          const parameters = strategy.parameters || {};
           const tags = [
             strategy.symbol,
             strategy.timeframe,
@@ -2598,17 +2932,44 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             backtest.winRatePercent ? `승률 ${backtest.winRatePercent}%` : "",
             backtest.maxDrawdownPercent ? `MDD ${backtest.maxDrawdownPercent}%` : ""
           ].filter(Boolean);
+          const details = [
+            ["수익률", backtest.netReturnPercent ? `${backtest.netReturnPercent}%` : "-"],
+            ["승률", backtest.winRatePercent ? `${backtest.winRatePercent}%` : "-"],
+            ["MDD", backtest.maxDrawdownPercent ? `${backtest.maxDrawdownPercent}%` : "-"],
+            ["PF", backtest.profitFactor || "-"],
+            ["총 거래", backtest.totalTrades || "-"],
+            ["연 거래", backtest.annualTrades || "-"],
+            ["레버리지", parameters.leverage ? `${parameters.leverage}x` : "-"],
+            ["RR", parameters.reward_risk_ratio || parameters.tight_reward_risk_ratio || "-"]
+          ];
+          const paramTags = Object.entries(parameters)
+            .filter(([key]) => !["leverage", "reward_risk_ratio", "tight_reward_risk_ratio"].includes(key))
+            .slice(0, 14);
           return `
-            <label class="strategy-item">
-              <input type="checkbox" data-strategy-id="${escapeHTML(strategy.id)}" ${strategy.enabled ? "checked" : ""}>
-              <span class="strategy-content">
-                <span class="strategy-main">
-                  <span class="strategy-name">${escapeHTML(strategy.name || strategy.id)}</span>
-                  <span class="strategy-stats">${tags.map((tag) => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</span>
+            <article class="strategy-item" data-strategy-card="${escapeHTML(strategy.id)}">
+              <div class="strategy-top">
+                <input type="checkbox" data-strategy-id="${escapeHTML(strategy.id)}" ${strategy.enabled ? "checked" : ""}>
+                <span class="strategy-content">
+                  <span class="strategy-main">
+                    <span class="strategy-name">${escapeHTML(strategy.name || strategy.id)}</span>
+                    <span class="strategy-stats">${tags.map((tag) => `<span class="tag">${escapeHTML(tag)}</span>`).join("")}</span>
+                  </span>
+                  <span class="strategy-id">${escapeHTML(strategy.id)}</span>
                 </span>
-                <span class="strategy-id">${escapeHTML(strategy.id)}</span>
-              </span>
-            </label>
+                <button type="button" class="detail-toggle" data-action="strategy-detail">상세</button>
+              </div>
+              <div class="strategy-detail">
+                <div class="strategy-detail-grid">
+                  ${details.map(([label, value]) => `
+                    <div><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>
+                  `).join("")}
+                </div>
+                <div class="tagline">
+                  ${backtest.label ? `<span class="tag">${escapeHTML(backtest.label)}</span>` : ""}
+                  ${paramTags.map(([key, value]) => `<span class="tag">${escapeHTML(key)} ${escapeHTML(value)}</span>`).join("")}
+                </div>
+              </div>
+            </article>
           `;
         }).join("");
       };
@@ -2627,6 +2988,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       };
 
       const renderChartMessage = (message) => {
+        els.chartLegend.innerHTML = "";
         const canvas = els.chartCanvas;
         const rect = canvas.getBoundingClientRect();
         const width = Math.max(320, Math.floor(rect.width || 640));
@@ -2649,26 +3011,14 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           renderChartMessage(state.errors.candles);
           return;
         }
-        const candles = (state.candles?.items || [])
-          .map((candle) => ({
-            open: Number(candle.open),
-            high: Number(candle.high),
-            low: Number(candle.low),
-            close: Number(candle.close)
-          }))
-          .filter((candle) => (
-            Number.isFinite(candle.open) &&
-            Number.isFinite(candle.high) &&
-            Number.isFinite(candle.low) &&
-            Number.isFinite(candle.close)
-          ))
-          .slice(-160);
+        const candles = chartCandles();
         if (!candles.length) {
           renderChartMessage("표시할 캔들이 없습니다.");
           return;
         }
 
         const canvas = els.chartCanvas;
+        const wrapper = canvas.parentElement;
         const rect = canvas.getBoundingClientRect();
         const width = Math.max(320, Math.floor(rect.width || 640));
         const height = Math.max(180, Math.floor(rect.height || 260));
@@ -2680,32 +3030,54 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         ctx.fillStyle = "#151515";
         ctx.fillRect(0, 0, width, height);
 
-        const padX = 12;
-        const padY = 18;
-        const chartWidth = width - padX * 2;
-        const chartHeight = height - padY * 2;
-        const highs = candles.map((candle) => candle.high);
-        const lows = candles.map((candle) => candle.low);
+        const { start, end } = visibleChartWindow(candles);
+        const visible = candles.slice(start, end);
+        const seriesByKey = Object.fromEntries(
+          INDICATORS.map((indicator) => [
+            indicator.key,
+            movingAverageSeries(candles, indicator.period, indicator.type)
+          ])
+        );
+        const indicatorValues = INDICATORS.flatMap((indicator) => (
+          seriesByKey[indicator.key].slice(start, end).filter((value) => Number.isFinite(value))
+        ));
+
+        const padLeft = 12;
+        const padRight = 62;
+        const padTop = 18;
+        const padBottom = 24;
+        const chartWidth = width - padLeft - padRight;
+        const chartHeight = height - padTop - padBottom;
+        const highs = visible.map((candle) => candle.high);
+        const lows = visible.map((candle) => candle.low);
         const maxPrice = Math.max(...highs);
         const minPrice = Math.min(...lows);
-        const range = Math.max(maxPrice - minPrice, maxPrice * 0.001, 1);
-        const y = (price) => padY + ((maxPrice - price) / range) * chartHeight;
+        const indicatorMax = indicatorValues.length ? Math.max(...indicatorValues) : maxPrice;
+        const indicatorMin = indicatorValues.length ? Math.min(...indicatorValues) : minPrice;
+        const upper = Math.max(maxPrice, indicatorMax);
+        const lower = Math.min(minPrice, indicatorMin);
+        const range = Math.max(upper - lower, upper * 0.001, 1);
+        const y = (price) => padTop + ((upper - price) / range) * chartHeight;
 
         ctx.strokeStyle = "#2c2c2c";
         ctx.lineWidth = 1;
         for (let i = 0; i <= 4; i += 1) {
-          const gy = padY + (chartHeight / 4) * i;
+          const gy = padTop + (chartHeight / 4) * i;
           ctx.beginPath();
-          ctx.moveTo(padX, gy);
-          ctx.lineTo(width - padX, gy);
+          ctx.moveTo(padLeft, gy);
+          ctx.lineTo(width - padRight, gy);
           ctx.stroke();
+          const price = upper - (range / 4) * i;
+          ctx.fillStyle = "#8e8e93";
+          ctx.font = "10px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillText(numberText(price, 2), width - padRight + 8, gy + 3);
         }
 
-        const slot = chartWidth / candles.length;
+        const slot = chartWidth / visible.length;
         const bodyWidth = Math.max(2, Math.min(8, slot * 0.58));
-        candles.forEach((candle, index) => {
+        visible.forEach((candle, index) => {
           const rising = candle.close >= candle.open;
-          const x = padX + slot * index + slot / 2;
+          const x = padLeft + slot * index + slot / 2;
           const color = rising ? "#35d06f" : "#ff5b57";
           const highY = y(candle.high);
           const lowY = y(candle.low);
@@ -2723,10 +3095,48 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ctx.fillRect(x - bodyWidth / 2, top, bodyWidth, bodyHeight);
         });
 
+        INDICATORS.forEach((indicator) => {
+          const values = seriesByKey[indicator.key];
+          ctx.strokeStyle = indicator.color;
+          ctx.lineWidth = indicator.type === "vwma" ? 1.45 : 1.1;
+          ctx.beginPath();
+          let started = false;
+          for (let absoluteIndex = start; absoluteIndex < end; absoluteIndex += 1) {
+            const value = values[absoluteIndex];
+            if (!Number.isFinite(value)) {
+              started = false;
+              continue;
+            }
+            const x = padLeft + slot * (absoluteIndex - start) + slot / 2;
+            const yy = y(value);
+            if (!started) {
+              ctx.moveTo(x, yy);
+              started = true;
+            } else {
+              ctx.lineTo(x, yy);
+            }
+          }
+          ctx.stroke();
+        });
+
+        const latest = visible[visible.length - 1];
         ctx.fillStyle = "#a8a8a8";
         ctx.font = "11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText(numberText(maxPrice, 2), padX, 13);
-        ctx.fillText(numberText(minPrice, 2), padX, height - 6);
+        ctx.fillText(`${state.selectedSymbol} · ${numberText(latest.close, 2)}`, padLeft, 13);
+        ctx.fillText(timeText(latest.openTimeISO), padLeft, height - 7);
+        if (state.chart.rightOffset > 0) {
+          ctx.fillStyle = "#ff9f0a";
+          ctx.fillText(`${state.chart.rightOffset}봉 전`, width - padRight - 54, height - 7);
+        }
+
+        els.chartLegend.innerHTML = INDICATORS.map((indicator) => `
+          <span class="legend-item">
+            <span class="legend-swatch" style="background:${indicator.color}"></span>${escapeHTML(indicator.label)}
+          </span>
+        `).join("");
+        if (wrapper) {
+          wrapper.title = "드래그로 좌우 이동, 휠로 확대/축소, 더블클릭으로 최신 봉으로 복귀";
+        }
       };
 
       const renderPositions = () => {
@@ -2868,9 +3278,11 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         document.querySelector('[data-action="bitget-logout"]').hidden = !authenticated;
         if (!authenticated) {
           els.metrics.innerHTML = "";
+          els.lastEvaluation.innerHTML = "";
           return;
         }
         renderMetrics();
+        renderLastEvaluation();
         renderAutomation();
         renderStrategies();
         renderPositions();
@@ -2931,6 +3343,124 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         }
       };
 
+      const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(value, maximum));
+
+      const setupResizablePanels = () => {
+        applyLayout();
+        const root = document.documentElement;
+        const dashboard = document.querySelector(".dashboard");
+        const leftStack = document.querySelector(".left-stack");
+        const chartPanel = els.chartCanvas.closest(".panel");
+        document.querySelectorAll(".splitter[data-resize]").forEach((splitter) => {
+          splitter.addEventListener("pointerdown", (event) => {
+            if (window.matchMedia("(max-width: 900px)").matches) {
+              return;
+            }
+            event.preventDefault();
+            splitter.classList.add("dragging");
+            splitter.setPointerCapture(event.pointerId);
+            const mode = splitter.dataset.resize;
+            const move = (moveEvent) => {
+              if (mode === "columns" && dashboard) {
+                const rect = dashboard.getBoundingClientRect();
+                const width = clamp(moveEvent.clientX - rect.left, 360, rect.width - 320);
+                root.style.setProperty("--left-pane-width", `${width}px`);
+                saveLayout({ leftPaneWidth: Math.round(width) });
+              } else if (mode === "position-chart" && leftStack) {
+                const rect = leftStack.getBoundingClientRect();
+                const height = clamp(moveEvent.clientY - rect.top, 96, rect.height - 390);
+                root.style.setProperty("--position-pane-height", `${height}px`);
+                saveLayout({ positionPaneHeight: Math.round(height) });
+              } else if (mode === "chart-strategy" && chartPanel && leftStack) {
+                const chartRect = chartPanel.getBoundingClientRect();
+                const stackRect = leftStack.getBoundingClientRect();
+                const height = clamp(moveEvent.clientY - chartRect.top, 220, stackRect.bottom - chartRect.top - 150);
+                root.style.setProperty("--chart-pane-height", `${height}px`);
+                saveLayout({ chartPaneHeight: Math.round(height) });
+              }
+              renderChart();
+            };
+            const up = () => {
+              splitter.classList.remove("dragging");
+              splitter.removeEventListener("pointermove", move);
+              splitter.removeEventListener("pointerup", up);
+              splitter.removeEventListener("pointercancel", up);
+            };
+            splitter.addEventListener("pointermove", move);
+            splitter.addEventListener("pointerup", up);
+            splitter.addEventListener("pointercancel", up);
+          });
+        });
+      };
+
+      const chartSlotWidth = () => {
+        const candles = chartCandles();
+        const { start, end } = visibleChartWindow(candles);
+        const rect = els.chartCanvas.getBoundingClientRect();
+        const count = Math.max(end - start, 1);
+        return Math.max((rect.width - 74) / count, 2);
+      };
+
+      const clampChartViewport = () => {
+        const total = chartCandles().length;
+        state.chart.visibleCount = clamp(state.chart.visibleCount, 30, Math.max(total, 30));
+        const maxOffset = Math.max(total - state.chart.visibleCount, 0);
+        state.chart.rightOffset = clamp(state.chart.rightOffset, 0, maxOffset);
+      };
+
+      const setupChartInteractions = () => {
+        const wrapper = els.chartCanvas.parentElement;
+        if (!wrapper) {
+          return;
+        }
+        wrapper.addEventListener("pointerdown", (event) => {
+          if (!token()) {
+            return;
+          }
+          state.chart.dragging = true;
+          state.chart.lastX = event.clientX;
+          wrapper.setPointerCapture(event.pointerId);
+        });
+        wrapper.addEventListener("pointermove", (event) => {
+          if (!state.chart.dragging) {
+            return;
+          }
+          const deltaX = event.clientX - state.chart.lastX;
+          const slot = chartSlotWidth();
+          if (Math.abs(deltaX) >= slot) {
+            const candleDelta = Math.trunc(deltaX / slot);
+            state.chart.rightOffset += candleDelta;
+            state.chart.lastX = event.clientX;
+            clampChartViewport();
+            renderChart();
+          }
+        });
+        const endDrag = () => {
+          state.chart.dragging = false;
+        };
+        wrapper.addEventListener("pointerup", endDrag);
+        wrapper.addEventListener("pointercancel", endDrag);
+        wrapper.addEventListener("wheel", (event) => {
+          if (!token()) {
+            return;
+          }
+          event.preventDefault();
+          if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+            state.chart.rightOffset += Math.trunc(event.deltaX / 18);
+          } else {
+            state.chart.visibleCount += event.deltaY > 0 ? 12 : -12;
+          }
+          clampChartViewport();
+          renderChart();
+        }, { passive: false });
+        wrapper.addEventListener("dblclick", () => {
+          state.chart.rightOffset = 0;
+          state.chart.visibleCount = DEFAULT_CHART_VISIBLE;
+          clampChartViewport();
+          renderChart();
+        });
+      };
+
       els.loginForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const form = new FormData(els.loginForm);
@@ -2974,11 +3504,13 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           return;
         }
         state.selectedSymbol = String(event.target.value || "").toUpperCase();
+        state.chart.rightOffset = 0;
+        state.chart.visibleCount = DEFAULT_CHART_VISIBLE;
         setBusy(true);
         try {
           await guardedLoad(
             "candles",
-            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=240`)
+            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=1000`)
           );
           renderChart();
         } catch (error) {
@@ -3017,6 +3549,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             }
           } else if (action === "strategies-save") {
             await saveStrategies();
+          } else if (action === "strategy-detail") {
+            const card = button.closest(".strategy-item");
+            if (card) {
+              card.classList.toggle("expanded");
+              button.textContent = card.classList.contains("expanded") ? "접기" : "상세";
+            }
           }
         } catch (error) {
           if (error.status === 401) {
@@ -3029,6 +3567,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         }
       });
 
+      setupResizablePanels();
+      setupChartInteractions();
       render();
       refreshAll({ silent: true });
       window.setInterval(() => refreshAll({ silent: true }), REFRESH_MS);
@@ -4305,6 +4845,7 @@ class PaperRunner:
                     "timeframe": TIMEFRAME,
                     "enabled": strategy_id in enabled_set,
                     "backtest": STRATEGY_BACKTESTS.get(strategy_id),
+                    "parameters": self.safe_strategy_parameters(params),
                 })
         return {
             "available": available,
@@ -4313,6 +4854,19 @@ class PaperRunner:
             "updatedAt": selection.get("updatedAt"),
             "updatedBy": selection.get("updatedBy"),
         }
+
+    @staticmethod
+    def safe_strategy_parameters(params: dict[str, Any]) -> dict[str, Any]:
+        hidden = {"strategy_id", "name", "symbol"}
+        public: dict[str, Any] = {}
+        for key, value in params.items():
+            if key in hidden:
+                continue
+            if isinstance(value, Decimal):
+                public[key] = decimal_text(value)
+            elif isinstance(value, (str, int, float, bool)) or value is None:
+                public[key] = value
+        return public
 
     def save_strategy_selection(
         self,
@@ -4591,29 +5145,122 @@ class PaperRunner:
         produced_signal: bool,
         evaluated_at: datetime,
         skipped_reason: str | None = None,
-    ) -> None:
+        strategy_name: str | None = None,
+        signal_details: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         evaluated_keys = self.evaluated_keys_by_user.setdefault(user_id, set())
         if key in evaluated_keys:
-            return
+            return None
         evaluated_keys.add(key)
+        record = {
+            "evaluationKey": key,
+            "symbol": symbol,
+            "timeframe": TIMEFRAME,
+            "strategyID": strategy_id,
+            "strategyName": strategy_name or strategy_id,
+            "candleOpenTime": open_time,
+            "candleOpenTimeISO": open_time_iso(open_time),
+            "candleCloseTimeISO": open_time_iso(open_time + 15 * 60),
+            "producedSignal": produced_signal,
+            "skippedReason": skipped_reason,
+            "signal": signal_details if signal_details else None,
+            "evaluatedAt": iso(evaluated_at),
+        }
         self.append_jsonl(
             self.user_dir(user_id) / "paper-runner-evaluations.jsonl",
-            {
-                "evaluationKey": key,
-                "symbol": symbol,
-                "timeframe": TIMEFRAME,
-                "strategyID": strategy_id,
-                "candleOpenTime": open_time,
-                "candleOpenTimeISO": open_time_iso(open_time),
-                "producedSignal": produced_signal,
-                "skippedReason": skipped_reason,
-                "evaluatedAt": iso(evaluated_at),
-            },
+            record,
         )
+        return record
+
+    @staticmethod
+    def signal_evaluation_details(signal: Signal) -> dict[str, Any]:
+        return {
+            "side": signal.side,
+            "entry": decimal_text(signal.entry),
+            "stopLoss": decimal_text(signal.stop),
+            "partialTakeProfit": decimal_text(signal.partial_take_profit),
+            "takeProfit": decimal_text(signal.take_profit),
+            "leverage": signal.leverage,
+            "rewardRiskRatio": decimal_text(signal.reward_risk_ratio) if signal.reward_risk_ratio else None,
+            "reason": signal.reason,
+        }
+
+    @staticmethod
+    def evaluation_summary(records: list[dict[str, Any]], failures: list[str] | None = None) -> dict[str, Any] | None:
+        if not records:
+            return None
+        latest_open_time = max(int(record.get("candleOpenTime") or 0) for record in records)
+        latest_records = [
+            record for record in records
+            if int(record.get("candleOpenTime") or 0) == latest_open_time
+        ]
+        if not latest_records:
+            return None
+        signal_records = [record for record in latest_records if bool(record.get("producedSignal"))]
+        skipped_records = [record for record in latest_records if record.get("skippedReason")]
+        evaluated_records = [record for record in latest_records if not record.get("skippedReason")]
+        if signal_records:
+            headline = f"신호 {len(signal_records)}개 발생"
+        elif skipped_records and not evaluated_records:
+            headline = "평가 건너뜀"
+        else:
+            headline = "신호 없음"
+        if failures:
+            headline = f"{headline} · 확인 필요 {len(failures)}"
+        return {
+            "headline": headline,
+            "candleOpenTime": latest_open_time,
+            "candleOpenTimeISO": open_time_iso(latest_open_time),
+            "candleCloseTimeISO": open_time_iso(latest_open_time + 15 * 60),
+            "evaluatedAt": max(str(record.get("evaluatedAt") or "") for record in latest_records),
+            "evaluatedCount": len(evaluated_records),
+            "skippedCount": len(skipped_records),
+            "signalCount": len(signal_records),
+            "failureCount": len(failures or []),
+            "failures": list(failures or [])[:3],
+            "items": [
+                {
+                    "symbol": str(record.get("symbol") or ""),
+                    "timeframe": str(record.get("timeframe") or TIMEFRAME),
+                    "strategyID": str(record.get("strategyID") or ""),
+                    "strategyName": str(record.get("strategyName") or record.get("strategyID") or ""),
+                    "producedSignal": bool(record.get("producedSignal")),
+                    "skippedReason": record.get("skippedReason"),
+                    "signal": record.get("signal") if isinstance(record.get("signal"), dict) else None,
+                    "evaluatedAt": record.get("evaluatedAt"),
+                }
+                for record in latest_records[:20]
+            ],
+        }
+
+    def load_latest_evaluation_summary(self, user_id: str) -> dict[str, Any] | None:
+        path = self.user_dir(user_id) / "paper-runner-evaluations.jsonl"
+        if not path.exists():
+            return None
+        records: list[dict[str, Any]] = []
+        latest_open_time: int | None = None
+        for line in reversed(path.read_text(encoding="utf-8").splitlines()):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            try:
+                candle_open_time = int(record.get("candleOpenTime") or 0)
+            except (TypeError, ValueError):
+                continue
+            if latest_open_time is None:
+                latest_open_time = candle_open_time
+            if candle_open_time != latest_open_time:
+                break
+            records.append(record)
+        records.reverse()
+        return self.evaluation_summary(records)
 
     def load_status(self, user_id: str) -> dict[str, Any]:
         user_directory = self.user_dir(user_id)
-        return read_json_file(
+        status = read_json_file(
             user_directory / "paper-runner-status.json",
             {
                 "updatedAt": None,
@@ -4629,8 +5276,12 @@ class PaperRunner:
                 "storagePath": str(user_directory),
                 "marketStoragePath": str(self.data_dir),
                 "strategies": self.strategy_status(user_id),
+                "lastEvaluation": None,
             },
         )
+        if not status.get("lastEvaluation"):
+            status["lastEvaluation"] = self.load_latest_evaluation_summary(user_id)
+        return status
 
     def load_control(self, user_id: str) -> dict[str, Any]:
         control = read_json_file(self.user_dir(user_id) / "paper-runner-control.json", {})
@@ -4845,6 +5496,7 @@ class PaperRunner:
                 failures.append(private_failure)
             private_snapshot = self.load_private_snapshot(user_id)
             live_candidates: list[tuple[Signal, int, datetime, str]] = []
+            evaluation_records: list[dict[str, Any]] = []
 
             for symbol, closed_candles in closed_candles_by_symbol.items():
                 latest_closed = closed_candles[-1]
@@ -4857,7 +5509,7 @@ class PaperRunner:
                         continue
                     if not strategy_enabled:
                         skipped_evaluations += 1
-                        self.mark_evaluated(
+                        record = self.mark_evaluated(
                             user_id,
                             key,
                             symbol,
@@ -4866,7 +5518,10 @@ class PaperRunner:
                             produced_signal=False,
                             evaluated_at=now_utc(),
                             skipped_reason="paper runner disabled",
+                            strategy_name=str(params.get("name") or strategy_id),
                         )
+                        if record:
+                            evaluation_records.append(record)
                         continue
                     evaluations += 1
                     evaluated_at = now_utc()
@@ -4876,7 +5531,19 @@ class PaperRunner:
                             signals += 1
                             self.record_signal(user_id, signal, latest_closed.open_time, evaluated_at)
                             live_candidates.append((signal, latest_closed.open_time, evaluated_at, strategy_id))
-                        self.mark_evaluated(user_id, key, symbol, strategy_id, latest_closed.open_time, signal is not None, evaluated_at)
+                        record = self.mark_evaluated(
+                            user_id,
+                            key,
+                            symbol,
+                            strategy_id,
+                            latest_closed.open_time,
+                            signal is not None,
+                            evaluated_at,
+                            strategy_name=str(params.get("name") or strategy_id),
+                            signal_details=self.signal_evaluation_details(signal) if signal else None,
+                        )
+                        if record:
+                            evaluation_records.append(record)
                     except Exception as error:
                         failures.append(f"{symbol} {strategy_id}: {error}")
 
@@ -4919,6 +5586,11 @@ class PaperRunner:
                 "control": control,
                 "live": self.live_status(user_id),
                 "strategies": self.strategy_status(user_id),
+                "lastEvaluation": (
+                    self.evaluation_summary(evaluation_records, failures)
+                    if evaluation_records
+                    else self.load_latest_evaluation_summary(user_id)
+                ),
                 "privateSnapshot": {
                     "updatedAt": private_snapshot.get("updatedAt"),
                     "accountCount": private_snapshot.get("accountCount", 0),
