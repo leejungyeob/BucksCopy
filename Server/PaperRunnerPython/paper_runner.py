@@ -1023,13 +1023,41 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             raw_limit = str(query.get("limit", [None])[0] or "100").strip().lower()
             all_candles = raw_limit in {"0", "all", "full", "none", "unlimited"}
             limit = None if all_candles else clamp_int(raw_limit, default=100, minimum=1, maximum=1_000_000)
+            before_raw = query.get("before", query.get("beforeOpenTime", [None]))[0]
             if symbol not in self.runner.symbols:
                 self.write_json({"error": "symbol is not configured for this runner"}, HTTPStatus.BAD_REQUEST)
                 return
             loaded_candles = self.runner.load_candles(symbol)
-            selected_candles = loaded_candles if limit is None else loaded_candles[-limit:]
+            end_index = len(loaded_candles)
+            if before_raw not in {None, ""}:
+                try:
+                    before_open_time = int(str(before_raw))
+                except ValueError:
+                    self.write_json({"error": "before must be a candle openTime integer"}, HTTPStatus.BAD_REQUEST)
+                    return
+                for index, candle in enumerate(loaded_candles):
+                    if candle.open_time >= before_open_time:
+                        end_index = index
+                        break
+            start_index = 0 if limit is None else max(0, end_index - limit)
+            selected_candles = loaded_candles[start_index:end_index]
             candles = [candle.to_record() for candle in selected_candles]
-            self.write_json({"symbol": symbol, "timeframe": TIMEFRAME, "items": candles, "limit": limit or 0})
+            oldest = selected_candles[0].open_time if selected_candles else None
+            newest = selected_candles[-1].open_time if selected_candles else None
+            self.write_json({
+                "symbol": symbol,
+                "timeframe": TIMEFRAME,
+                "items": candles,
+                "limit": limit or 0,
+                "returned": len(candles),
+                "totalAvailable": len(loaded_candles),
+                "hasMoreBefore": start_index > 0,
+                "hasMoreAfter": end_index < len(loaded_candles),
+                "oldestOpenTime": oldest,
+                "oldestOpenTimeISO": open_time_iso(oldest) if oldest else None,
+                "newestOpenTime": newest,
+                "newestOpenTimeISO": open_time_iso(newest) if newest else None,
+            })
             return
         if action == "account":
             try:
@@ -1695,9 +1723,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       grid-template-rows:
         minmax(96px, var(--position-pane-height, 150px))
         8px
-        minmax(220px, 1fr)
+        minmax(220px, var(--chart-pane-height, 420px))
         8px
-        minmax(150px, var(--strategy-pane-height, 230px));
+        310px;
     }
     .right-stack { min-height: calc(100vh - 184px); }
     .trade-log-panel {
@@ -2294,6 +2322,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       const REFRESH_MS = 60000;
       const DEFAULT_CHART_VISIBLE = 160;
       const MIN_CHART_VISIBLE = 5;
+      const CHART_CANDLE_PAGE_LIMIT = 2000;
+      const CHART_PREFETCH_THRESHOLD = 240;
       const INDICATORS = [
         { key: "ma25", label: "MA25", period: 25, color: "#ff9f0a", type: "sma" },
         { key: "ma50", label: "MA50", period: 50, color: "#32d74b", type: "sma" },
@@ -2354,6 +2384,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           zoomRemainder: 0,
           priceOffsetRatio: 0,
           priceScaleRatio: 1,
+          loadingMore: false,
           activePointers: new Map(),
           pinchDistance: 0,
           pinchVisibleCount: DEFAULT_CHART_VISIBLE,
@@ -2604,6 +2635,50 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         }
       };
 
+      const chartCandlePath = (symbol, beforeOpenTime = null) => {
+        const params = new URLSearchParams({
+          symbol: String(symbol || "").toUpperCase(),
+          limit: String(CHART_CANDLE_PAGE_LIMIT)
+        });
+        if (beforeOpenTime) {
+          params.set("before", String(beforeOpenTime));
+        }
+        return `/users/me/candles?${params.toString()}`;
+      };
+
+      const sortedCandleItems = (items) => [...(items || [])]
+        .filter((item) => Number.isFinite(Number(item.openTime)))
+        .sort((first, second) => Number(first.openTime) - Number(second.openTime));
+
+      const normalizedCandleResponse = (response) => ({
+        ...response,
+        items: sortedCandleItems(response?.items || [])
+      });
+
+      const mergeCandleResponse = (response) => {
+        const current = normalizedCandleResponse(state.candles || {});
+        const incoming = normalizedCandleResponse(response || {});
+        const byOpenTime = new Map();
+        [...current.items, ...incoming.items].forEach((item) => {
+          byOpenTime.set(String(item.openTime), item);
+        });
+        const items = sortedCandleItems([...byOpenTime.values()]);
+        const oldest = items[0]?.openTime || null;
+        const newest = items[items.length - 1]?.openTime || null;
+        state.candles = {
+          ...current,
+          ...incoming,
+          items,
+          returned: items.length,
+          oldestOpenTime: oldest,
+          oldestOpenTimeISO: items[0]?.openTimeISO || null,
+          newestOpenTime: newest,
+          newestOpenTimeISO: items[items.length - 1]?.openTimeISO || null,
+          hasMoreBefore: Boolean(incoming.hasMoreBefore),
+          hasMoreAfter: Boolean(current.hasMoreAfter || incoming.hasMoreAfter)
+        };
+      };
+
       const rawLivePositions = () => (state.positions?.items || []).filter((position) => (
         Number(position.total || position.available || 0) !== 0
       ));
@@ -2716,8 +2791,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         if (layout.positionPaneHeight) {
           root.style.setProperty("--position-pane-height", `${layout.positionPaneHeight}px`);
         }
-        if (layout.strategyPaneHeight) {
-          root.style.setProperty("--strategy-pane-height", `${layout.strategyPaneHeight}px`);
+        if (layout.chartPaneHeight) {
+          root.style.setProperty("--chart-pane-height", `${layout.chartPaneHeight}px`);
         }
       };
 
@@ -2931,7 +3006,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ensureSelectedSymbol();
           await guardedLoad(
             "candles",
-            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=0`)
+            async () => normalizedCandleResponse(await api(chartCandlePath(state.selectedSymbol)))
           );
           state.lastUpdated = new Date();
           render();
@@ -3176,7 +3251,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         ctx.fillStyle = "#151515";
         ctx.fillRect(0, 0, width, height);
 
-        const { start, renderStart, renderEnd, visibleCount } = visibleChartWindow(candles);
+        const viewport = visibleChartWindow(candles);
+        maybeLoadOlderChartCandles(viewport);
+        const { start, renderStart, renderEnd, visibleCount } = viewport;
         const visible = candles.slice(renderStart, renderEnd);
         const seriesByKey = Object.fromEntries(
           INDICATORS.map((indicator) => [
@@ -3566,11 +3643,16 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
                 root.style.setProperty("--position-pane-height", `${height}px`);
                 saveLayout({ positionPaneHeight: Math.round(height) });
               } else if (mode === "chart-strategy" && leftStack) {
+                const chartPanel = els.chartCanvas.closest(".panel");
+                if (!chartPanel) {
+                  return;
+                }
+                const chartRect = chartPanel.getBoundingClientRect();
                 const stackRect = leftStack.getBoundingClientRect();
-                const maxHeight = Math.max(150, stackRect.height - 330);
-                const height = clamp(stackRect.bottom - moveEvent.clientY, 150, maxHeight);
-                root.style.setProperty("--strategy-pane-height", `${height}px`);
-                saveLayout({ strategyPaneHeight: Math.round(height) });
+                const maxHeight = Math.max(420, stackRect.bottom - chartRect.top - 270);
+                const height = clamp(moveEvent.clientY - chartRect.top, 220, maxHeight);
+                root.style.setProperty("--chart-pane-height", `${height}px`);
+                saveLayout({ chartPaneHeight: Math.round(height) });
               }
               renderChart();
             };
@@ -3585,6 +3667,43 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             splitter.addEventListener("pointercancel", up);
           });
         });
+      };
+
+      const loadOlderChartCandles = async () => {
+        if (state.chart.loadingMore || !state.candles?.hasMoreBefore || !token()) {
+          return;
+        }
+        const candles = chartCandles();
+        const oldestOpenTime = candles[0]?.openTime;
+        if (!oldestOpenTime) {
+          return;
+        }
+        state.chart.loadingMore = true;
+        try {
+          const response = await api(chartCandlePath(state.selectedSymbol, oldestOpenTime));
+          mergeCandleResponse(response);
+          state.chart.loadingMore = false;
+          renderChart();
+        } catch (error) {
+          if (error.status === 401) {
+            clearSession();
+            render();
+            setNotice("Bitget 세션이 만료되었습니다.", "error");
+          } else {
+            setNotice(error.message || "과거 캔들 로딩 실패", "error");
+          }
+        } finally {
+          state.chart.loadingMore = false;
+        }
+      };
+
+      const maybeLoadOlderChartCandles = (viewport) => {
+        if (!viewport || !state.candles?.hasMoreBefore || state.chart.loadingMore) {
+          return;
+        }
+        if (viewport.start <= CHART_PREFETCH_THRESHOLD) {
+          void loadOlderChartCandles();
+        }
       };
 
       const chartSlotWidth = () => {
@@ -3859,7 +3978,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         try {
           await guardedLoad(
             "candles",
-            () => api(`/users/me/candles?symbol=${encodeURIComponent(state.selectedSymbol)}&limit=0`)
+            async () => normalizedCandleResponse(await api(chartCandlePath(state.selectedSymbol)))
           );
           renderChart();
         } catch (error) {
