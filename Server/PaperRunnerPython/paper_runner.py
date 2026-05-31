@@ -2295,7 +2295,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           lastY: 0,
           dragMode: "",
           wheelRemainder: 0,
-          zoomRemainder: 0
+          zoomRemainder: 0,
+          priceOffsetRatio: 0
         },
         errors: {},
         redactedIdentifier: "",
@@ -3091,7 +3092,9 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         const upper = Math.max(maxPrice, indicatorMax);
         const lower = Math.min(minPrice, indicatorMin);
         const range = Math.max(upper - lower, upper * 0.001, 1);
-        const y = (price) => padTop + ((upper - price) / range) * chartHeight;
+        const priceOffset = Number(state.chart.priceOffsetRatio || 0) * range;
+        const viewUpper = upper + priceOffset;
+        const y = (price) => padTop + ((viewUpper - price) / range) * chartHeight;
 
         ctx.strokeStyle = "#2c2c2c";
         ctx.lineWidth = 1;
@@ -3101,7 +3104,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ctx.moveTo(padLeft, gy);
           ctx.lineTo(width - padRight, gy);
           ctx.stroke();
-          const price = upper - (range / 4) * i;
+          const price = viewUpper - (range / 4) * i;
           ctx.fillStyle = "#8e8e93";
           ctx.font = "10px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
           ctx.fillText(numberText(price, 2), width - padRight + 8, gy + 3);
@@ -3166,14 +3169,13 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ctx.fillStyle = "#8e8e93";
           ctx.fillText(`${Math.abs(state.chart.rightOffset)}봉 여백`, width - padRight - 58, height - 7);
         }
-
         els.chartLegend.innerHTML = INDICATORS.map((indicator) => `
           <span class="legend-item">
             <span class="legend-swatch" style="background:${indicator.color}"></span>${escapeHTML(indicator.label)}
           </span>
         `).join("");
         if (wrapper) {
-          wrapper.title = "차트 패널 어디서든 드래그 이동, 두 손가락 좌우 이동, 두 손가락 위/아래 확대/축소, 더블클릭으로 최신 봉 복귀";
+          wrapper.title = "차트 패널 어디서든 상하좌우 드래그 이동, 두 손가락 좌우 이동, 두 손가락 위/아래 확대/축소, 더블클릭으로 최신 봉 복귀";
         }
       };
 
@@ -3469,6 +3471,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       const resetChartViewport = () => {
         state.chart.rightOffset = 0;
         state.chart.visibleCount = DEFAULT_CHART_VISIBLE;
+        state.chart.priceOffsetRatio = 0;
         state.chart.wheelRemainder = 0;
         state.chart.zoomRemainder = 0;
         clampChartViewport();
@@ -3505,11 +3508,23 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           }
           event.preventDefault();
           const slot = chartSlotWidth();
+          let changed = false;
           if (Math.abs(deltaX) >= slot) {
             const candleDelta = Math.trunc(deltaX / slot);
             state.chart.lastX = event.clientX;
+            state.chart.rightOffset += candleDelta;
+            changed = true;
+          }
+          if (Math.abs(deltaY) >= 1) {
+            const rect = els.chartCanvas.getBoundingClientRect();
+            const chartHeight = Math.max(rect.height - 42, 1);
+            state.chart.priceOffsetRatio += deltaY / chartHeight;
             state.chart.lastY = event.clientY;
-            panChartByCandles(candleDelta);
+            changed = true;
+          }
+          if (changed) {
+            clampChartViewport();
+            renderChart();
           }
         });
         const endDrag = () => {
@@ -3589,6 +3604,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         state.selectedSymbol = String(event.target.value || "").toUpperCase();
         state.chart.rightOffset = 0;
         state.chart.visibleCount = DEFAULT_CHART_VISIBLE;
+        state.chart.priceOffsetRatio = 0;
         setBusy(true);
         try {
           await guardedLoad(
