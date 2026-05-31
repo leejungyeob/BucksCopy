@@ -2543,9 +2543,59 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         }
       };
 
-      const livePositions = () => (state.positions?.items || []).filter((position) => (
+      const rawLivePositions = () => (state.positions?.items || []).filter((position) => (
         Number(position.total || position.available || 0) !== 0
       ));
+
+      const nonEmptyValue = (value) => {
+        const text = String(value ?? "").trim();
+        return text && text !== "0" ? text : "";
+      };
+
+      const normalizedPositionSide = (value) => {
+        const text = String(value || "").toLowerCase();
+        if (text === "buy" || text === "long") {
+          return "long";
+        }
+        if (text === "sell" || text === "short") {
+          return "short";
+        }
+        return text;
+      };
+
+      const latestLiveEntryDetailsForPosition = (position) => {
+        const symbol = String(position.symbol || "").toUpperCase();
+        const positionSide = normalizedPositionSide(position.holdSide);
+        const logs = state.logs?.items || [];
+        for (const item of logs.slice().reverse()) {
+          if (String(item.category || "") !== "liveOrder") {
+            continue;
+          }
+          if (String(item.symbol || "").toUpperCase() !== symbol) {
+            continue;
+          }
+          const details = item.metadata?.details || {};
+          const detailSide = normalizedPositionSide(details.side);
+          if (positionSide && detailSide && positionSide !== detailSide) {
+            continue;
+          }
+          return details;
+        }
+        return {};
+      };
+
+      const enrichedPosition = (position) => {
+        const details = latestLiveEntryDetailsForPosition(position);
+        return {
+          ...position,
+          openPriceAvg: nonEmptyValue(position.openPriceAvg) || nonEmptyValue(details.entry) || position.openPriceAvg,
+          partialTakeProfit: nonEmptyValue(position.partialTakeProfit) || nonEmptyValue(details.tp1) || nonEmptyValue(details.partialTakeProfit),
+          takeProfit: nonEmptyValue(position.takeProfit) || nonEmptyValue(details.tp2) || nonEmptyValue(details.takeProfit) || position.takeProfit,
+          stopLoss: nonEmptyValue(position.stopLoss) || nonEmptyValue(details.stopLoss) || position.stopLoss
+        };
+      };
+
+      const livePositions = () => rawLivePositions().map(enrichedPosition);
 
       const currentUnrealizedPnl = () => livePositions()
         .reduce((sum, position) => sum + (Number(position.unrealizedPL) || 0), 0);
@@ -3156,6 +3206,47 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           }
           ctx.stroke();
         });
+
+        const drawLevelLine = (label, price, color, dash = []) => {
+          const numeric = Number(price);
+          if (!Number.isFinite(numeric) || numeric <= 0) {
+            return;
+          }
+          const yy = y(numeric);
+          if (yy < padTop - 28 || yy > padTop + chartHeight + 28) {
+            return;
+          }
+          const text = `${label} ${numberText(numeric, 2)}`;
+          const labelY = Math.max(padTop + 10, Math.min(yy - 4, height - padBottom - 5));
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.setLineDash(dash);
+          ctx.beginPath();
+          ctx.moveTo(padLeft, yy);
+          ctx.lineTo(width - padRight, yy);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "10px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+          const labelWidth = Math.min(ctx.measureText(text).width + 10, chartWidth - 10);
+          ctx.globalAlpha = 0.78;
+          ctx.fillStyle = "#151515";
+          ctx.fillRect(padLeft + 4, labelY - 11, labelWidth, 15);
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = color;
+          ctx.fillText(text, padLeft + 8, labelY);
+          ctx.restore();
+        };
+
+        livePositions()
+          .filter((position) => String(position.symbol || "").toUpperCase() === state.selectedSymbol)
+          .forEach((position) => {
+            drawLevelLine("현재", position.markPrice, "#f2f2f7", [2, 4]);
+            drawLevelLine("진입", position.openPriceAvg, "#ffcc00");
+            drawLevelLine("TP1", position.partialTakeProfit, "#30d158", [6, 4]);
+            drawLevelLine("TP2", position.takeProfit, "#35d06f");
+            drawLevelLine("SL", position.stopLoss, "#ff453a");
+          });
 
         const latest = visible[visible.length - 1];
         ctx.fillStyle = "#a8a8a8";
@@ -5456,7 +5547,7 @@ class PaperRunner:
             handle.write("\n")
 
     def atomic_write_json(self, path: Path, record: Any, pretty: bool = False) -> None:
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         text = json.dumps(
             record,
             ensure_ascii=False,
@@ -5464,8 +5555,14 @@ class PaperRunner:
             indent=2 if pretty else None,
             separators=None if pretty else (",", ":"),
         )
-        tmp_path.write_text(text + "\n", encoding="utf-8")
-        tmp_path.replace(path)
+        try:
+            tmp_path.write_text(text + "\n", encoding="utf-8")
+            tmp_path.replace(path)
+        finally:
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
 
     def record_signal(self, user_id: str, signal: Signal, candle_open_time: int, generated_at: datetime) -> None:
         ratio = signal.reward_risk_ratio
