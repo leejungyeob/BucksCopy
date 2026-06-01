@@ -12,10 +12,10 @@
 | --- | --- | --- | --- |
 | 단순 질의응답 | 메인 에이전트 | 가능 | 답변으로 종료 |
 | 짧은 문서/오타 | 메인 에이전트 | 가능 | 좁은 diff + 최소 확인 |
-| macOS 구조/파일 위치 | `bucks-copy-macos-structure` | 가능 | 경로와 이유 제시 |
+| server runner 구조/파일 위치 | `bucks-copy-trading-engine` | 가능 | 경로와 이유 제시 |
 | Bitget REST/WS 연동 | L1 -> Architect -> Security -> TDD Guide -> Code Reviewer | 보통 비권장 | DTO/auth/reconnect/rate-limit/검증 반영 |
 | USDT-M symbol catalog / Watchlist | L1 -> Architect -> Security -> TDD Guide -> Code Reviewer | 조건부 | 후보 필터 + Watchlist-only 구독/매매 검증 |
-| API credential/Keychain | L1 -> Architect -> Security -> TDD Guide -> Code Reviewer | 비권장 | secret 저장/삭제/로그 검증 |
+| API credential/storage | L1 -> Architect -> Security -> TDD Guide -> Code Reviewer | 비권장 | secret 저장/삭제/로그 검증 |
 | candle/strategy/trading engine | L1 -> Architect -> TDD Guide -> Code Reviewer | 조건부 | deterministic acceptance + edge case |
 | live execution policy | L1 -> Architect -> Security -> TDD Guide -> Doc Writer -> Code Reviewer | 비권장 | decision log + 보안/테스트 기준 |
 | build/generate break | L1 -> Build Fixer -> Code Reviewer | 비권장 | build/generate 복구 |

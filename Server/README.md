@@ -2,13 +2,13 @@
 
 ## 한글 요약
 
-- 현재 서버 단계는 실거래가 아니라 `paper-runner`입니다.
-- runner는 Bitget public REST로 `15m` candle을 받아 공용 JSON 파일에 저장하고, 사용자별 paper 상태/control/log를 분리합니다.
+- 현재 실전 기준 엔진은 `Server/PaperRunnerPython/paper_runner.py`입니다.
+- runner는 Bitget public REST로 `15m` candle을 받아 공용 JSON 파일에 저장하고, 사용자별 상태/control/log를 분리합니다.
 - 저장 기본값은 개수 제한 없음(`BUCKS_COPY_CANDLE_LIMIT=0`)입니다. 1회 fetch는 Bitget API 한도 때문에 최대 `1000`개로 나누고, 오래된 candle은 history backfill로 여러 페이지를 이어 받습니다.
 - Bitget API key, secret, passphrase는 `/auth/bitget/login` 후 서버 메모리에 올리고, `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY`가 설정된 운영 환경에서는 AES-256-GCM으로 암호화해 사용자별 파일에 저장합니다.
 - Bitget credential 원문, 서명 payload, private response 원문은 디스크/env/log에 저장하지 않습니다.
 
-## Paper Runner
+## Runtime Runner
 
 Local one-shot check:
 
@@ -67,8 +67,8 @@ curl -X POST http://127.0.0.1:8787/users/me/control \
 curl http://127.0.0.1:8787/users/me/live/status
 ```
 
-To point the macOS app at the server without exposing the API publicly, keep an
-SSH tunnel open on the Mac:
+For local server-only checks without exposing the API publicly, keep an SSH
+tunnel open from the client machine:
 
 ```bash
 ssh -L 8787:127.0.0.1:8787 ubuntu@<server-public-ip>
@@ -128,11 +128,11 @@ BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY=<generated-random-key>
 When this key is set, `/auth/bitget/login` stores each Bitget credential as
 `users/{userID}/bitget-credential.enc.json` using AES-256-GCM. The runner
 restores those credentials on container restart so account/position reads and
-future server-side automation can continue without the Mac app staying open.
+future server-side automation can continue without any local desktop client.
 The `.env` file and encrypted credential files must stay on the server and must
 not be committed.
 
-The macOS app reads:
+Browser/API clients use:
 
 ```bash
 BUCKS_COPY_SERVER_API_BASE_URL=http://127.0.0.1:8787
@@ -141,7 +141,7 @@ BUCKS_COPY_SERVER_API_TOKEN=<token>
 
 ## Public HTTPS API
 
-The public API mode is for using the app without an SSH tunnel. It requires a
+The public API mode is for using the server without an SSH tunnel. It requires a
 real DNS name pointing to the Lightsail static IP. Do not expose the raw
 `8787` port to the internet.
 
@@ -204,7 +204,7 @@ Expected result:
 - `/users/me/status` without token: `401`
 - `/users/me/status` with token: `200 OK`
 
-The macOS app server URL becomes:
+The browser/server API base URL becomes:
 
 ```text
 https://api.example.com
@@ -214,7 +214,7 @@ Only `/health`, `/auth/bitget/login`, and `/users/me/*` are proxied by Caddy.
 Legacy local routes such as `/status`, `/control`, `/logs`, and `/candles`
 remain available only through the server-local `127.0.0.1:8787` bind.
 
-The app login flow posts Bitget API key, secret, and passphrase to:
+The web login flow posts Bitget API key, secret, and passphrase to:
 
 ```bash
 curl -X POST https://api.example.com/auth/bitget/login \
@@ -224,12 +224,12 @@ curl -X POST https://api.example.com/auth/bitget/login \
 
 The runner validates the credential with Bitget USDT-M Futures account read,
 creates or reuses a user-scoped bearer token in `auth-users.json`, and returns
-that app session token. If `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` is set, the
+that browser/API session token. If `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` is set, the
 runner also writes an AES-256-GCM encrypted credential record under the user
 directory and restores it on restart. Without that key, credentials remain
 memory-only.
 
-After a successful login, the app can use the server session token to read:
+After a successful login, the browser client can use the server session token to read:
 
 ```bash
 curl https://api.example.com/users/me/account \
@@ -246,7 +246,7 @@ restored Bitget credential. The snapshot is stored as:
 users/{userID}/private-snapshot.json
 ```
 
-This file contains only normalized account and position fields used by the app,
+This file contains only normalized account and position fields used by the web UI,
 not raw Bitget private responses, signatures, headers, API secret, or
 passphrase.
 
@@ -293,7 +293,7 @@ BUCKS_COPY_LIVE_POSITION_MODE=hedge
 to 100% of current USDT available balance, still capped by
 `BUCKS_COPY_LIVE_ORDER_MARGIN_USDT` and Bitget contract minimum/step rules.
 
-To log out and revoke the current app session token:
+To log out and revoke the current browser/API session token:
 
 ```bash
 curl -X DELETE https://api.example.com/users/me/session \
@@ -305,9 +305,9 @@ encrypted credential file for that user. User-scoped paper runner files remain
 on disk.
 
 If `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` is not configured and the container
-restarts, `auth-users.json` can still recognize the app session token, but the
+restarts, `auth-users.json` can still recognize the browser/API session token, but the
 in-memory Bitget credential is gone. In that case private account/position reads
-return `409` and the app asks for Bitget login again.
+return `409` and the client must perform Bitget login again.
 
 If the mounted data/log folders were created by an earlier container attempt
 with restrictive permissions, reset ownership once:
@@ -341,7 +341,7 @@ The runner writes JSON/JSONL files under `BUCKS_COPY_DATA_DIR`:
 - Bitget API key, secret, and passphrase are process-memory only unless
   `BUCKS_COPY_CREDENTIAL_ENCRYPTION_KEY` enables AES-256-GCM encrypted
   user-scoped credential storage.
-- `DELETE /users/me/session` revokes the app bearer token and clears the
+- `DELETE /users/me/session` revokes the browser/API bearer token and clears the
   process-memory and encrypted Bitget credential for that user.
 - No WebSocket private login.
 - No order placement by default. Production `.env` must explicitly opt in with

@@ -8,12 +8,11 @@
 
 ## 언제 쓰는가
 
-- App 내부 구현을 Presentation/Domain/Data 경계로 이동할 때
-- Bitget 연동 코드를 raw adapter와 repository로 분리할 때
-- USDT-M Futures symbol catalog와 Watchlist 책임을 Presentation/Domain/Data로 분리할 때
-- candle/strategy/trading execution을 테스트 가능한 Domain/Data 경계로 분리할 때
-- local market history 저장소와 startup gap fill을 Data adapter 뒤로 숨길 때
-- Tuist target wiring 또는 module boundary를 정리할 때
+- server runner 내부 책임을 runtime strategy, backtest, Bitget integration 경계로 분리할 때
+- Bitget 연동 코드를 credential/auth/order/candle 책임별로 정리할 때
+- candle/strategy/trading execution을 테스트 가능한 Python runner 경계로 분리할 때
+- server market history 저장소와 startup gap fill을 runner 경계에서 정리할 때
+- test harness 또는 deployment script 구조를 정리할 때
 
 ## 기본 절차
 

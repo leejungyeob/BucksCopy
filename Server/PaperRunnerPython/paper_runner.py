@@ -406,44 +406,7 @@ DEFAULT_OWNER_STRATEGY_IDS = (
     ETH_PULSE_PARAMS["strategy_id"],
 )
 
-STRATEGY_BACKTESTS = {
-    "btc-15m-vacuum-pulse": {
-        "label": "최근 4년 · 10x · 5% risk",
-        "netReturnPercent": "+708.64",
-        "winRatePercent": "51.28",
-        "maxDrawdownPercent": "33.77",
-        "profitFactor": "1.59",
-        "totalTrades": 156,
-        "annualTrades": "39.03",
-    },
-    "btc-15m-regime-session-fade": {
-        "label": "최근 4년 · 10x · 5% risk",
-        "netReturnPercent": "+718824.26",
-        "winRatePercent": "58.91",
-        "maxDrawdownPercent": "33.16",
-        "profitFactor": "1.78",
-        "totalTrades": 696,
-        "annualTrades": "174.2",
-    },
-    "btc-15m-bull-pullback-long": {
-        "label": "최근 4년 · 10x · 5% risk",
-        "netReturnPercent": "+2054.93",
-        "winRatePercent": "68.21",
-        "maxDrawdownPercent": "21.91",
-        "profitFactor": "2.66",
-        "totalTrades": 173,
-        "annualTrades": "43.3",
-    },
-    "eth-15m-vacuum-pulse": {
-        "label": "최근 4년 · 10x · 5% risk",
-        "netReturnPercent": "+537.45",
-        "winRatePercent": "49.15",
-        "maxDrawdownPercent": "22.00",
-        "profitFactor": "1.47",
-        "totalTrades": 118,
-        "annualTrades": "29.52",
-    },
-}
+STRATEGY_BACKTESTS: dict[str, dict[str, str]] = {}
 
 
 def simple_moving_average(candles: list[Candle], period: int, ending_at: int | None = None) -> Decimal | None:

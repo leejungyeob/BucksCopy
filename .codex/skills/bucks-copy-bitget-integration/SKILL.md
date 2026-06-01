@@ -22,9 +22,9 @@ description: >
 - Use Classic Futures v2 mix API for v1.
 - Treat USDT-M Futures as `productType=USDT-FUTURES`.
 - Use official Bitget docs for endpoint and signature details.
-- Keep credential storage in Keychain-facing Data adapter code.
-- Keep REST/WS DTOs in Data and map into Domain contracts.
-- Use local market history storage for Watchlist candle seeding and startup gap fill.
+- Keep credential storage in server memory or AES-256-GCM encrypted user credential files.
+- Keep REST/WS payload normalization inside the server runner boundary.
+- Use server market history storage for Watchlist candle seeding and startup gap fill.
 - Implement ping/pong, reconnect, and rate-limit handling for WebSocket work.
 - Load contract config from `GET /api/v2/mix/market/contracts`.
 - Expose only `symbolStatus=normal` symbols with `USDT` in `supportMarginCoins` as Watchlist candidates.

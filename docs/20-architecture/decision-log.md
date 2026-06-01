@@ -837,3 +837,21 @@
   - 앱을 꺼도 서버는 저장된 user strategy selection을 기준으로 자동매매 평가를 계속합니다.
   - 사용자는 전략별 백테스트 결과를 보면서 여러 전략을 켜고 끌 수 있으며, 최소 1개 전략은 항상 유지됩니다.
   - registry에 남은 pruned strategy는 백테스트/연구에는 사용 가능하지만 live route에는 명시적으로 재활성화하기 전까지 들어가지 않습니다.
+
+## 0047. Runtime Strategy Engine Is Python Server Runner
+
+- Status: accepted
+- Date: 2026-06-01
+- Context:
+  - 실거래는 서버 `paper_runner.py`가 closed 15m candle을 받아 전략을 평가하고 Bitget live order path로 넘기는 구조입니다.
+  - 기존 Swift/macOS 백테스트 엔진, 서버 Python 전략 이식, 임시 그래프 러너가 동시에 존재해 같은 전략이라도 결과 기준이 달라질 수 있었습니다.
+  - 사용자는 macOS 앱을 더 이상 쓰지 않고, 실거래 판단과 백테스트 판단이 같은 로직이어야 한다고 명확히 요구했습니다.
+- Decision:
+  - 활성 프로젝트의 단일 실전 전략 판단 기준은 `Server/PaperRunnerPython/paper_runner.py`로 고정합니다.
+  - `Server/PaperRunnerPython/paper_runner_backtest.py`를 추가해 백테스트가 `paper_runner.evaluate_strategy(...)`를 직접 호출하도록 합니다.
+  - Swift/macOS 앱, Swift 백테스트 엔진, Swift 테스트, Swift backtest script, 임시 Python 그래프/연구 backtest script는 활성 프로젝트에서 제거합니다.
+  - 고정 market-history fixture로 active 4개 전략의 deterministic backtest regression을 추가합니다.
+- Consequences:
+  - 앞으로 live entry 판단과 backtest entry 판단은 같은 runtime strategy evaluator를 기준으로 검증합니다.
+  - 그래프/백테스트 도구는 별도 전략 로직을 복사하지 않고 runtime evaluator를 import해야 합니다.
+  - macOS UI/Swift build 검증은 더 이상 필수 검증 세트가 아니며, Python runner/live execution 테스트가 기본 검증입니다.

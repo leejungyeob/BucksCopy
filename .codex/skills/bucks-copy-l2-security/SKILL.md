@@ -2,7 +2,7 @@
 name: bucks-copy-l2-security
 description: >
   Use when BucksCopy work touches Bitget credentials, API key/secret/passphrase,
-  Keychain, REST/WebSocket signatures, private channels, order/account data,
+  encrypted credential storage, REST/WebSocket signatures, private channels, order/account data,
   logging, storage, URL handling, or live-trading safety.
 ---
 

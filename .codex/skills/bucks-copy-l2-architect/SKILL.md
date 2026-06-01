@@ -1,8 +1,8 @@
 ---
 name: bucks-copy-l2-architect
 description: >
-  Use when BucksCopy work needs structural review: macOS app layers, module
-  boundaries, Bitget integration placement, trading-engine ownership,
+  Use when BucksCopy work needs structural review: server runner boundaries,
+  Bitget integration placement, trading-engine ownership,
   dependency direction, migration fit, or decision-log impact.
 ---
 
@@ -17,9 +17,9 @@ description: >
 
 ## Focus Areas
 
-- Layer fit across App, Presentation, Domains, and Data.
-- Whether credential, Bitget DTO, candle, strategy, and execution responsibilities are in the right layer.
-- Whether local market history belongs behind Data repositories while strategy rules stay in Domains.
+- Layer fit across server runtime, strategy evaluation, backtest, and Bitget integration.
+- Whether credential, Bitget payload, candle, strategy, and execution responsibilities are in the right boundary.
+- Whether strategy entry logic remains single-sourced through `paper_runner.py`.
 - Whether a change requires a decision-log entry.
 - Whether live execution is being introduced without accepted policy.
 

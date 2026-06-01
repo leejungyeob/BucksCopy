@@ -30,7 +30,7 @@
 | --- | --- |
 | 추측 | 근거 없으면 `확인 필요`와 확인 경로를 제시 |
 | 변경 범위 | 요청 없으면 좁은 diff 우선 |
-| 실거래 | v1 자동매매는 Bitget credential 연결 + UI 실거래 동의 + Start Live 이후에만 live order를 호출 |
+| 실거래 | v1 자동매매는 Bitget credential 연결 + 서버 live 동의 + order execution env switch 이후에만 live order를 호출 |
 | 거래소 보호주문 | live 진입 체결 후 TP1/TP2/SL 거래소-side 보호주문을 등록해야 하며, 보호주문 등록 실패 시 최소 5회 재시도해야 함 |
 | 보호 실패 처리 | 진입 체결 후 TP/SL 등록이 끝나기 전 포지션은 unprotected 상태로 간주하고, 재시도 소진 시 즉시 경고 후 fail-closed 시장가 청산을 시도해야 함 |
 | 수수료 모델 | 기본 모델은 진입 시장가=taker, 익절 예약 limit=maker 가능, 손절 trigger market=taker로 분리하되 maker 체결 보장은 별도 검증 전 과대평가 금지 |
@@ -39,11 +39,11 @@
 | 심볼 후보 | `symbolStatus=normal`이고 `supportMarginCoins`에 `USDT`가 있는 심볼만 Watchlist 후보 |
 | WebSocket 구독 | 한 연결당 50개 이하 채널을 기본 제한으로 두고 초과 시 분리 또는 validation 실패 |
 | 비밀정보 | API key, secret, passphrase, 계정 정보, 주문 식별자 원문 출력/기록 금지 |
-| 인증 저장 | 민감정보는 Keychain-facing Data adapter만 소유 |
-| 시장 데이터 저장 | Watchlist closed candle은 로컬 DB에 누적하되 credential/raw private response는 저장 금지 |
+| 인증 저장 | 민감정보는 서버 메모리 또는 AES-256-GCM encrypted user credential 파일만 소유 |
+| 시장 데이터 저장 | Watchlist closed candle은 서버 market store에 누적하되 credential/raw private response는 저장 금지 |
 | 로그 | 토큰, 서명 payload, credential, 주문 원문 응답 전체 dump 금지 |
 | 외부 API | Bitget 공식 문서 기준으로 endpoint, signature, rate-limit, WebSocket ping/pong 확인 |
-| 구조 | 기본 레이어는 `App / Presentation / Domains / Data`, 경계 위반은 예외가 아니라 debt |
+| 구조 | 실전 전략 판단의 단일 기준은 `Server/PaperRunnerPython/paper_runner.py` |
 | 문서 | canonical 중복 금지, 새 문서 전 기존 문서 흡수 가능성 확인 |
 | formatter | 요청 없는 대규모 formatter 실행 금지 |
 | 커밋 메시지 | 가능하면 한글 우선 |
@@ -54,9 +54,9 @@
 | --- | --- |
 | 단순 질의응답, 짧은 문서 수정, 1~3파일 저위험 수정 | 메인 에이전트 direct-handle |
 | 여러 레이어/단계 동시 변경 | L1 기준 오케스트레이션 |
-| Bitget REST/WS, auth, Keychain, order, storage, live execution policy 포함 | Architect, Security, TDD Guide 포함 |
+| Bitget REST/WS, auth, credential, order, storage, live execution policy 포함 | Architect, Security, TDD Guide 포함 |
 | candle aggregation, strategy engine, trading execution 변경 | Architect, TDD Guide, Code Reviewer 포함 |
-| build/generate/target wiring 복구 | Build Fixer 포함 |
+| server/test harness 복구 | Build Fixer 포함 |
 | canonical 문서/스킬 변경 | Doc Writer 포함 |
 
 | 운영 원칙 | 규칙 |

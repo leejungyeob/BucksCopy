@@ -13,64 +13,61 @@ description: >
 - Use local closed candle history from SQLite. For 15m BTC strategy validation, prefer full available history or explicitly pass `--15m-limit 0` when the user asks for 4-year or full-history validation.
 - Treat backtest validation as mandatory before judging any strategy as usable for live monitoring.
 - Keep auxiliary indicators out of the primary result unless the user explicitly asks to test them.
-- Current routed portfolio is symbol-scoped and Dashboard/Live runtime is 15m-only. Active routes: BTCUSDT 15m BTC Vacuum Pulse, BTCUSDT 15m BTC Regime Session Fade, BTCUSDT 15m BTC Bull Pullback Long, and ETHUSDT 15m ETH Vacuum Pulse. BTC Phase Vacuum Reclaim remains implemented for historical comparison but is not active because its latest result duplicated Vacuum Pulse. Higher-timeframe and removed symbol routes must stay excluded unless the user explicitly asks to re-enable them.
+- Current routed portfolio is symbol-scoped and server runtime is 15m-only. Active routes: BTCUSDT 15m BTC Vacuum Pulse, BTCUSDT 15m BTC Regime Session Fade, BTCUSDT 15m BTC Bull Pullback Long, and ETHUSDT 15m ETH Vacuum Pulse. Backtest tools must call the server runtime evaluator instead of reimplementing entry logic.
 - Report practical metrics, not just final balance: final balance, net return, win rate, trade count, MDD, PF, TP1/TP2/profit-lock stop/time-exit counts.
 - Explain jargon in Korean when showing results. At minimum define MDD, PF, TP1, TP2, TP1후 SL, 순수 SL.
 
 ## 표준 실행
 
-Run the repo script from the repository root:
+Run the runtime-equivalent backtest from the repository root:
 
 ```bash
-scripts/backtest/run_split_tp_backtest_report.sh --symbol BTCUSDT --all
+python3 Server/PaperRunnerPython/paper_runner_backtest.py \
+  --db fixtures/market-history/BucksCopyCandles.sqlite.gz \
+  --strategy btc-15m-vacuum-pulse
 ```
 
-For a focused timeframe/risk run, pass explicit parameters:
+For a focused timeframe run, pass explicit bounds:
 
 ```bash
-scripts/backtest/run_split_tp_backtest_report.sh --symbol BTCUSDT --all --timeframe 15m --leverage 10 --risk 5
+python3 Server/PaperRunnerPython/paper_runner_backtest.py \
+  --db fixtures/market-history/BucksCopyCandles.sqlite.gz \
+  --strategy btc-15m-regime-session-fade \
+  --start 2026-01-01T00:00:00Z \
+  --end 2026-02-01T00:00:00Z \
+  --output-prefix Derived/Reports/paper-runner-regime-check
 ```
 
-The default output is:
+The default outputs are:
 
 ```text
-Derived/Reports/split-tp-backtest-BTCUSDT-all.md
+Derived/Reports/paper-runner-backtest-summary.json
+Derived/Reports/paper-runner-backtest-trades.csv
+Derived/Reports/paper-runner-backtest-equity.csv
 ```
 
-The default cache is:
+Current deterministic fixture coverage:
 
 ```text
-Derived/Reports/split-tp-backtest-BTCUSDT-cache.json
-```
-
-By default, the script reuses cached rows for combinations that were already run. Use `--refresh-cache` only when the user explicitly wants to recompute prior combinations.
-The default script may limit 15m rows for speed. Use `--15m-limit 0` when the user explicitly wants full available or 4-year 15m validation.
-Use `--leverage`, `--risk`, and `--margin` to match the user's requested risk settings instead of editing the runner source.
-
-Use `--recommended-only` only when the user specifically wants current app-routing candidates.
-
-Current 4-year reference reports for the `10x` leverage / `5%` risk Vacuum Pulse routes:
-
-```text
-Derived/Reports/vacuum-pulse-BTCUSDT-4y-10x-risk5.md
-Derived/Reports/vacuum-pulse-ETHUSDT-4y-10x-risk5.md
-Derived/Reports/vacuum-pulse-4y-10x-risk5-summary.csv
+Server/PaperRunnerPython/test_paper_runner_backtest.py
 ```
 
 ## 전략 추가/변경 후 절차
 
-1. Confirm the strategy is registered in `StrategyRegistry`.
-2. Confirm `StrategyTimeframeRouting` includes or intentionally excludes the strategy.
-3. Run the standard script.
+1. Confirm the strategy is registered in `paper_runner.ACTIVE_STRATEGIES_BY_SYMBOL`.
+2. Confirm the server live loop uses the strategy ID on closed 15m candles.
+3. Run the runtime backtest script.
 4. Open the generated Markdown report and summarize:
    - 실전 후보
    - 제외할 조합
    - MDD가 큰 조건부 후보
    - 거래 수가 너무 적어 과신하면 안 되는 후보
-5. If code changed, also run the project test suite:
+5. If code changed, also run the Python validation suite:
 
 ```bash
-xcodebuild -workspace BucksCopy.xcworkspace -scheme BucksCopy -destination 'platform=macOS' test
+python3 -m unittest \
+  Server/PaperRunnerPython/test_paper_runner_backtest.py \
+  Server/PaperRunnerPython/test_paper_runner_live_execution.py
 ```
 
 ## 실전 후보 판단 기준

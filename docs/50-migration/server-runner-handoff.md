@@ -1,5 +1,7 @@
 # Server Runner Handoff
 
+> 2026-06-01 update: the Swift/macOS client and Swift backtest engine were removed from the active project. Treat macOS-specific sections below as historical context only; current runtime and validation use `Server/PaperRunnerPython/paper_runner.py` and `paper_runner_backtest.py`.
+
 ## 한글 요약
 
 - 이 문서는 다른 노트북 또는 다른 Codex 세션에서 `BucksCopy` server runner 작업을 이어받기 위한 인수인계 문서입니다.

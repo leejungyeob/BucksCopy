@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | [README.md](../../README.md) | 저장소 진입점, 기본 결정, 실행/검증 명령 | 구조/스택/검증 진입점 변경 |
 | [AGENTS.md](../../AGENTS.md) | repo-wide 작업 규칙 | 작업 규칙, 출력 규약, 라우팅 기준 변경 |
-| [docs/CODE_CONVENTION.md](../CODE_CONVENTION.md) | 코드 스타일과 Git 관례 | Swift/macOS 스타일 기준 변경 |
+| [docs/CODE_CONVENTION.md](../CODE_CONVENTION.md) | 코드 스타일과 Git 관례 | Python runner 스타일 기준 변경 |
 | [docs/20-architecture/system-overview.md](../20-architecture/system-overview.md) | 레이어와 책임 경계 | 구조 경계, target 구성, 의존 방향 변경 |
 | [docs/20-architecture/decision-log.md](../20-architecture/decision-log.md) | ADR-lite 결정 기록 | repo-wide 구조/정책 결정 |
 | [docs/30-quality/test-strategy.md](../30-quality/test-strategy.md) | 테스트/acceptance 기준 | 테스트 기대치 변경 |

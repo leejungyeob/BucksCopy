@@ -2,7 +2,7 @@
 name: bucks-copy-l2-tdd-guide
 description: >
   Use when BucksCopy requirements need acceptance scenarios, edge cases, and
-  minimum safe validation for macOS UI, Bitget integration, credential storage,
+  minimum safe validation for server UI/API, Bitget integration, credential storage,
   candle aggregation, strategy, live execution, or live-trading policy.
 ---
 
