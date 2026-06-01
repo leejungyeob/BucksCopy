@@ -45,6 +45,23 @@ class PaperRunnerBacktestTests(unittest.TestCase):
         self.assertGreater(calls, 0)
         self.assertEqual(result["summary"]["trade_count"], 1)
 
+    def test_strategy_backtest_metadata_is_populated_for_web_cards(self):
+        expected_returns = {
+            "btc-15m-vacuum-pulse": "+634.03",
+            "btc-15m-regime-session-fade": "+854501.14",
+            "btc-15m-bull-pullback-long": "+2054.93",
+            "eth-15m-vacuum-pulse": "+530.27",
+        }
+
+        for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
+            with self.subTest(strategy_id=strategy_id):
+                metadata = paper_runner.STRATEGY_BACKTESTS.get(strategy_id)
+                self.assertIsNotNone(metadata)
+                self.assertEqual(metadata["netReturnPercent"], expected_returns[strategy_id])
+                self.assertEqual(metadata["source"], "paper_runner.evaluate_strategy")
+                self.assertIn("2022-05-24", metadata["period"])
+                self.assertIn("2026-05-24", metadata["period"])
+
     def test_cached_strategy_context_matches_uncached_runtime_evaluator(self):
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
             with self.subTest(strategy_id=strategy_id):

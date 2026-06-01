@@ -406,7 +406,85 @@ DEFAULT_OWNER_STRATEGY_IDS = (
     ETH_PULSE_PARAMS["strategy_id"],
 )
 
-STRATEGY_BACKTESTS: dict[str, dict[str, str]] = {}
+STRATEGY_BACKTESTS = {
+    "btc-15m-vacuum-pulse": {
+        "label": "최근 4년 · 공식 러너 · 10x · 5% risk",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "734.03",
+        "netReturnPercent": "+634.03",
+        "winRatePercent": "50.64",
+        "maxDrawdownPercent": "33.77",
+        "profitFactor": "1.51",
+        "totalTrades": 156,
+        "annualTrades": "39.0",
+        "tp1Count": 79,
+        "tp2Count": 33,
+        "profitLockStopCount": 46,
+        "pureStopCount": 77,
+        "timeExitCount": 0,
+        "robustness": "LOWER",
+    },
+    "btc-15m-regime-session-fade": {
+        "label": "최근 4년 · 공식 러너 · 10x · 5% risk",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "854601.14",
+        "netReturnPercent": "+854501.14",
+        "winRatePercent": "59.20",
+        "maxDrawdownPercent": "33.16",
+        "profitFactor": "1.77",
+        "totalTrades": 696,
+        "annualTrades": "174.0",
+        "tp1Count": 279,
+        "tp2Count": 93,
+        "profitLockStopCount": 118,
+        "pureStopCount": 206,
+        "timeExitCount": 279,
+        "robustness": "MEDIUM",
+        "robustnessNote": "4개 연도/8개 반기 모두 플러스. 단, 극단적 복리 결과라 forward 검증 필요.",
+    },
+    "btc-15m-bull-pullback-long": {
+        "label": "최근 4년 · 공식 러너 · 10x · 5% risk",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "2154.93",
+        "netReturnPercent": "+2054.93",
+        "winRatePercent": "68.21",
+        "maxDrawdownPercent": "21.91",
+        "profitFactor": "2.66",
+        "totalTrades": 173,
+        "annualTrades": "43.3",
+        "tp1Count": 56,
+        "tp2Count": 18,
+        "profitLockStopCount": 22,
+        "pureStopCount": 33,
+        "timeExitCount": 100,
+        "robustness": "LOWER",
+    },
+    "eth-15m-vacuum-pulse": {
+        "label": "최근 4년 · 공식 러너 · 10x · 5% risk",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "630.27",
+        "netReturnPercent": "+530.27",
+        "winRatePercent": "49.14",
+        "maxDrawdownPercent": "22.00",
+        "profitFactor": "1.47",
+        "totalTrades": 116,
+        "annualTrades": "29.0",
+        "tp1Count": 57,
+        "tp2Count": 22,
+        "profitLockStopCount": 35,
+        "pureStopCount": 59,
+        "timeExitCount": 0,
+        "robustness": "LOWER",
+    },
+}
 
 
 def simple_moving_average(candles: list[Candle], period: int, ending_at: int | None = None) -> Decimal | None:
@@ -3316,11 +3394,13 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           ].filter(Boolean);
           const details = [
             ["수익률", backtest.netReturnPercent ? `${backtest.netReturnPercent}%` : "-"],
+            ["최종 자산", backtest.finalBalance || "-"],
             ["승률", backtest.winRatePercent ? `${backtest.winRatePercent}%` : "-"],
             ["MDD", backtest.maxDrawdownPercent ? `${backtest.maxDrawdownPercent}%` : "-"],
             ["PF", backtest.profitFactor || "-"],
             ["총 거래", backtest.totalTrades || "-"],
             ["연 거래", backtest.annualTrades || "-"],
+            ["과최적화", backtest.robustness || "-"],
             ["레버리지", parameters.leverage ? `${parameters.leverage}x` : "-"],
             ["RR", parameters.reward_risk_ratio || parameters.tight_reward_risk_ratio || "-"]
           ];
@@ -3348,6 +3428,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
                 </div>
                 <div class="tagline">
                   ${backtest.label ? `<span class="tag">${escapeHTML(backtest.label)}</span>` : ""}
+                  ${backtest.period ? `<span class="tag">${escapeHTML(backtest.period)}</span>` : ""}
+                  ${backtest.robustnessNote ? `<span class="tag">${escapeHTML(backtest.robustnessNote)}</span>` : ""}
                   ${paramTags.map(([key, value]) => `<span class="tag">${escapeHTML(key)} ${escapeHTML(value)}</span>`).join("")}
                 </div>
               </div>
