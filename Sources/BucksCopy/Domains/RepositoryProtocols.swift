@@ -121,7 +121,12 @@ protocol LiveOrderPlacing {
 }
 
 protocol LiveLeverageSetting {
-    func setLeverage(symbol: FuturesSymbol, leverage: Int, marginCoin: String) async throws
+    func setLeverage(
+        symbol: FuturesSymbol,
+        leverage: Int,
+        marginCoin: String,
+        holdSide: PositionSide?
+    ) async throws
 }
 
 protocol PositionProtectionInstalling {

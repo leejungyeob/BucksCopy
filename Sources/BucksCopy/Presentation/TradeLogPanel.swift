@@ -538,7 +538,9 @@ private struct TradeLogDisplay {
 
         if let metadata = log.metadata {
             title = metadata.title
-            detail = metadata.subtitle ?? log.message
+            detail = log.severity == .error && log.message.isEmpty == false
+                ? log.message
+                : (metadata.subtitle ?? log.message)
             return
         }
 

@@ -271,7 +271,7 @@ final class BitgetMappingTests: XCTestCase {
         XCTAssertEqual(dto.tradeSide, "open")
         XCTAssertEqual(dto.orderType, "market")
         XCTAssertEqual(dto.clientOid, "client-1")
-        XCTAssertEqual(dto.reduceOnly, "NO")
+        XCTAssertNil(dto.reduceOnly)
     }
 
     func testLiveOrderDetailMapsBitgetFillAliasesToFilledReceipt() throws {
@@ -315,13 +315,15 @@ final class BitgetMappingTests: XCTestCase {
             symbol: "BTCUSDT",
             productType: ProductType.usdtFutures.rawValue,
             marginCoin: "USDT",
-            leverage: "10"
+            leverage: "10",
+            holdSide: "long"
         )
 
         XCTAssertEqual(dto.symbol, "BTCUSDT")
         XCTAssertEqual(dto.productType, ProductType.usdtFutures.rawValue)
         XCTAssertEqual(dto.marginCoin, "USDT")
         XCTAssertEqual(dto.leverage, "10")
+        XCTAssertEqual(dto.holdSide, "long")
     }
 
     func testPendingPlanOrdersMapManualTPSLProtection() throws {

@@ -18,13 +18,15 @@ final class BitgetLiveOrderClient: LiveOrderPlacing, LiveLeverageSetting {
     func setLeverage(
         symbol: FuturesSymbol,
         leverage: Int,
-        marginCoin: String
+        marginCoin: String,
+        holdSide: PositionSide?
     ) async throws {
         let body = BitgetSetLeverageRequestDTO(
             symbol: symbol.rawValue,
             productType: ProductType.usdtFutures.rawValue,
             marginCoin: marginCoin.uppercased(),
-            leverage: String(leverage)
+            leverage: String(leverage),
+            holdSide: holdSide?.bitgetClosePositionHoldSide
         )
         let _: BitgetSetLeverageResponseDTO = try await client.sendSignedPOST(
             path: "/api/v2/mix/account/set-leverage",
@@ -132,6 +134,7 @@ struct BitgetSetLeverageRequestDTO: Encodable, Equatable {
     let productType: String
     let marginCoin: String
     let leverage: String
+    let holdSide: String?
 }
 
 struct BitgetSetLeverageResponseDTO: Decodable, Equatable {
@@ -153,7 +156,7 @@ struct BitgetPlaceOrderRequestDTO: Encodable, Equatable {
     let tradeSide: String
     let orderType: String
     let clientOid: String
-    let reduceOnly: String
+    let reduceOnly: String?
 
     init(request: LiveOrderRequest) {
         symbol = request.symbol.rawValue
@@ -165,7 +168,7 @@ struct BitgetPlaceOrderRequestDTO: Encodable, Equatable {
         tradeSide = request.purpose.rawValue
         orderType = "market"
         clientOid = request.clientOid
-        reduceOnly = request.reduceOnly ? "YES" : "NO"
+        reduceOnly = request.reduceOnly ? "YES" : nil
     }
 }
 

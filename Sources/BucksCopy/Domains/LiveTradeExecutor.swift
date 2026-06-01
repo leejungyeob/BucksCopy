@@ -161,7 +161,8 @@ final class LiveTradeExecutor {
         try await leverageSetter.setLeverage(
             symbol: candidate.signal.symbol,
             leverage: candidate.leverage,
-            marginCoin: request.marginCoin
+            marginCoin: request.marginCoin,
+            holdSide: PositionSide(openedBy: candidate.signal.side)
         )
         let receipt = try await orderPlacer.placeMarketOrder(request)
         guard receipt.status == .filled,
@@ -545,7 +546,12 @@ final class LiveTradeExecutor {
 }
 
 final class UnavailableLiveOrderClient: LiveOrderPlacing, LiveLeverageSetting, ExchangeProtectionOrderPlacing {
-    func setLeverage(symbol: FuturesSymbol, leverage: Int, marginCoin: String) async throws {
+    func setLeverage(
+        symbol: FuturesSymbol,
+        leverage: Int,
+        marginCoin: String,
+        holdSide: PositionSide?
+    ) async throws {
         throw TradingDomainError.liveTradingDisabled
     }
 

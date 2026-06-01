@@ -31,6 +31,7 @@ final class SafetyTests: XCTestCase {
 
         XCTAssertTrue(result.didSubmitOrder)
         XCTAssertEqual(client.leverageRequests.count, 1)
+        XCTAssertEqual(client.leverageRequests.first?.holdSide, .long)
         XCTAssertEqual(client.marketOrders.count, 1)
         XCTAssertEqual(client.marketOrders.first?.size, 5)
         XCTAssertEqual(client.protectionOrders.count, 3)

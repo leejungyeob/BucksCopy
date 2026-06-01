@@ -5,6 +5,7 @@ struct RecordedLeverageRequest: Equatable {
     let symbol: FuturesSymbol
     let leverage: Int
     let marginCoin: String
+    let holdSide: PositionSide?
 }
 
 final class TestLiveOrderClient: LiveOrderPlacing, LiveLeverageSetting, ExchangeProtectionOrderPlacing {
@@ -13,11 +14,17 @@ final class TestLiveOrderClient: LiveOrderPlacing, LiveLeverageSetting, Exchange
     private(set) var closeRequests: [(symbol: FuturesSymbol, holdSide: PositionSide?)] = []
     private(set) var protectionOrders: [ExchangeProtectionOrder] = []
 
-    func setLeverage(symbol: FuturesSymbol, leverage: Int, marginCoin: String) async throws {
+    func setLeverage(
+        symbol: FuturesSymbol,
+        leverage: Int,
+        marginCoin: String,
+        holdSide: PositionSide?
+    ) async throws {
         leverageRequests.append(RecordedLeverageRequest(
             symbol: symbol,
             leverage: leverage,
-            marginCoin: marginCoin
+            marginCoin: marginCoin,
+            holdSide: holdSide
         ))
     }
 

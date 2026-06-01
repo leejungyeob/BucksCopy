@@ -14,7 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_DOWN, getcontext
+from decimal import Decimal, ROUND_DOWN, ROUND_UP, getcontext
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1090,7 +1090,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return
 
         action = self.route_action(parsed.path)
-        if action not in {"control", "live/control", "strategies"}:
+        if action not in {"control", "live/control", "live/test-order", "strategies"}:
             self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
         user_id = self.authorize_user()
@@ -1121,6 +1121,22 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
                 acknowledged_risk=bool(payload.get("acknowledgedRisk", False)),
                 updated_by="api",
             ))
+            return
+
+        if action == "live/test-order":
+            symbol = str(payload.get("symbol") or "").strip().upper()
+            side = str(payload.get("side") or "buy").strip().lower()
+            if payload.get("acknowledgedMinimumLiveTest") is not True:
+                self.write_json({"error": "acknowledgedMinimumLiveTest true is required"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                self.write_json(self.runner.execute_minimum_live_test_order(
+                    user_id,
+                    symbol=symbol,
+                    side=side,
+                ))
+            except (BitgetLoginError, LiveExecutionError, ValueError) as error:
+                self.write_json({"error": self.runner.public_live_error_text(error)}, HTTPStatus.CONFLICT)
             return
 
         if action == "strategies":
@@ -1258,6 +1274,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             "positions",
             "live/status",
             "live/control",
+            "live/test-order",
         }:
             return action
         return None
@@ -1440,7 +1457,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
-    .top-actions, .button-row, .command-actions {
+    .top-actions, .button-row, .command-actions, .panel-head-actions {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -1561,6 +1578,15 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .command-actions {
       justify-content: flex-end;
       flex: 0 0 auto;
+    }
+    .panel-head-actions {
+      justify-content: flex-end;
+      min-width: 0;
+    }
+    .panel-head-actions button {
+      min-height: 30px;
+      padding: 0 10px;
+      font-size: 12px;
     }
     .command-footer {
       min-height: 0;
@@ -2238,6 +2264,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             <div class="command-actions">
               <button type="button" data-action="refresh">새로고침</button>
               <button type="button" data-action="bitget-logout">로그아웃</button>
+              <button type="button" data-action="live-test-order" id="live-test-order" class="danger">진입/정리 테스트</button>
               <button type="button" data-action="automation-toggle" id="automation-toggle" class="primary">자동매매 시작</button>
             </div>
           </div>
@@ -2301,7 +2328,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           <section class="panel trade-log-panel">
             <div class="panel-head">
               <h2 class="panel-title">매매기록</h2>
-              <span class="mini muted" id="log-count"></span>
+              <div class="panel-head-actions">
+                <button type="button" data-action="live-test-order" class="danger">진입/정리 테스트</button>
+                <span class="mini muted" id="log-count"></span>
+              </div>
             </div>
             <div class="panel-body">
               <div id="log-summary" class="log-summary"></div>
@@ -2349,6 +2379,12 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         "averagePrice",
         "size",
         "availableBalanceRatio",
+        "requestedMarginUSDT",
+        "minimumTest",
+        "closeSubmitted",
+        "closeConfirmed",
+        "failureReason",
+        "failClosedAttempted",
         "tp1",
         "tp2",
         "protectionOrders",
@@ -3130,6 +3166,15 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         els.automationToggle.className = shouldStop ? "danger" : "primary";
         els.automationToggle.dataset.intent = shouldStop ? "stop" : "start";
         els.automationToggle.disabled = state.busy;
+        const testSymbol = state.selectedSymbol || state.status?.symbols?.[0] || "BTCUSDT";
+        const testDisabled = state.busy || !live.minimumTestOrderEnabled;
+        document.querySelectorAll('[data-action="live-test-order"]').forEach((button, index) => {
+          button.textContent = index === 0 ? `${testSymbol} 1x 진입/즉시정리` : "진입/정리 테스트";
+          button.disabled = testDisabled;
+          button.title = testDisabled
+            ? localizedLiveBlocker(blockers[0] || "live test order is not ready")
+            : `${testSymbol} 1x 최소 수량 진입 후 즉시 정리`;
+        });
       };
 
       const renderStrategies = () => {
@@ -3514,6 +3559,10 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           const metadata = item.metadata || {};
           const details = metadata.details || {};
           const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+          const isError = String(item.severity || "").toLowerCase() === "error";
+          const subtitle = isError && item.message
+            ? item.message
+            : (metadata.subtitle || item.message || "");
           const safeDetails = Object.entries(details)
             .filter(([key]) => SAFE_DETAIL_KEYS.has(key))
             .slice(0, 8);
@@ -3522,7 +3571,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
               <div class="row-title">
                 <div>
                   <strong>${escapeHTML(metadata.title || item.category || "record")}</strong>
-                  <div class="mini muted">${escapeHTML(metadata.subtitle || item.message || "")}</div>
+                  <div class="mini muted">${escapeHTML(subtitle)}</div>
                 </div>
                 ${pill(item.severity || "info", severityClass(item.severity))}
               </div>
@@ -3599,6 +3648,30 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           body: { enabled: false }
         });
         await refreshAll();
+      };
+
+      const executeMinimumLiveTestOrder = async () => {
+        const symbol = state.selectedSymbol || state.status?.symbols?.[0] || "BTCUSDT";
+        const confirmed = window.confirm(`${symbol} 실계정에 1x 최소 수량 BUY 주문을 넣고 바로 시장가 청산합니다. 진행할까요?`);
+        if (!confirmed) {
+          return;
+        }
+        setBusy(true);
+        try {
+          const response = await api("/users/me/live/test-order", {
+            method: "POST",
+            body: {
+              symbol,
+              side: "buy",
+              acknowledgedMinimumLiveTest: true
+            }
+          });
+          setNotice(response.message || `${symbol} 최소 테스트 주문을 전송했습니다.`, "ok");
+          await refreshAll({ silent: true });
+        } finally {
+          setBusy(false);
+          render();
+        }
       };
 
       const logoutBitget = async () => {
@@ -4015,6 +4088,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             } else {
               await startAutomation();
             }
+          } else if (action === "live-test-order") {
+            await executeMinimumLiveTestOrder();
           } else if (action === "strategies-save") {
             await saveStrategies();
           } else if (action === "strategy-detail") {
@@ -4104,7 +4179,9 @@ class PaperRunner:
             dec(1),
         )
         self.live_margin_mode = os.environ.get("BUCKS_COPY_LIVE_MARGIN_MODE", "isolated").strip().lower() or "isolated"
-        self.live_position_mode = os.environ.get("BUCKS_COPY_LIVE_POSITION_MODE", "hedge").strip().lower() or "hedge"
+        self.live_position_mode = self.normalized_live_position_mode(
+            os.environ.get("BUCKS_COPY_LIVE_POSITION_MODE", "hedge")
+        )
         self.live_confirmation_attempts = clamp_int(
             os.environ.get("BUCKS_COPY_LIVE_CONFIRMATION_ATTEMPTS"),
             default=8,
@@ -4169,6 +4246,15 @@ class PaperRunner:
         if not symbols:
             raise ValueError("BUCKS_COPY_SYMBOLS must include at least one symbol.")
         return symbols
+
+    @staticmethod
+    def normalized_live_position_mode(value: str | None) -> str:
+        mode = (value or "hedge").strip().lower().replace("_", "-")
+        if mode in {"hedge", "hedge-mode", "two-way", "two-way-mode"}:
+            return "hedge"
+        if mode in {"oneway", "one-way", "one-way-mode"}:
+            return "one-way"
+        return mode or "hedge"
 
     def web_access_session_secret_from_env(self, value: str | None) -> bytes:
         if value is not None and value.strip():
@@ -4697,6 +4783,7 @@ class PaperRunner:
                     "minTradeUSDT": dec(record.get("minTradeUSDT") or "0"),
                     "sizeMultiplier": dec(record.get("sizeMultiplier") or "0"),
                     "volumePlace": int(record.get("volumePlace") or "8"),
+                    "pricePlace": int(record.get("pricePlace") or "2"),
                     "maxLeverage": int(record.get("maxLever") or "1"),
                 }
         raise LiveExecutionError(f"{symbol} contract config was not found")
@@ -4709,6 +4796,21 @@ class PaperRunner:
             multiplier = dec(1) / (dec(10) ** volume_place)
         units = (raw_size / multiplier).to_integral_value(rounding=ROUND_DOWN)
         return units * multiplier
+
+    @staticmethod
+    def rounded_order_size_up(raw_size: Decimal, contract_spec: dict[str, Any]) -> Decimal:
+        multiplier = contract_spec.get("sizeMultiplier")
+        if not isinstance(multiplier, Decimal) or multiplier <= 0:
+            volume_place = int(contract_spec.get("volumePlace") or 8)
+            multiplier = dec(1) / (dec(10) ** volume_place)
+        units = (raw_size / multiplier).to_integral_value(rounding=ROUND_UP)
+        return units * multiplier
+
+    @staticmethod
+    def rounded_price(price: Decimal, contract_spec: dict[str, Any], rounding: str) -> Decimal:
+        price_place = max(int(contract_spec.get("pricePlace") or 2), 0)
+        quantum = dec(1) / (dec(10) ** price_place)
+        return price.quantize(quantum, rounding=rounding)
 
     def order_size_for_signal(self, signal: Signal, account_available: Decimal, contract_spec: dict[str, Any]) -> Decimal:
         if self.live_order_margin_usdt <= 0:
@@ -4723,6 +4825,29 @@ class PaperRunner:
         size = self.rounded_order_size(notional / signal.entry, contract_spec)
         if size <= 0 or size < contract_spec.get("minTradeNum", dec(0)):
             raise LiveExecutionError("calculated order size is below Bitget minimum trade size")
+        return size
+
+    def minimum_test_order_size_for_signal(
+        self,
+        signal: Signal,
+        account_available: Decimal,
+        contract_spec: dict[str, Any],
+    ) -> Decimal:
+        min_trade_num = contract_spec.get("minTradeNum", dec(0))
+        min_trade_usdt = contract_spec.get("minTradeUSDT", dec(0))
+        size_from_notional = min_trade_usdt / signal.entry if min_trade_usdt > 0 else dec(0)
+        size = self.rounded_order_size_up(max(min_trade_num, size_from_notional), contract_spec)
+        multiplier = contract_spec.get("sizeMultiplier")
+        if not isinstance(multiplier, Decimal) or multiplier <= 0:
+            volume_place = int(contract_spec.get("volumePlace") or 8)
+            multiplier = dec(1) / (dec(10) ** volume_place)
+        while min_trade_usdt > 0 and size * signal.entry < min_trade_usdt:
+            size += multiplier
+        required_margin = size * signal.entry / dec(signal.leverage)
+        if required_margin > account_available:
+            raise LiveExecutionError("USDT available balance is not enough for minimum live test order")
+        if size <= 0 or size < min_trade_num:
+            raise LiveExecutionError("calculated minimum live test size is below Bitget minimum trade size")
         return size
 
     @staticmethod
@@ -4767,6 +4892,55 @@ class PaperRunner:
                 return dec(account.get("available") or "0")
         return dec(0)
 
+    def latest_closed_reference_price(self, symbol: str) -> Decimal:
+        remote_candles = self.fetch_candles(symbol)
+        if remote_candles:
+            try:
+                self.upsert_candles(symbol, remote_candles)
+            except Exception:
+                pass
+        candles = [candle for candle in remote_candles if candle.is_closed]
+        if not candles:
+            candles = [candle for candle in self.load_candles(symbol) if candle.is_closed]
+        if not candles:
+            raise LiveExecutionError(f"{symbol} closed candle price is unavailable")
+        price = candles[-1].close
+        if price <= 0:
+            raise LiveExecutionError(f"{symbol} reference price is invalid")
+        return price
+
+    def minimum_live_test_signal(
+        self,
+        symbol: str,
+        side: str,
+        entry: Decimal,
+        contract_spec: dict[str, Any],
+    ) -> Signal:
+        if side == "buy":
+            stop = self.rounded_price(entry * dec("0.995"), contract_spec, ROUND_DOWN)
+            take_profit = self.rounded_price(entry * dec("1.005"), contract_spec, ROUND_UP)
+        else:
+            stop = self.rounded_price(entry * dec("1.005"), contract_spec, ROUND_UP)
+            take_profit = self.rounded_price(entry * dec("0.995"), contract_spec, ROUND_DOWN)
+        if stop <= 0 or take_profit <= 0 or stop == entry or take_profit == entry:
+            raise LiveExecutionError("minimum live test protection prices are invalid")
+        return Signal(
+            strategy_id="manual-minimum-live-test",
+            symbol=symbol,
+            side=side,
+            entry=entry,
+            stop=stop,
+            take_profit=take_profit,
+            reason="manual minimum live test",
+            leverage=1,
+        )
+
+    @staticmethod
+    def position_order_size(position: dict[str, Any] | None) -> Decimal:
+        if not isinstance(position, dict):
+            return dec(0)
+        return max(dec(position.get("total") or "0"), dec(position.get("available") or "0"))
+
     @staticmethod
     def hold_side_for_signal(signal: Signal) -> str:
         return "long" if signal.side == "buy" else "short"
@@ -4801,6 +4975,11 @@ class PaperRunner:
         details: dict[str, str],
     ) -> None:
         tags = ["LIVE", TIMEFRAME, signal.side.upper(), signal.strategy_id]
+        subtitle = (
+            details.get("failureReason")
+            if severity == "error" and details.get("failureReason")
+            else "서버 runner가 실거래 주문 경로를 처리했습니다."
+        )
         self.append_jsonl(
             self.user_dir(user_id) / "trade-event-logs.jsonl",
             {
@@ -4812,7 +4991,7 @@ class PaperRunner:
                 "message": message,
                 "metadata": {
                     "title": f"{signal.symbol} server live execution",
-                    "subtitle": "서버 runner가 실거래 주문 경로를 처리했습니다.",
+                    "subtitle": subtitle,
                     "tags": tags,
                     "details": details,
                 },
@@ -4820,34 +4999,31 @@ class PaperRunner:
         )
 
     def set_bitget_leverage(self, credential: BitgetCredential, signal: Signal) -> None:
-        self.bitget_signed_post(
-            credential,
-            "/api/v2/mix/account/set-leverage",
-            {
-                "symbol": signal.symbol,
-                "productType": PRODUCT_TYPE,
-                "marginCoin": "USDT",
-                "leverage": str(signal.leverage),
-            },
-        )
+        payload = {
+            "symbol": signal.symbol,
+            "productType": PRODUCT_TYPE,
+            "marginCoin": "USDT",
+            "leverage": str(signal.leverage),
+        }
+        if self.live_margin_mode == "isolated" and self.live_position_mode == "hedge":
+            payload["holdSide"] = self.hold_side_for_signal(signal)
+        self.bitget_signed_post(credential, "/api/v2/mix/account/set-leverage", payload)
 
     def place_market_order(self, credential: BitgetCredential, signal: Signal, size: Decimal, client_oid: str) -> dict[str, Any]:
-        data = self.bitget_signed_post(
-            credential,
-            "/api/v2/mix/order/place-order",
-            {
-                "symbol": signal.symbol,
-                "productType": PRODUCT_TYPE,
-                "marginMode": self.live_margin_mode,
-                "marginCoin": "USDT",
-                "size": decimal_text(size),
-                "side": signal.side,
-                "tradeSide": "open",
-                "orderType": "market",
-                "clientOid": client_oid,
-                "reduceOnly": "NO",
-            },
-        )
+        payload = {
+            "symbol": signal.symbol,
+            "productType": PRODUCT_TYPE,
+            "marginMode": self.live_margin_mode,
+            "marginCoin": "USDT",
+            "size": decimal_text(size),
+            "side": signal.side,
+            "tradeSide": "open",
+            "orderType": "market",
+            "clientOid": client_oid,
+        }
+        if self.live_position_mode == "one-way":
+            payload["reduceOnly"] = "NO"
+        data = self.bitget_signed_post(credential, "/api/v2/mix/order/place-order", payload)
         return data if isinstance(data, dict) else {}
 
     def fetch_order_detail(
@@ -4921,7 +5097,7 @@ class PaperRunner:
                 "triggerPrice": decimal_text(trigger_price),
                 "triggerType": "mark_price",
                 "executePrice": decimal_text(execute_price),
-                "holdSide": self.hold_side_for_signal(signal) if self.live_position_mode != "one-way" else signal.side,
+                "holdSide": self.hold_side_for_signal(signal) if self.live_position_mode == "hedge" else signal.side,
                 "size": decimal_text(size),
                 "rangeRate": "",
                 "clientOid": client_oid,
@@ -4948,6 +5124,12 @@ class PaperRunner:
         ]
         receipts: list[dict[str, Any]] = []
         for kind, trigger_price, execute_price, order_size, suffix in orders:
+            trigger_price = self.rounded_protection_price(signal, kind, trigger_price, contract_spec)
+            execute_price = (
+                dec(0)
+                if execute_price <= 0
+                else self.rounded_protection_price(signal, kind, execute_price, contract_spec)
+            )
             last_error: Exception | None = None
             for attempt in range(1, self.live_protection_retry_attempts + 2):
                 client_oid = f"{parent_client_oid}-{suffix}-{attempt}"
@@ -4980,16 +5162,171 @@ class PaperRunner:
                 )
         return receipts
 
-    def close_position_fail_closed(self, credential: BitgetCredential, signal: Signal) -> None:
-        self.bitget_signed_post(
-            credential,
-            "/api/v2/mix/order/close-positions",
-            {
-                "symbol": signal.symbol,
-                "productType": PRODUCT_TYPE,
-                "holdSide": self.hold_side_for_signal(signal),
-            },
-        )
+    def rounded_protection_price(
+        self,
+        signal: Signal,
+        kind: str,
+        price: Decimal,
+        contract_spec: dict[str, Any],
+    ) -> Decimal:
+        if kind == "takeProfit":
+            rounding = ROUND_UP if signal.side == "buy" else ROUND_DOWN
+        else:
+            rounding = ROUND_DOWN if signal.side == "buy" else ROUND_UP
+        return self.rounded_price(price, contract_spec, rounding)
+
+    def close_position_fail_closed(self, credential: BitgetCredential, signal: Signal) -> Any:
+        payload = {
+            "symbol": signal.symbol,
+            "productType": PRODUCT_TYPE,
+        }
+        if self.live_position_mode == "hedge":
+            payload["holdSide"] = self.hold_side_for_signal(signal)
+        return self.bitget_signed_post(credential, "/api/v2/mix/order/close-positions", payload)
+
+    def confirm_position_closed(self, user_id: str, signal: Signal) -> None:
+        for attempt in range(self.live_confirmation_attempts):
+            if attempt > 0 and self.live_confirmation_delay_seconds > 0:
+                time.sleep(float(self.live_confirmation_delay_seconds))
+            snapshot = self.refresh_user_private_snapshot(user_id)
+            if self.find_open_position(snapshot["positions"], signal) is None:
+                return
+        raise LiveExecutionError(f"{signal.symbol} {self.hold_side_for_signal(signal)} close was not confirmed")
+
+    @staticmethod
+    def public_live_error_text(error: Exception) -> str:
+        message = str(error).strip()
+        if not message:
+            message = type(error).__name__
+        return message[:240]
+
+    def execute_minimum_live_test_order(self, user_id: str, symbol: str, side: str = "buy") -> dict[str, Any]:
+        symbol = symbol.upper()
+        side = side.lower()
+        if symbol not in self.symbols:
+            raise ValueError("symbol is not configured for this runner")
+        if side not in {"buy", "sell"}:
+            raise ValueError("side must be buy or sell")
+        live = self.live_status(user_id)
+        if not live["ready"]:
+            blocker = next(iter(live.get("blockers") or []), "live gate is not ready")
+            raise LiveExecutionError(blocker)
+        if not self.live_order_execution_enabled:
+            raise LiveExecutionError("live order execution env switch is disabled")
+
+        credential = self.credential_for_user(user_id)
+        parent_client_oid = f"bc-test-{symbol.lower()}-{side}-{int(time.time())}-{uuid.uuid4().hex[:10]}"
+        self.acquire_live_lock(user_id, parent_client_oid)
+        entry_confirmed = False
+        close_submitted = False
+        requested_size = dec(0)
+        active_signal: Signal | None = None
+        try:
+            contract_spec = self.fetch_contract_specs(symbol)
+            reference_price = self.latest_closed_reference_price(symbol)
+            active_signal = self.minimum_live_test_signal(symbol, side, reference_price, contract_spec)
+            private_snapshot = self.refresh_user_private_snapshot(user_id)
+            if self.find_open_position(private_snapshot["positions"], active_signal) is not None:
+                raise LiveExecutionError(f"{symbol} {self.hold_side_for_signal(active_signal)} position is already open")
+            account_available = self.account_available_usdt(private_snapshot)
+            requested_size = self.minimum_test_order_size_for_signal(active_signal, account_available, contract_spec)
+            requested_margin = requested_size * active_signal.entry / dec(active_signal.leverage)
+
+            self.set_bitget_leverage(credential, active_signal)
+            order = self.place_market_order(credential, active_signal, requested_size, parent_client_oid)
+            order_id = str(order.get("orderId") or "") or None
+            detail = self.confirm_filled_order(credential, active_signal, order_id, parent_client_oid)
+            entry_confirmed = True
+
+            average_price = dec(detail.get("priceAvg") or active_signal.entry)
+            filled_size = dec(detail.get("baseVolume") or detail.get("size") or requested_size)
+            active_signal = self.minimum_live_test_signal(symbol, side, average_price, contract_spec)
+            snapshot = self.refresh_user_private_snapshot(user_id)
+            position = self.find_open_position(snapshot["positions"], active_signal)
+            if position is None:
+                raise LiveExecutionError("entry was filled but fresh position snapshot did not confirm an open position")
+            close_size = self.position_order_size(position) or filled_size
+            self.close_position_fail_closed(credential, active_signal)
+            close_submitted = True
+            self.confirm_position_closed(user_id, active_signal)
+            details = {
+                "mode": "server-live-test",
+                "minimumTest": "true",
+                "clientOid": redacted_identifier(parent_client_oid),
+                "filledSize": decimal_text(filled_size),
+                "averagePrice": decimal_text(average_price),
+                "entry": decimal_text(active_signal.entry),
+                "size": decimal_text(close_size),
+                "requestedMarginUSDT": decimal_text(requested_margin),
+                "leverage": "1x",
+                "closeSubmitted": "true",
+                "closeConfirmed": "true",
+                "protectionOrders": "0",
+            }
+            self.record_live_event(
+                user_id,
+                active_signal,
+                "info",
+                (
+                    f"Minimum live round-trip test completed. Side {side}, size {decimal_text(close_size)}, "
+                    f"entry {decimal_text(active_signal.entry)}, market close confirmed."
+                ),
+                details,
+            )
+            return {
+                "ok": True,
+                "symbol": symbol,
+                "side": side,
+                "mode": "server-live-test",
+                "size": decimal_text(close_size),
+                "requestedMarginUSDT": decimal_text(requested_margin),
+                "leverage": "1x",
+                "entry": decimal_text(active_signal.entry),
+                "closeSubmitted": True,
+                "closeConfirmed": True,
+                "protectionOrders": 0,
+                "message": f"{symbol} 1x minimum live round-trip test completed.",
+            }
+        except Exception as error:
+            failure_reason = self.public_live_error_text(error)
+            if entry_confirmed and active_signal is not None:
+                try:
+                    snapshot = self.refresh_user_private_snapshot(user_id)
+                    if self.find_open_position(snapshot["positions"], active_signal) is not None:
+                        self.close_position_fail_closed(credential, active_signal)
+                        close_submitted = True
+                except Exception:
+                    pass
+            log_signal = active_signal or Signal(
+                strategy_id="manual-minimum-live-test",
+                symbol=symbol,
+                side=side,
+                entry=dec(0),
+                stop=dec(0),
+                take_profit=dec(0),
+                reason="manual minimum live test",
+                leverage=1,
+            )
+            self.record_live_event(
+                user_id,
+                log_signal,
+                "error",
+                f"Minimum live test execution failed: {failure_reason}",
+                {
+                    "mode": "server-live-test",
+                    "minimumTest": "true",
+                    "failureReason": failure_reason,
+                    "clientOid": redacted_identifier(parent_client_oid),
+                    "failClosedAttempted": str(entry_confirmed).lower(),
+                    "closeSubmitted": str(close_submitted).lower(),
+                    "entry": decimal_text(log_signal.entry),
+                    "size": decimal_text(requested_size),
+                    "leverage": "1x",
+                },
+            )
+            raise
+        finally:
+            self.release_live_lock(user_id)
 
     def maybe_execute_live_signal(
         self,
@@ -5056,6 +5393,7 @@ class PaperRunner:
             )
             return True
         except Exception as error:
+            failure_reason = self.public_live_error_text(error)
             if entry_confirmed:
                 try:
                     snapshot = self.refresh_user_private_snapshot(user_id)
@@ -5067,9 +5405,10 @@ class PaperRunner:
                 user_id,
                 signal,
                 "error",
-                f"Server live execution failed: {error}",
+                f"Server live execution failed: {failure_reason}",
                 {
                     "mode": "server-live",
+                    "failureReason": failure_reason,
                     "clientOid": redacted_identifier(parent_client_oid),
                     "failClosedAttempted": str(entry_confirmed).lower(),
                     "entry": decimal_text(signal.entry),
@@ -5230,11 +5569,13 @@ class PaperRunner:
         if self.live_order_margin_usdt <= 0:
             order_blockers.append("live order margin USDT is not configured")
         order_execution_enabled = ready and not order_blockers
+        minimum_test_order_enabled = ready and self.live_order_execution_enabled
         return {
             "updatedAt": iso(checked_at),
             "mode": "server-live-gate",
             "ready": ready,
             "orderExecutionEnabled": order_execution_enabled,
+            "minimumTestOrderEnabled": minimum_test_order_enabled,
             "blockers": blockers,
             "orderBlockers": order_blockers,
             "control": control,
