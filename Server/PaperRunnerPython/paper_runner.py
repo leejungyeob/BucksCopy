@@ -1090,7 +1090,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             return
 
         action = self.route_action(parsed.path)
-        if action not in {"control", "live/control", "live/test-order", "strategies"}:
+        if action not in {"control", "live/control", "strategies"}:
             self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
         user_id = self.authorize_user()
@@ -1121,22 +1121,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
                 acknowledged_risk=bool(payload.get("acknowledgedRisk", False)),
                 updated_by="api",
             ))
-            return
-
-        if action == "live/test-order":
-            symbol = str(payload.get("symbol") or "").strip().upper()
-            side = str(payload.get("side") or "buy").strip().lower()
-            if payload.get("acknowledgedMinimumLiveTest") is not True:
-                self.write_json({"error": "acknowledgedMinimumLiveTest true is required"}, HTTPStatus.BAD_REQUEST)
-                return
-            try:
-                self.write_json(self.runner.execute_minimum_live_test_order(
-                    user_id,
-                    symbol=symbol,
-                    side=side,
-                ))
-            except (BitgetLoginError, LiveExecutionError, ValueError) as error:
-                self.write_json({"error": self.runner.public_live_error_text(error)}, HTTPStatus.CONFLICT)
             return
 
         if action == "strategies":
@@ -1274,7 +1258,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             "positions",
             "live/status",
             "live/control",
-            "live/test-order",
         }:
             return action
         return None
@@ -1457,7 +1440,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
-    .top-actions, .button-row, .command-actions, .panel-head-actions {
+    .top-actions, .button-row, .command-actions {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -1578,15 +1561,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
     .command-actions {
       justify-content: flex-end;
       flex: 0 0 auto;
-    }
-    .panel-head-actions {
-      justify-content: flex-end;
-      min-width: 0;
-    }
-    .panel-head-actions button {
-      min-height: 30px;
-      padding: 0 10px;
-      font-size: 12px;
     }
     .command-footer {
       min-height: 0;
@@ -2264,7 +2238,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             <div class="command-actions">
               <button type="button" data-action="refresh">새로고침</button>
               <button type="button" data-action="bitget-logout">로그아웃</button>
-              <button type="button" data-action="live-test-order" id="live-test-order" class="danger">진입/정리 테스트</button>
               <button type="button" data-action="automation-toggle" id="automation-toggle" class="primary">자동매매 시작</button>
             </div>
           </div>
@@ -2328,10 +2301,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           <section class="panel trade-log-panel">
             <div class="panel-head">
               <h2 class="panel-title">매매기록</h2>
-              <div class="panel-head-actions">
-                <button type="button" data-action="live-test-order" class="danger">진입/정리 테스트</button>
-                <span class="mini muted" id="log-count"></span>
-              </div>
+              <span class="mini muted" id="log-count"></span>
             </div>
             <div class="panel-body">
               <div id="log-summary" class="log-summary"></div>
@@ -3166,15 +3136,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         els.automationToggle.className = shouldStop ? "danger" : "primary";
         els.automationToggle.dataset.intent = shouldStop ? "stop" : "start";
         els.automationToggle.disabled = state.busy;
-        const testSymbol = state.selectedSymbol || state.status?.symbols?.[0] || "BTCUSDT";
-        const testDisabled = state.busy || !live.minimumTestOrderEnabled;
-        document.querySelectorAll('[data-action="live-test-order"]').forEach((button, index) => {
-          button.textContent = index === 0 ? `${testSymbol} 1x 진입/즉시정리` : "진입/정리 테스트";
-          button.disabled = testDisabled;
-          button.title = testDisabled
-            ? localizedLiveBlocker(blockers[0] || "live test order is not ready")
-            : `${testSymbol} 1x 최소 수량 진입 후 즉시 정리`;
-        });
       };
 
       const renderStrategies = () => {
@@ -3650,30 +3611,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         await refreshAll();
       };
 
-      const executeMinimumLiveTestOrder = async () => {
-        const symbol = state.selectedSymbol || state.status?.symbols?.[0] || "BTCUSDT";
-        const confirmed = window.confirm(`${symbol} 실계정에 1x 최소 수량 BUY 주문을 넣고 바로 시장가 청산합니다. 진행할까요?`);
-        if (!confirmed) {
-          return;
-        }
-        setBusy(true);
-        try {
-          const response = await api("/users/me/live/test-order", {
-            method: "POST",
-            body: {
-              symbol,
-              side: "buy",
-              acknowledgedMinimumLiveTest: true
-            }
-          });
-          setNotice(response.message || `${symbol} 최소 테스트 주문을 전송했습니다.`, "ok");
-          await refreshAll({ silent: true });
-        } finally {
-          setBusy(false);
-          render();
-        }
-      };
-
       const logoutBitget = async () => {
         try {
           if (token()) {
@@ -4088,8 +4025,6 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
             } else {
               await startAutomation();
             }
-          } else if (action === "live-test-order") {
-            await executeMinimumLiveTestOrder();
           } else if (action === "strategies-save") {
             await saveStrategies();
           } else if (action === "strategy-detail") {
