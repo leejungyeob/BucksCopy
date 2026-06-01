@@ -283,6 +283,7 @@ def run_backtest(config: BacktestConfig) -> dict[str, Any]:
     max_drawdown = Decimal("0")
     trades: list[dict[str, Any]] = []
     history: list[paper_runner.Candle] = []
+    evaluation_context = paper_runner.StrategyEvaluationContext(candles)
     equity_curve = [{
         "time": iso_text(candles[0].open_time),
         "strategy_id": config.strategy_id,
@@ -295,7 +296,7 @@ def run_backtest(config: BacktestConfig) -> dict[str, Any]:
     while index < len(candles):
         history.append(candles[index])
         evaluated_at = datetime.fromtimestamp(candles[index].open_time + paper_runner.TIMEFRAME_SECONDS, timezone.utc)
-        signal = paper_runner.evaluate_strategy(history, params, evaluated_at)
+        signal = paper_runner.evaluate_strategy(history, params, evaluated_at, context=evaluation_context)
         if signal is None:
             index += 1
             continue

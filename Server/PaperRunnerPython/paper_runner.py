@@ -526,6 +526,147 @@ def btc_macro_snapshot(
     }
 
 
+class StrategyEvaluationContext:
+    """Precomputed indicators for historical evaluation.
+
+    Live execution calls the same strategy functions without this context. Long
+    backtests pass it in so those functions do not recalculate EMA/ATR/macro
+    history from the first candle on every step.
+    """
+
+    def __init__(self, candles: list[Candle]):
+        self.candles = candles
+        self.close_prefix = self._prefix([candle.close for candle in candles])
+        self.volume_prefix = self._prefix([candle.volume for candle in candles])
+        self.true_range_prefix = self._true_range_prefix(candles)
+        self.ema_by_period: dict[int, list[Decimal | None]] = {}
+        self.day_index_by_candle: list[int] = []
+        self.days: list[tuple[int, Decimal]] = []
+        for candle in candles:
+            day = candle.open_time // 86_400
+            if self.days and self.days[-1][0] == day:
+                self.days[-1] = (day, candle.close)
+            else:
+                self.days.append((day, candle.close))
+            self.day_index_by_candle.append(len(self.days) - 1)
+        self.daily_close_prefix = self._prefix([close for _, close in self.days])
+        self.daily_rolling_high: list[Decimal] = []
+        high = dec(0)
+        for _, close in self.days:
+            high = max(high, close)
+            self.daily_rolling_high.append(high)
+
+    @staticmethod
+    def _prefix(values: list[Decimal]) -> list[Decimal]:
+        output = [dec(0)]
+        total = dec(0)
+        for value in values:
+            total += value
+            output.append(total)
+        return output
+
+    @staticmethod
+    def _range_sum(prefix: list[Decimal], start: int, end: int) -> Decimal:
+        return prefix[end + 1] - prefix[start]
+
+    @classmethod
+    def _true_range_prefix(cls, candles: list[Candle]) -> list[Decimal]:
+        ranges = [dec(0)]
+        total = dec(0)
+        for index, candle in enumerate(candles):
+            if index == 0:
+                ranges.append(total)
+                continue
+            previous_close = candles[index - 1].close
+            total += max(candle.high - candle.low, abs(candle.high - previous_close), abs(candle.low - previous_close))
+            ranges.append(total)
+        return ranges
+
+    def simple_moving_average(self, period: int, ending_at: int) -> Decimal | None:
+        if period <= 0 or ending_at < 0 or ending_at >= len(self.candles) or ending_at - period + 1 < 0:
+            return None
+        return self._range_sum(self.close_prefix, ending_at - period + 1, ending_at) / dec(period)
+
+    def average_volume(self, period: int, ending_at: int) -> Decimal | None:
+        if period <= 0 or ending_at < 0 or ending_at >= len(self.candles) or ending_at - period + 1 < 0:
+            return None
+        return self._range_sum(self.volume_prefix, ending_at - period + 1, ending_at) / dec(period)
+
+    def average_true_range(self, period: int, ending_at: int) -> Decimal | None:
+        if period <= 0 or ending_at <= 0 or ending_at >= len(self.candles) or ending_at - period + 1 <= 0:
+            return None
+        return self._range_sum(self.true_range_prefix, ending_at - period + 1, ending_at) / dec(period)
+
+    def exponential_moving_average(self, period: int, ending_at: int) -> Decimal | None:
+        if period <= 0 or ending_at < period - 1 or ending_at >= len(self.candles):
+            return None
+        if period not in self.ema_by_period:
+            values: list[Decimal | None] = [None] * len(self.candles)
+            current = self._range_sum(self.close_prefix, 0, period - 1) / dec(period)
+            values[period - 1] = current
+            alpha = dec(2) / dec(period + 1)
+            for index in range(period, len(self.candles)):
+                current = self.candles[index].close * alpha + current * (dec(1) - alpha)
+                values[index] = current
+            self.ema_by_period[period] = values
+        return self.ema_by_period[period][ending_at]
+
+    def daily_sma(self, period: int, ending_at: int) -> Decimal | None:
+        if period <= 0 or ending_at < 0 or ending_at >= len(self.days) or ending_at - period + 1 < 0:
+            return None
+        return self._range_sum(self.daily_close_prefix, ending_at - period + 1, ending_at) / dec(period)
+
+    def btc_macro_snapshot(
+        self,
+        ending_at: int,
+        ma_period: int,
+        slope_days: int,
+        return_days: int,
+        bull_return_threshold: Decimal,
+        bear_return_threshold: Decimal,
+        bear_drawdown_threshold: Decimal,
+    ) -> dict[str, Any]:
+        if not self.candles or ending_at < 0 or ending_at >= len(self.candles) or len(self.days) < 2:
+            return {"regime": 0, "drawdown": None}
+        current_index = self.day_index_by_candle[ending_at]
+        if current_index <= 0:
+            return {"regime": 0, "drawdown": None}
+
+        previous_index = current_index - 1
+        previous_close = self.days[previous_index][1]
+        rolling_high = self.daily_rolling_high[previous_index]
+        drawdown = previous_close / rolling_high - dec(1) if rolling_high > 0 else dec(0)
+
+        previous_ma = self.daily_sma(ma_period, previous_index)
+        prior_ma = self.daily_sma(ma_period, previous_index - slope_days)
+        if (
+            previous_ma is None
+            or prior_ma is None
+            or previous_index - return_days < 0
+            or prior_ma <= 0
+            or previous_ma <= 0
+            or self.days[previous_index - return_days][1] <= 0
+        ):
+            return {"regime": 0, "drawdown": drawdown}
+
+        slope = previous_ma / prior_ma - dec(1)
+        period_return = previous_close / self.days[previous_index - return_days][1] - dec(1)
+        if previous_close >= previous_ma and slope > 0 and period_return >= bull_return_threshold:
+            regime = 1
+        elif previous_close <= previous_ma and (
+            slope < 0 or period_return <= bear_return_threshold or drawdown <= -bear_drawdown_threshold
+        ):
+            regime = -1
+        else:
+            regime = 0
+        return {
+            "regime": regime,
+            "drawdown": drawdown,
+            "periodReturn": period_return,
+            "slope": slope,
+        }
+
+
 def has_valid_price_layout(signal: Signal) -> bool:
     if signal.side == "buy":
         return signal.stop < signal.entry < signal.take_profit
@@ -551,15 +692,21 @@ def allowed_weekday(mask: int, generated_at: datetime) -> bool:
     return mask & (1 << weekday) != 0
 
 
-def evaluate_btc_phase(candles: list[Candle], params: dict[str, Any], generated_at: datetime) -> Signal | None:
+def evaluate_btc_phase(
+    candles: list[Candle],
+    params: dict[str, Any],
+    generated_at: datetime,
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
     del generated_at
     if len(candles) < params["slow_mean_period"] or len(candles) < params["reclaim_lookback"] + 1:
         return None
 
-    fast_mean = simple_moving_average(candles, params["fast_mean_period"])
-    slow_mean = simple_moving_average(candles, params["slow_mean_period"])
-    atr = average_true_range(candles, params["atr_period"])
-    avg_volume = average_volume(candles, params["volume_lookback"])
+    ending_at = len(candles) - 1
+    fast_mean = context.simple_moving_average(params["fast_mean_period"], ending_at) if context else simple_moving_average(candles, params["fast_mean_period"])
+    slow_mean = context.simple_moving_average(params["slow_mean_period"], ending_at) if context else simple_moving_average(candles, params["slow_mean_period"])
+    atr = context.average_true_range(params["atr_period"], ending_at) if context else average_true_range(candles, params["atr_period"])
+    avg_volume = context.average_volume(params["volume_lookback"], ending_at) if context else average_volume(candles, params["volume_lookback"])
     previous_high = highest_high(candles, params["reclaim_lookback"], len(candles) - 2)
     previous_low = lowest_low(candles, params["reclaim_lookback"], len(candles) - 2)
     if None in {fast_mean, slow_mean, atr, avg_volume, previous_high, previous_low}:
@@ -643,7 +790,12 @@ def pulse_stop_price(side: str, mode: int, latest: Candle, entry: Decimal, fast_
     return max(latest.high, fast_mean + atr * buffer)
 
 
-def evaluate_vacuum_pulse(candles: list[Candle], params: dict[str, Any], generated_at: datetime) -> Signal | None:
+def evaluate_vacuum_pulse(
+    candles: list[Candle],
+    params: dict[str, Any],
+    generated_at: datetime,
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
     if not allowed_weekday(params["weekday_mask"], generated_at):
         return None
     if (
@@ -653,10 +805,11 @@ def evaluate_vacuum_pulse(candles: list[Candle], params: dict[str, Any], generat
     ):
         return None
 
-    fast_mean = simple_moving_average(candles, params["fast_mean_period"])
-    slow_mean = simple_moving_average(candles, params["slow_mean_period"])
-    atr = average_true_range(candles, params["atr_period"])
-    avg_volume = average_volume(candles, params["volume_lookback"])
+    ending_at = len(candles) - 1
+    fast_mean = context.simple_moving_average(params["fast_mean_period"], ending_at) if context else simple_moving_average(candles, params["fast_mean_period"])
+    slow_mean = context.simple_moving_average(params["slow_mean_period"], ending_at) if context else simple_moving_average(candles, params["slow_mean_period"])
+    atr = context.average_true_range(params["atr_period"], ending_at) if context else average_true_range(candles, params["atr_period"])
+    avg_volume = context.average_volume(params["volume_lookback"], ending_at) if context else average_volume(candles, params["volume_lookback"])
     previous_high = highest_high(candles, params["reclaim_lookback"], len(candles) - 2)
     previous_low = lowest_low(candles, params["reclaim_lookback"], len(candles) - 2)
     if None in {fast_mean, slow_mean, atr, avg_volume, previous_high, previous_low}:
@@ -788,23 +941,40 @@ def fixed_percent_signal(
     )
 
 
-def evaluate_btc_regime_session_fade(candles: list[Candle], params: dict[str, Any]) -> Signal | None:
+def evaluate_btc_regime_session_fade(
+    candles: list[Candle],
+    params: dict[str, Any],
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
     if len(candles) <= params["lookback"]:
         return None
     latest = candles[-1]
-    trend_ema = exponential_moving_average(candles, params["trend_ema_period"])
-    atr = average_true_range(candles, params["atr_period"])
+    ending_at = len(candles) - 1
+    trend_ema = context.exponential_moving_average(params["trend_ema_period"], ending_at) if context else exponential_moving_average(candles, params["trend_ema_period"])
+    atr = context.average_true_range(params["atr_period"], ending_at) if context else average_true_range(candles, params["atr_period"])
     if trend_ema is None or atr is None or latest.close <= 0:
         return None
 
-    macro = btc_macro_snapshot(
-        candles,
-        params["macro_ma_period"],
-        params["macro_slope_days"],
-        params["macro_return_days"],
-        params["bull_return_threshold"],
-        params["bear_return_threshold"],
-        params["bear_drawdown_threshold"],
+    macro = (
+        context.btc_macro_snapshot(
+            ending_at,
+            params["macro_ma_period"],
+            params["macro_slope_days"],
+            params["macro_return_days"],
+            params["bull_return_threshold"],
+            params["bear_return_threshold"],
+            params["bear_drawdown_threshold"],
+        )
+        if context
+        else btc_macro_snapshot(
+            candles,
+            params["macro_ma_period"],
+            params["macro_slope_days"],
+            params["macro_return_days"],
+            params["bull_return_threshold"],
+            params["bear_return_threshold"],
+            params["bear_drawdown_threshold"],
+        )
     )
     regime = int(macro.get("regime", 0))
     allowed_hours = BTC_REGIME_BULL_HOURS if regime == 1 else BTC_REGIME_BEAR_HOURS if regime == -1 else BTC_REGIME_NEUTRAL_HOURS
@@ -841,22 +1011,39 @@ def evaluate_btc_regime_session_fade(candles: list[Candle], params: dict[str, An
     )
 
 
-def evaluate_btc_bull_pullback_long(candles: list[Candle], params: dict[str, Any]) -> Signal | None:
+def evaluate_btc_bull_pullback_long(
+    candles: list[Candle],
+    params: dict[str, Any],
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
     if len(candles) <= params["lookback"]:
         return None
     latest = candles[-1]
-    trend_ema = exponential_moving_average(candles, params["trend_ema_period"])
+    ending_at = len(candles) - 1
+    trend_ema = context.exponential_moving_average(params["trend_ema_period"], ending_at) if context else exponential_moving_average(candles, params["trend_ema_period"])
     if trend_ema is None or latest.close <= 0:
         return None
 
-    macro = btc_macro_snapshot(
-        candles,
-        params["macro_ma_period"],
-        params["macro_slope_days"],
-        params["macro_return_days"],
-        params["bull_return_threshold"],
-        dec("-0.03"),
-        dec("0.25"),
+    macro = (
+        context.btc_macro_snapshot(
+            ending_at,
+            params["macro_ma_period"],
+            params["macro_slope_days"],
+            params["macro_return_days"],
+            params["bull_return_threshold"],
+            dec("-0.03"),
+            dec("0.25"),
+        )
+        if context
+        else btc_macro_snapshot(
+            candles,
+            params["macro_ma_period"],
+            params["macro_slope_days"],
+            params["macro_return_days"],
+            params["bull_return_threshold"],
+            dec("-0.03"),
+            dec("0.25"),
+        )
     )
     if int(macro.get("regime", 0)) != 1:
         return None
@@ -888,15 +1075,20 @@ def evaluate_btc_bull_pullback_long(candles: list[Candle], params: dict[str, Any
     )
 
 
-def evaluate_strategy(candles: list[Candle], params: dict[str, Any], generated_at: datetime) -> Signal | None:
+def evaluate_strategy(
+    candles: list[Candle],
+    params: dict[str, Any],
+    generated_at: datetime,
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
     if params["strategy_id"] == BTC_PHASE_PARAMS["strategy_id"]:
-        signal = evaluate_btc_phase(candles, params, generated_at)
+        signal = evaluate_btc_phase(candles, params, generated_at, context)
     elif params["strategy_id"] == BTC_REGIME_SESSION_FADE_PARAMS["strategy_id"]:
-        signal = evaluate_btc_regime_session_fade(candles, params)
+        signal = evaluate_btc_regime_session_fade(candles, params, context)
     elif params["strategy_id"] == BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"]:
-        signal = evaluate_btc_bull_pullback_long(candles, params)
+        signal = evaluate_btc_bull_pullback_long(candles, params, context)
     else:
-        signal = evaluate_vacuum_pulse(candles, params, generated_at)
+        signal = evaluate_vacuum_pulse(candles, params, generated_at, context)
     if signal and risk_allowed(signal):
         return signal
     return None

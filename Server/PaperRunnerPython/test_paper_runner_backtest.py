@@ -1,5 +1,6 @@
 import sys
 import unittest
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -33,16 +34,40 @@ class PaperRunnerBacktestTests(unittest.TestCase):
         original = paper_runner.evaluate_strategy
         calls = 0
 
-        def wrapped(candles, params, generated_at):
+        def wrapped(candles, params, generated_at, context=None):
             nonlocal calls
             calls += 1
-            return original(candles, params, generated_at)
+            return original(candles, params, generated_at, context=context)
 
         with patch.object(paper_runner_backtest.paper_runner, "evaluate_strategy", side_effect=wrapped):
             result = paper_runner_backtest.run_backtest(self.config("eth-15m-vacuum-pulse"))
 
         self.assertGreater(calls, 0)
         self.assertEqual(result["summary"]["trade_count"], 1)
+
+    def test_cached_strategy_context_matches_uncached_runtime_evaluator(self):
+        for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
+            with self.subTest(strategy_id=strategy_id):
+                config = self.config(strategy_id)
+                params = paper_runner_backtest.strategy_params(strategy_id)
+                candles = paper_runner_backtest.load_candles(config)
+                context = paper_runner.StrategyEvaluationContext(candles)
+                history = []
+                for candle in candles:
+                    history.append(candle)
+                    evaluated_at = datetime.fromtimestamp(candle.open_time + paper_runner.TIMEFRAME_SECONDS, paper_runner.timezone.utc)
+                    uncached = paper_runner.evaluate_strategy(history, params, evaluated_at)
+                    cached = paper_runner.evaluate_strategy(history, params, evaluated_at, context=context)
+                    self.assertEqual(uncached is None, cached is None)
+                    if uncached is None or cached is None:
+                        continue
+                    self.assertEqual(uncached.strategy_id, cached.strategy_id)
+                    self.assertEqual(uncached.symbol, cached.symbol)
+                    self.assertEqual(uncached.side, cached.side)
+                    self.assertEqual(uncached.entry, cached.entry)
+                    self.assertEqual(uncached.stop, cached.stop)
+                    self.assertEqual(uncached.take_profit, cached.take_profit)
+                    self.assertEqual(uncached.leverage, cached.leverage)
 
     def test_active_strategy_backtests_are_deterministic_on_fixture_snapshot(self):
         expected = {
