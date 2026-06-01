@@ -5338,6 +5338,31 @@ class PaperRunner:
     ) -> bool:
         live = self.live_status(user_id)
         if not live["ready"] or not live["orderExecutionEnabled"]:
+            live_blockers = [
+                str(item)
+                for item in [
+                    *(live.get("blockers") or []),
+                    *(live.get("orderBlockers") or []),
+                ]
+                if str(item).strip()
+            ]
+            failure_reason = "; ".join(live_blockers) or "live gate is not ready"
+            self.record_live_event(
+                user_id,
+                signal,
+                "error",
+                f"Server live signal was not executed: {failure_reason}",
+                {
+                    "mode": "server-live",
+                    "failureReason": failure_reason,
+                    "liveReady": str(live.get("ready", False)).lower(),
+                    "orderExecutionEnabled": str(live.get("orderExecutionEnabled", False)).lower(),
+                    "entry": decimal_text(signal.entry),
+                    "tp1": decimal_text(signal.partial_take_profit),
+                    "tp2": decimal_text(signal.take_profit),
+                    "stopLoss": decimal_text(signal.stop),
+                },
+            )
             return False
         credential = self.credential_for_user(user_id)
         parent_client_oid = (

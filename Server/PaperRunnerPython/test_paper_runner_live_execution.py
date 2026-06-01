@@ -172,6 +172,35 @@ class ServerLiveExecutionTests(unittest.TestCase):
             )
             self.assertEqual(logs[-1]["metadata"]["details"]["failClosedAttempted"], "false")
 
+    def test_live_signal_blocked_by_gate_records_reason_without_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runner = self.make_runner(directory)
+            runner.live_status = lambda _user_id: {
+                "ready": True,
+                "orderExecutionEnabled": False,
+                "blockers": [],
+                "orderBlockers": ["live order margin USDT is not configured"],
+            }
+            runner.bitget_signed_post = lambda *_args: self.fail("order API must not be called")
+
+            did_execute = runner.maybe_execute_live_signal(
+                self.user_id,
+                self.signal(),
+                1_748_742_300_000,
+                self.mod.now_utc(),
+                self.private_snapshot(),
+            )
+
+            self.assertFalse(did_execute)
+            logs = self.read_logs(directory)
+            self.assertEqual(logs[-1]["category"], "risk")
+            self.assertEqual(logs[-1]["severity"], "error")
+            self.assertEqual(
+                logs[-1]["metadata"]["details"]["failureReason"],
+                "live order margin USDT is not configured",
+            )
+            self.assertEqual(logs[-1]["metadata"]["details"]["orderExecutionEnabled"], "false")
+
     def test_minimum_live_test_order_enters_then_closes_position(self):
         with tempfile.TemporaryDirectory() as directory:
             runner = self.make_runner(directory)
