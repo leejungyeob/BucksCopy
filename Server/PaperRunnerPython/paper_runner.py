@@ -424,7 +424,9 @@ STRATEGY_BACKTESTS = {
         "profitLockStopCount": 46,
         "pureStopCount": 77,
         "timeExitCount": 0,
-        "robustness": "LOWER",
+        "robustness": "낮음",
+        "robustnessCode": "LOWER",
+        "robustnessNote": "4개 연도 모두 플러스, 반기 6/8 플러스, 최악 반기 -4.41%.",
     },
     "btc-15m-regime-session-fade": {
         "label": "최근 4년 · 공식 러너 · 10x · 5% risk",
@@ -443,7 +445,8 @@ STRATEGY_BACKTESTS = {
         "profitLockStopCount": 118,
         "pureStopCount": 206,
         "timeExitCount": 279,
-        "robustness": "MEDIUM",
+        "robustness": "중간",
+        "robustnessCode": "MEDIUM",
         "robustnessNote": "4개 연도/8개 반기 모두 플러스. 단, 극단적 복리 결과라 forward 검증 필요.",
     },
     "btc-15m-bull-pullback-long": {
@@ -463,7 +466,9 @@ STRATEGY_BACKTESTS = {
         "profitLockStopCount": 22,
         "pureStopCount": 33,
         "timeExitCount": 100,
-        "robustness": "LOWER",
+        "robustness": "낮음",
+        "robustnessCode": "LOWER",
+        "robustnessNote": "4개 연도 모두 플러스, 반기 6/8 플러스, MDD 21.91%.",
     },
     "eth-15m-vacuum-pulse": {
         "label": "최근 4년 · 공식 러너 · 10x · 5% risk",
@@ -482,7 +487,9 @@ STRATEGY_BACKTESTS = {
         "profitLockStopCount": 35,
         "pureStopCount": 59,
         "timeExitCount": 0,
-        "robustness": "LOWER",
+        "robustness": "낮음",
+        "robustnessCode": "LOWER",
+        "robustnessNote": "4개 연도 모두 플러스, 반기 7/8 플러스, 최악 반기 -9.73%.",
     },
 }
 
@@ -2712,6 +2719,31 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         return `${numberText(parsed * 100, 2)}%`;
       };
 
+      const decimalNumberText = (value, digits = 2, signed = false) => {
+        const raw = String(value ?? "").replaceAll(",", "").trim();
+        if (!raw) {
+          return "-";
+        }
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) {
+          return String(value ?? "");
+        }
+        const sign = parsed < 0 ? "-" : signed && (parsed > 0 || raw.startsWith("+")) ? "+" : "";
+        return `${sign}${Math.abs(parsed).toLocaleString("ko-KR", {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits
+        })}`;
+      };
+
+      const percentValueText = (value) => {
+        const text = decimalNumberText(value, 2, true);
+        return text === "-" ? "-" : `${text}%`;
+      };
+
+      const amountText = (value) => decimalNumberText(value, 2, false);
+      const countText = (value) => decimalNumberText(value, 0, false);
+      const ratioText = (value, digits = 2) => decimalNumberText(value, digits, false);
+
       const durationText = (seconds) => {
         const safeSeconds = Math.max(Number(seconds) || 0, 0);
         const days = Math.floor(safeSeconds / 86400);
@@ -3388,18 +3420,18 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
           const tags = [
             strategy.symbol,
             strategy.timeframe,
-            backtest.profitFactor ? `PF ${backtest.profitFactor}` : "",
-            backtest.winRatePercent ? `승률 ${backtest.winRatePercent}%` : "",
-            backtest.maxDrawdownPercent ? `MDD ${backtest.maxDrawdownPercent}%` : ""
+            backtest.profitFactor ? `PF ${ratioText(backtest.profitFactor, 2)}` : "",
+            backtest.winRatePercent ? `승률 ${percentValueText(backtest.winRatePercent)}` : "",
+            backtest.maxDrawdownPercent ? `MDD ${percentValueText(backtest.maxDrawdownPercent)}` : ""
           ].filter(Boolean);
           const details = [
-            ["수익률", backtest.netReturnPercent ? `${backtest.netReturnPercent}%` : "-"],
-            ["최종 자산", backtest.finalBalance || "-"],
-            ["승률", backtest.winRatePercent ? `${backtest.winRatePercent}%` : "-"],
-            ["MDD", backtest.maxDrawdownPercent ? `${backtest.maxDrawdownPercent}%` : "-"],
-            ["PF", backtest.profitFactor || "-"],
-            ["총 거래", backtest.totalTrades || "-"],
-            ["연 거래", backtest.annualTrades || "-"],
+            ["수익률", backtest.netReturnPercent ? percentValueText(backtest.netReturnPercent) : "-"],
+            ["최종 자산", backtest.finalBalance ? amountText(backtest.finalBalance) : "-"],
+            ["승률", backtest.winRatePercent ? percentValueText(backtest.winRatePercent) : "-"],
+            ["MDD", backtest.maxDrawdownPercent ? percentValueText(backtest.maxDrawdownPercent) : "-"],
+            ["PF", backtest.profitFactor ? ratioText(backtest.profitFactor, 2) : "-"],
+            ["총 거래", backtest.totalTrades ? countText(backtest.totalTrades) : "-"],
+            ["연 거래", backtest.annualTrades ? ratioText(backtest.annualTrades, 1) : "-"],
             ["과최적화", backtest.robustness || "-"],
             ["레버리지", parameters.leverage ? `${parameters.leverage}x` : "-"],
             ["RR", parameters.reward_risk_ratio || parameters.tight_reward_risk_ratio || "-"]
@@ -3430,6 +3462,7 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
                   ${backtest.label ? `<span class="tag">${escapeHTML(backtest.label)}</span>` : ""}
                   ${backtest.period ? `<span class="tag">${escapeHTML(backtest.period)}</span>` : ""}
                   ${backtest.robustnessNote ? `<span class="tag">${escapeHTML(backtest.robustnessNote)}</span>` : ""}
+                  <span class="tag">과최적화 기준: 연도/반기 플러스 비율, 최악 구간 손실, 수익 집중도, 거래 수, MDD, 극단 복리</span>
                   ${paramTags.map(([key, value]) => `<span class="tag">${escapeHTML(key)} ${escapeHTML(value)}</span>`).join("")}
                 </div>
               </div>

@@ -61,6 +61,8 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 self.assertEqual(metadata["source"], "paper_runner.evaluate_strategy")
                 self.assertIn("2022-05-24", metadata["period"])
                 self.assertIn("2026-05-24", metadata["period"])
+                self.assertIn(metadata["robustness"], {"낮음", "중간"})
+                self.assertTrue(metadata["robustnessNote"])
 
     def test_cached_strategy_context_matches_uncached_runtime_evaluator(self):
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
