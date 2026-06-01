@@ -171,7 +171,7 @@ def clip(value: float, low: float, high: float) -> float:
     return min(max(value, low), high)
 
 
-def run_dynamic_top1(candles: list[Candle]) -> dict[str, Any]:
+def run_dynamic_top1(candles: list[Candle], include_trades: bool = False) -> dict[str, Any]:
     close = [c.close for c in candles]
     high = [c.high for c in candles]
     low = [c.low for c in candles]
@@ -223,7 +223,14 @@ def run_dynamic_top1(candles: list[Candle]) -> dict[str, Any]:
             balance += net
             peak = max(peak, balance)
             max_dd = max(max_dd, (peak - balance) / peak * 100.0)
-            trades.append({"pnl": net, "return_pct": net / before * 100.0, "reason": reason, "side": side})
+            trades.append({
+                "entry_time": position["entry_time"],
+                "exit_time": c.open_time,
+                "pnl": net,
+                "return_pct": net / before * 100.0,
+                "reason": reason,
+                "side": side,
+            })
             equity.append({"time": utc_text(c.open_time), "equity": balance})
             position = None
             continue
@@ -256,15 +263,45 @@ def run_dynamic_top1(candles: list[Candle]) -> dict[str, Any]:
             take = entry * (1.0 - 0.02)
             side = "short"
         notional = balance * margin * lev
-        position = {"side": side, "entry_fill": entry, "stop": stop, "take": take, "notional": notional, "entry_fee": notional * 0.0005}
-    return summarize("dynamic-top1-conservative-v2", "Dynamic Top1 Conservative v2", "BTCUSDT", candles, trades, equity, balance, max_dd, initial=10000.0)
+        position = {
+            "side": side,
+            "entry_time": c.open_time,
+            "entry_fill": entry,
+            "stop": stop,
+            "take": take,
+            "notional": notional,
+            "entry_fee": notional * 0.0005,
+        }
+    return summarize(
+        "dynamic-top1-conservative-v2",
+        "Dynamic Top1 Conservative v2",
+        "BTCUSDT",
+        candles,
+        trades,
+        equity,
+        balance,
+        max_dd,
+        initial=10000.0,
+        include_trades=include_trades,
+    )
 
 
-def summarize(strategy_id: str, name: str, symbol: str, candles: list[Candle], trades: list[dict[str, Any]], equity: list[dict[str, Any]], balance: float, max_dd: float, initial: float = INITIAL) -> dict[str, Any]:
+def summarize(
+    strategy_id: str,
+    name: str,
+    symbol: str,
+    candles: list[Candle],
+    trades: list[dict[str, Any]],
+    equity: list[dict[str, Any]],
+    balance: float,
+    max_dd: float,
+    initial: float = INITIAL,
+    include_trades: bool = False,
+) -> dict[str, Any]:
     gross_profit = sum(t["pnl"] for t in trades if t["pnl"] > 0)
     gross_loss = sum(t["pnl"] for t in trades if t["pnl"] < 0)
     wins = sum(1 for t in trades if t["pnl"] > 0)
-    return {
+    summary = {
         "strategy_id": strategy_id,
         "strategy_name": name,
         "symbol": symbol,
@@ -283,6 +320,9 @@ def summarize(strategy_id: str, name: str, symbol: str, candles: list[Candle], t
         "time_exit_count": sum(1 for t in trades if "time_exit" in t["reason"]),
         "equity_curve": equity,
     }
+    if include_trades:
+        summary["trades"] = trades
+    return summary
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
