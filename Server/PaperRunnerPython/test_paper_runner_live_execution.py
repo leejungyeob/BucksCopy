@@ -90,6 +90,37 @@ class ServerLiveExecutionTests(unittest.TestCase):
         path = Path(data_dir) / "users" / self.user_id / "trade-event-logs.jsonl"
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
+    def test_web_access_profiles_drop_stale_strategy_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runner = self.mod.PaperRunner.__new__(self.mod.PaperRunner)
+            runner.web_access_profiles_path = Path(directory) / "web-access-profiles.json"
+            runner.web_access_profiles_path.write_text(
+                json.dumps(
+                    {
+                        "profiles": [
+                            {
+                                "profileID": "friend",
+                                "name": "Friend",
+                                "accessKey": "friend-key",
+                                "allowedStrategyIDs": [
+                                    "btc-15m-vacuum-pulse",
+                                    "btc-15m-bull-pullback-long",
+                                    "btc-15m-pulse-107",
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            profiles = runner.load_web_access_profiles()
+
+            self.assertEqual(
+                profiles["friend"].allowed_strategy_ids,
+                ("btc-15m-vacuum-pulse", "btc-15m-pulse-107"),
+            )
+
     def test_live_signal_runs_full_hedge_order_sequence_with_bitget_payloads(self):
         with tempfile.TemporaryDirectory() as directory:
             runner = self.make_runner(directory)

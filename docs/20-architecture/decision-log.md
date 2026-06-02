@@ -912,4 +912,5 @@
 - Consequences:
   - 웹 전략 목록과 서버 live closed-candle 평가에서 BTC는 두 전략만 후보로 생성됩니다.
   - 삭제된 전략 ID는 `paper_runner_backtest.py`에서도 더 이상 선택할 수 없습니다.
+  - 저장된 web access profile에 삭제된 전략 ID가 남아 있어도 startup을 막지 않고 현재 registry에 남은 전략 ID만 허용합니다.
   - Pulse 107은 스윕으로 발견된 후보라 소액 forward 검증 리스크를 전략 카드에 계속 표시합니다.

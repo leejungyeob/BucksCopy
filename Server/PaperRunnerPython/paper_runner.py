@@ -4163,12 +4163,10 @@ class PaperRunner:
             if raw_allowed == "*":
                 allowed_strategy_ids = ("*",)
             elif isinstance(raw_allowed, list) and all(isinstance(value, str) for value in raw_allowed):
-                allowed_strategy_ids = tuple(strategy_id.strip() for strategy_id in raw_allowed if strategy_id.strip())
+                requested_strategy_ids = tuple(strategy_id.strip() for strategy_id in raw_allowed if strategy_id.strip())
+                allowed_strategy_ids = tuple(strategy_id for strategy_id in requested_strategy_ids if strategy_id in known_ids)
             else:
                 raise ValueError("web access profile allowedStrategyIDs must be a string array or '*'.")
-            unknown = sorted(set(allowed_strategy_ids) - known_ids - {"*"})
-            if unknown:
-                raise ValueError(f"web access profile references unknown strategy id: {unknown[0]}")
             loaded[profile_id] = WebAccessProfile(
                 profile_id=profile_id,
                 name=name.strip() or profile_id,
