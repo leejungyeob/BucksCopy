@@ -122,9 +122,13 @@ def sized_position_margin_ratio(signal: paper_runner.Signal) -> tuple[Decimal, D
     full_margin_risk_percent = abs(signal.entry - signal.stop) / signal.entry * Decimal(signal.leverage) * Decimal("100")
     if full_margin_risk_percent <= 0:
         return Decimal("0"), Decimal("0")
+    maximum_risk_percent = signal.account_risk_percent or MAXIMUM_RISK_PER_TRADE_PERCENT
+    maximum_position_margin_ratio = MAXIMUM_POSITION_MARGIN_RATIO
+    if signal.order_margin_multiplier > 0:
+        maximum_position_margin_ratio *= signal.order_margin_multiplier
     margin_ratio = min(
-        MAXIMUM_POSITION_MARGIN_RATIO,
-        MAXIMUM_RISK_PER_TRADE_PERCENT / full_margin_risk_percent,
+        maximum_position_margin_ratio,
+        maximum_risk_percent / full_margin_risk_percent,
     )
     return margin_ratio, full_margin_risk_percent * margin_ratio
 

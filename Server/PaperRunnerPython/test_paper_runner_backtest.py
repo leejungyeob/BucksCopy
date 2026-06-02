@@ -49,7 +49,8 @@ class PaperRunnerBacktestTests(unittest.TestCase):
         expected_returns = {
             "btc-15m-vacuum-pulse": "+634.03",
             "btc-15m-pulse-107": "+389.31",
-            "eth-15m-vacuum-pulse": "+64.78",
+            "eth-15m-vol-reversal-combo-balanced": "+111.43",
+            "eth-15m-donchian-breakdown-v2-guarded-balanced": "+159.37",
         }
 
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
@@ -118,6 +119,25 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                     Decimal(summary["max_drawdown_percent"]).quantize(Decimal("0.000001")),
                     expectation["max_drawdown_percent"],
                 )
+
+    def test_signal_sizing_honors_strategy_risk_budget(self):
+        signal = paper_runner.Signal(
+            strategy_id="fixture",
+            symbol="ETHUSDT",
+            side="buy",
+            entry=Decimal("100"),
+            stop=Decimal("95"),
+            take_profit=Decimal("120"),
+            reason="fixture",
+            leverage=1,
+            account_risk_percent=Decimal("2.5"),
+            order_margin_multiplier=Decimal("0.5"),
+        )
+
+        margin_ratio, account_risk_percent = paper_runner_backtest.sized_position_margin_ratio(signal)
+
+        self.assertEqual(margin_ratio, Decimal("0.5"))
+        self.assertEqual(account_risk_percent, Decimal("2.50"))
 
 
 if __name__ == "__main__":

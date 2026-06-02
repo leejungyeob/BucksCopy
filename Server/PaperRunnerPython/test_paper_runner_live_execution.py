@@ -173,6 +173,25 @@ class ServerLiveExecutionTests(unittest.TestCase):
             self.assertEqual(logs[-1]["severity"], "info")
             self.assertEqual(logs[-1]["metadata"]["details"]["protectionOrders"], "3")
 
+    def test_order_size_uses_signal_margin_multiplier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runner = self.make_runner(directory)
+            signal = self.mod.Signal(
+                strategy_id="eth-15m-vol-reversal-combo-balanced",
+                symbol="BTCUSDT",
+                side="buy",
+                entry=Decimal("73865"),
+                stop=Decimal("73716"),
+                take_profit=Decimal("74386.5"),
+                reason="fixture",
+                leverage=10,
+                order_margin_multiplier=Decimal("0.5"),
+            )
+
+            size = runner.order_size_for_signal(signal, Decimal("100"), runner.fetch_contract_specs("BTCUSDT"))
+
+            self.assertEqual(size, Decimal("0.0006"))
+
     def test_live_signal_failure_log_keeps_sanitized_bitget_reason(self):
         with tempfile.TemporaryDirectory() as directory:
             runner = self.make_runner(directory)

@@ -7,7 +7,8 @@
       "allowedStrategyIDs": [
         "btc-15m-vacuum-pulse",
         "btc-15m-pulse-107",
-        "eth-15m-vacuum-pulse"
+        "eth-15m-vol-reversal-combo-balanced",
+        "eth-15m-donchian-breakdown-v2-guarded-balanced"
       ]
     }
   ]

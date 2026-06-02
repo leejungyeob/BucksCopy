@@ -914,3 +914,23 @@
   - 삭제된 전략 ID는 `paper_runner_backtest.py`에서도 더 이상 선택할 수 없습니다.
   - 저장된 web access profile에 삭제된 전략 ID가 남아 있어도 startup을 막지 않고 현재 registry에 남은 전략 ID만 허용합니다.
   - Pulse 107은 스윕으로 발견된 후보라 소액 forward 검증 리스크를 전략 카드에 계속 표시합니다.
+
+## 0051. Activate Two Balanced ETH Strategies
+
+- Status: accepted
+- Date: 2026-06-02
+- Context:
+  - 사용자는 ETHUSDT도 도파민/거래 빈도를 위해 실전 후보 2개를 함께 운용하길 원했습니다.
+  - `ETH 15m Volatility Reversal Combo`와 `ETH 15m Donchian Breakdown V2 Guarded`는 각각 후보로 의미가 있었지만, 5% risk 그대로 단순 조합하면 전체 보유 history MDD가 과도하게 커졌습니다.
+  - 과최적화 위험을 줄이기 위해 날짜·요일·시간대 필터를 추가하지 않고, 두 전략을 같은 계좌에서 쓰기 위한 일반적인 risk budget 분할을 적용했습니다.
+- Decision:
+  - ETHUSDT active route는 `ETH 15m Volatility Reversal Combo Balanced`, `ETH 15m Donchian Breakdown V2 Guarded Balanced` 두 개로 고정합니다.
+  - 기존 `ETH 15m Vacuum Pulse`는 active route에서 제외하고 research/backtest registry에는 유지합니다.
+  - 두 balanced ETH 전략은 동일한 entry logic을 유지하되 `account_risk_percent=2.5`, `order_margin_multiplier=0.5`를 사용합니다.
+  - live order sizing과 runtime-equivalent backtest sizing 모두 `Signal.account_risk_percent`, `Signal.order_margin_multiplier`를 반영합니다.
+  - 공식 portfolio runner 최근 4년 결과는 `$100 -> $421.63`, `+321.63%`, `712` trades, MDD `16.43%`, PF `1.33`입니다.
+  - 공식 portfolio runner 전체 보유 history 결과는 `$100 -> $575.06`, `+475.06%`, `1073` trades, MDD `33.64%`, PF `1.30`입니다.
+- Consequences:
+  - ETH는 두 전략을 함께 켜도 각 전략이 기본 live margin/risk의 절반만 쓰도록 설계됩니다.
+  - 웹 전략 목록과 owner default strategy IDs는 BTC 2개 + ETH balanced 2개를 노출합니다.
+  - 기존 ETH Vacuum 선택이 저장된 사용자는 active set 필터링에 의해 새 ETH active 전략으로 이동할 수 있으므로, 배포 후 strategy status와 최신 selection 파일을 확인해야 합니다.

@@ -251,6 +251,8 @@ class Signal:
     take_profit: Decimal
     reason: str
     leverage: int
+    account_risk_percent: Decimal | None = None
+    order_margin_multiplier: Decimal = dec(1)
 
     @property
     def partial_take_profit(self) -> Decimal:
@@ -379,23 +381,159 @@ ETH_PULSE_PARAMS = {
     "leverage": 2,
 }
 
+ETH_VOL_REVERSAL_551_PARAMS = {
+    "strategy_id": "eth-15m-vol-reversal-551",
+    "name": "ETH 15m Volatility Reversal 551",
+    "symbol": "ETHUSDT",
+    "fast_mean_period": 72,
+    "slow_mean_period": 288,
+    "atr_period": 20,
+    "volume_lookback": 48,
+    "volume_multiplier": dec("0.7"),
+    "return_lookback": 12,
+    "return_threshold": dec("0.006"),
+    "minimum_atr_percent": dec("0.0005"),
+    "maximum_atr_percent": dec("0.012"),
+    "minimum_range_atr": dec("1.1"),
+    "trend_tolerance": dec("0.0025"),
+    "minimum_close_location": dec("0.84"),
+    "stop_atr_buffer": dec("0.5"),
+    "minimum_stop_percent": dec("0.001"),
+    "maximum_stop_percent": dec("0.008"),
+    "reward_risk_ratio": dec("5.6"),
+    "side_mode": -1,
+    "weekday_mask": 127,
+    "leverage": 2,
+}
+
+ETH_VOL_REVERSAL_478_L3_PARAMS = {
+    "strategy_id": "eth-15m-vol-reversal-478-l3",
+    "name": "ETH 15m Volatility Reversal 478 L3",
+    "symbol": "ETHUSDT",
+    "fast_mean_period": 20,
+    "slow_mean_period": 96,
+    "atr_period": 10,
+    "volume_lookback": 24,
+    "volume_multiplier": dec("2.0"),
+    "return_lookback": 6,
+    "return_threshold": dec("0.0035"),
+    "minimum_atr_percent": dec("0.0003"),
+    "maximum_atr_percent": dec("0.024"),
+    "minimum_range_atr": dec("1.1"),
+    "trend_tolerance": dec("0.008"),
+    "minimum_close_location": dec("0.68"),
+    "stop_atr_buffer": dec("0.4"),
+    "minimum_stop_percent": dec("0.0015"),
+    "maximum_stop_percent": dec("0.012"),
+    "reward_risk_ratio": dec("4.0"),
+    "side_mode": 1,
+    "weekday_mask": 127,
+    "leverage": 3,
+}
+
+ETH_VOL_REVERSAL_COMBO_PARAMS = {
+    "strategy_id": "eth-15m-vol-reversal-combo",
+    "name": "ETH 15m Volatility Reversal Combo",
+    "symbol": "ETHUSDT",
+    "component_strategy_ids": (
+        ETH_VOL_REVERSAL_551_PARAMS["strategy_id"],
+        ETH_VOL_REVERSAL_478_L3_PARAMS["strategy_id"],
+    ),
+    "weekday_mask": 127,
+    "leverage": 3,
+}
+
+ETH_DONCHIAN_BREAKDOWN_V2_PARAMS = {
+    "strategy_id": "eth-15m-donchian-breakdown-v2",
+    "name": "ETH 15m Donchian Breakdown V2",
+    "symbol": "ETHUSDT",
+    "fast_mean_period": 12,
+    "slow_mean_period": 48,
+    "atr_period": 20,
+    "volume_lookback": 96,
+    "volume_multiplier": dec("1.0"),
+    "breakout_lookback": 12,
+    "stop_channel_lookback": 12,
+    "stop_atr_buffer": dec("1.0"),
+    "minimum_atr_percent": dec("0.0003"),
+    "maximum_atr_percent": dec("0.012"),
+    "minimum_stop_percent": dec("0.0015"),
+    "maximum_stop_percent": dec("0.016"),
+    "minimum_close_location": dec("0.58"),
+    "reward_risk_ratio": dec("4.0"),
+    "trend_mode": "ema",
+    "stop_mode": "channel",
+    "side_mode": -1,
+    "weekday_mask": 127,
+    "leverage": 2,
+}
+
+ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_PARAMS = {
+    **ETH_DONCHIAN_BREAKDOWN_V2_PARAMS,
+    "strategy_id": "eth-15m-donchian-breakdown-v2-guarded",
+    "name": "ETH 15m Donchian Breakdown V2 Guarded",
+    "bearish_guard_mean_period": 384,
+}
+
+ETH_VOL_REVERSAL_COMBO_BALANCED_PARAMS = {
+    **ETH_VOL_REVERSAL_COMBO_PARAMS,
+    "strategy_id": "eth-15m-vol-reversal-combo-balanced",
+    "name": "ETH 15m Volatility Reversal Combo Balanced",
+    "account_risk_percent": dec("2.5"),
+    "order_margin_multiplier": dec("0.5"),
+}
+
+ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_BALANCED_PARAMS = {
+    **ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_PARAMS,
+    "strategy_id": "eth-15m-donchian-breakdown-v2-guarded-balanced",
+    "name": "ETH 15m Donchian Breakdown V2 Guarded Balanced",
+    "account_risk_percent": dec("2.5"),
+    "order_margin_multiplier": dec("0.5"),
+}
+
+ETH_VOL_DONCHIAN_GUARDED_COMBO_PARAMS = {
+    "strategy_id": "eth-15m-vol-donchian-guarded-combo",
+    "name": "ETH 15m Volatility + Guarded Donchian Combo",
+    "symbol": "ETHUSDT",
+    "component_strategy_ids": (
+        ETH_VOL_REVERSAL_COMBO_PARAMS["strategy_id"],
+        ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_PARAMS["strategy_id"],
+    ),
+    "weekday_mask": 127,
+    "leverage": 3,
+}
+
 ALL_STRATEGIES_BY_SYMBOL = {
     "BTCUSDT": [
         BTC_PULSE_PARAMS,
         BTC_PULSE_107_PARAMS,
     ],
-    "ETHUSDT": [ETH_PULSE_PARAMS],
+    "ETHUSDT": [
+        ETH_PULSE_PARAMS,
+        ETH_VOL_REVERSAL_551_PARAMS,
+        ETH_VOL_REVERSAL_478_L3_PARAMS,
+        ETH_VOL_REVERSAL_COMBO_PARAMS,
+        ETH_DONCHIAN_BREAKDOWN_V2_PARAMS,
+        ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_PARAMS,
+        ETH_VOL_REVERSAL_COMBO_BALANCED_PARAMS,
+        ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_BALANCED_PARAMS,
+        ETH_VOL_DONCHIAN_GUARDED_COMBO_PARAMS,
+    ],
 }
 
 ACTIVE_STRATEGIES_BY_SYMBOL = {
     "BTCUSDT": [BTC_PULSE_PARAMS, BTC_PULSE_107_PARAMS],
-    "ETHUSDT": [ETH_PULSE_PARAMS],
+    "ETHUSDT": [
+        ETH_VOL_REVERSAL_COMBO_BALANCED_PARAMS,
+        ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_BALANCED_PARAMS,
+    ],
 }
 
 DEFAULT_OWNER_STRATEGY_IDS = (
     BTC_PULSE_PARAMS["strategy_id"],
     BTC_PULSE_107_PARAMS["strategy_id"],
-    ETH_PULSE_PARAMS["strategy_id"],
+    ETH_VOL_REVERSAL_COMBO_BALANCED_PARAMS["strategy_id"],
+    ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_BALANCED_PARAMS["strategy_id"],
 )
 
 STRATEGY_BACKTESTS = {
@@ -461,6 +599,132 @@ STRATEGY_BACKTESTS = {
         "robustness": "중간",
         "robustnessCode": "MEDIUM",
         "robustnessNote": "요일 mask 제거 후 평균 이상 거래량·강한 하단 종가·0.35% impulse로 신호 품질을 강화. 전체 구간 +46.28%, MDD 21.26%, PF 1.28.",
+    },
+    "eth-15m-vol-reversal-combo": {
+        "label": "최근 4년 · 공식 러너 · no time filter",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "401.14",
+        "netReturnPercent": "+301.14",
+        "winRatePercent": "37.59",
+        "maxDrawdownPercent": "24.47",
+        "profitFactor": "1.29",
+        "totalTrades": 399,
+        "annualTrades": "99.8",
+        "tp1Count": 150,
+        "tp2Count": 75,
+        "profitLockStopCount": 75,
+        "pureStopCount": 249,
+        "timeExitCount": 0,
+        "robustness": "중간",
+        "robustnessCode": "MEDIUM",
+        "robustnessNote": "요일·시간대 필터 없음. 전체 구간 +442.10%, MDD 35.85%, PF 1.26. 두 변동성 되돌림 후보의 조합이라 forward 검증 필요.",
+    },
+    "eth-15m-donchian-breakdown-v2": {
+        "label": "최근 4년 · 공식 러너 · short-only · 2x",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "1,086.58",
+        "netReturnPercent": "+986.58",
+        "winRatePercent": "41.72",
+        "maxDrawdownPercent": "25.17",
+        "profitFactor": "1.31",
+        "totalTrades": 580,
+        "annualTrades": "145.0",
+        "tp1Count": 242,
+        "tp2Count": 93,
+        "profitLockStopCount": 149,
+        "pureStopCount": 338,
+        "timeExitCount": 0,
+        "robustness": "낮음",
+        "robustnessCode": "LOWER",
+        "robustnessNote": "요일·시간대 필터는 없지만 short-only Donchian 하락 돌파 계열. 전체 구간 +1,892.41%, MDD 46.68%, PF 1.30이라 고수익·고낙폭 후보.",
+    },
+    "eth-15m-donchian-breakdown-v2-guarded": {
+        "label": "최근 4년 · 공식 러너 · short-only · EMA384 guard",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "581.98",
+        "netReturnPercent": "+481.98",
+        "winRatePercent": "41.67",
+        "maxDrawdownPercent": "29.00",
+        "profitFactor": "1.33",
+        "totalTrades": 444,
+        "annualTrades": "111.0",
+        "tp1Count": 185,
+        "tp2Count": 73,
+        "profitLockStopCount": 112,
+        "pureStopCount": 259,
+        "timeExitCount": 0,
+        "robustness": "중간",
+        "robustnessCode": "MEDIUM",
+        "robustnessNote": "EMA384 아래에서만 숏 허용. 전체 구간 +1,051.41%, MDD 29.00%, PF 1.32. 원본보다 수익은 낮지만 낙폭이 크게 줄어든 후보.",
+    },
+    "eth-15m-vol-reversal-combo-balanced": {
+        "label": "최근 4년 · 공식 러너 · 50% risk budget",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "211.43",
+        "netReturnPercent": "+111.43",
+        "winRatePercent": "37.59",
+        "maxDrawdownPercent": "12.93",
+        "profitFactor": "1.31",
+        "totalTrades": 399,
+        "annualTrades": "99.8",
+        "tp1Count": 150,
+        "tp2Count": 75,
+        "profitLockStopCount": 75,
+        "pureStopCount": 249,
+        "timeExitCount": 0,
+        "robustness": "중간",
+        "robustnessCode": "MEDIUM",
+        "robustnessNote": "두 ETH 전략 동시 운용용 절반 비중 variant. 전체 구간 +154.13%, MDD 19.20%, PF 1.26.",
+    },
+    "eth-15m-donchian-breakdown-v2-guarded-balanced": {
+        "label": "최근 4년 · 공식 러너 · EMA384 guard · 50% risk budget",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "259.37",
+        "netReturnPercent": "+159.37",
+        "winRatePercent": "41.67",
+        "maxDrawdownPercent": "14.98",
+        "profitFactor": "1.34",
+        "totalTrades": 444,
+        "annualTrades": "111.0",
+        "tp1Count": 185,
+        "tp2Count": 73,
+        "profitLockStopCount": 112,
+        "pureStopCount": 259,
+        "timeExitCount": 0,
+        "robustness": "중간",
+        "robustnessCode": "MEDIUM",
+        "robustnessNote": "두 ETH 전략 동시 운용용 절반 비중 variant. 전체 구간 +279.17%, MDD 14.98%, PF 1.33.",
+    },
+    "eth-15m-vol-donchian-guarded-combo": {
+        "label": "최근 4년 · 공식 러너 · vol combo + guarded Donchian",
+        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
+        "source": "paper_runner.evaluate_strategy",
+        "initialCapital": "100",
+        "finalBalance": "1,434.74",
+        "netReturnPercent": "+1,334.74",
+        "winRatePercent": "39.47",
+        "maxDrawdownPercent": "30.71",
+        "profitFactor": "1.30",
+        "totalTrades": 712,
+        "annualTrades": "178.0",
+        "tp1Count": 281,
+        "tp2Count": 125,
+        "profitLockStopCount": 156,
+        "pureStopCount": 431,
+        "timeExitCount": 0,
+        "robustness": "낮음",
+        "robustnessCode": "LOWER",
+        "robustnessNote": "검증 구간 수익은 강하지만 전체 구간 MDD 58.46%로 큼. 보수 후보보다는 공격형 조합 후보.",
     },
 }
 
@@ -601,6 +865,21 @@ def risk_allowed(signal: Signal) -> bool:
 def stop_percent_allowed(params: dict[str, Any], risk: Decimal, entry: Decimal) -> bool:
     stop_percent = risk / entry
     return params["minimum_stop_percent"] <= stop_percent <= params["maximum_stop_percent"]
+
+
+def signal_with_strategy_sizing(signal: Signal, params: dict[str, Any]) -> Signal:
+    return Signal(
+        strategy_id=signal.strategy_id,
+        symbol=signal.symbol,
+        side=signal.side,
+        entry=signal.entry,
+        stop=signal.stop,
+        take_profit=signal.take_profit,
+        reason=signal.reason,
+        leverage=signal.leverage,
+        account_risk_percent=params.get("account_risk_percent", signal.account_risk_percent),
+        order_margin_multiplier=params.get("order_margin_multiplier", signal.order_margin_multiplier),
+    )
 
 
 def allowed_weekday(mask: int, generated_at: datetime) -> bool:
@@ -805,6 +1084,258 @@ def evaluate_vacuum_pulse(
     return None
 
 
+def evaluate_eth_volatility_reversal(
+    candles: list[Candle],
+    params: dict[str, Any],
+    generated_at: datetime,
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
+    if not allowed_weekday(params["weekday_mask"], generated_at):
+        return None
+    if (
+        len(candles) < params["slow_mean_period"]
+        or len(candles) <= params["return_lookback"]
+        or len(candles) < params["volume_lookback"]
+    ):
+        return None
+
+    ending_at = len(candles) - 1
+    fast_mean = context.exponential_moving_average(params["fast_mean_period"], ending_at) if context else exponential_moving_average(candles, params["fast_mean_period"])
+    slow_mean = context.exponential_moving_average(params["slow_mean_period"], ending_at) if context else exponential_moving_average(candles, params["slow_mean_period"])
+    atr = context.average_true_range(params["atr_period"], ending_at) if context else average_true_range(candles, params["atr_period"])
+    avg_volume = context.average_volume(params["volume_lookback"], ending_at) if context else average_volume(candles, params["volume_lookback"])
+    if None in {fast_mean, slow_mean, atr, avg_volume}:
+        return None
+
+    latest = candles[-1]
+    base = candles[-1 - params["return_lookback"]]
+    entry = latest.close
+    candle_range = latest.high - latest.low
+    if entry <= 0 or base.close <= 0 or candle_range <= 0 or atr <= 0 or avg_volume <= 0:
+        return None
+    if latest.volume < avg_volume * params["volume_multiplier"]:
+        return None
+
+    atr_percent = atr / entry
+    if not (params["minimum_atr_percent"] <= atr_percent <= params["maximum_atr_percent"]):
+        return None
+    if candle_range < atr * params["minimum_range_atr"]:
+        return None
+
+    close_location = (latest.close - latest.low) / candle_range
+    return_value = (latest.close - base.close) / base.close
+    allows_long = params["side_mode"] >= 0
+    allows_short = params["side_mode"] <= 0
+
+    if (
+        allows_long
+        and return_value <= -params["return_threshold"]
+        and fast_mean >= slow_mean * (dec(1) - params["trend_tolerance"])
+        and latest.close > latest.open
+        and close_location >= params["minimum_close_location"]
+    ):
+        stop = latest.low - atr * params["stop_atr_buffer"]
+        risk = entry - stop
+        if risk <= 0 or not stop_percent_allowed(params, risk, entry):
+            return None
+        return Signal(
+            strategy_id=params["strategy_id"],
+            symbol=params["symbol"],
+            side="buy",
+            entry=entry,
+            stop=stop,
+            take_profit=entry + risk * params["reward_risk_ratio"],
+            reason=f"{params['name']}: high-volume wide-range long exhaustion reversal",
+            leverage=params["leverage"],
+        )
+
+    if (
+        allows_short
+        and return_value >= params["return_threshold"]
+        and fast_mean <= slow_mean * (dec(1) + params["trend_tolerance"])
+        and latest.close < latest.open
+        and close_location <= dec(1) - params["minimum_close_location"]
+    ):
+        stop = latest.high + atr * params["stop_atr_buffer"]
+        risk = stop - entry
+        if risk <= 0 or not stop_percent_allowed(params, risk, entry):
+            return None
+        return Signal(
+            strategy_id=params["strategy_id"],
+            symbol=params["symbol"],
+            side="sell",
+            entry=entry,
+            stop=stop,
+            take_profit=entry - risk * params["reward_risk_ratio"],
+            reason=f"{params['name']}: high-volume wide-range short exhaustion reversal",
+            leverage=params["leverage"],
+        )
+
+    return None
+
+
+def evaluate_eth_volatility_reversal_combo(
+    candles: list[Candle],
+    params: dict[str, Any],
+    generated_at: datetime,
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
+    for component in (ETH_VOL_REVERSAL_551_PARAMS, ETH_VOL_REVERSAL_478_L3_PARAMS):
+        signal = evaluate_eth_volatility_reversal(candles, component, generated_at, context)
+        if signal is None:
+            continue
+        return Signal(
+            strategy_id=params["strategy_id"],
+            symbol=signal.symbol,
+            side=signal.side,
+            entry=signal.entry,
+            stop=signal.stop,
+            take_profit=signal.take_profit,
+            reason=f"{params['name']}: {signal.strategy_id}",
+            leverage=signal.leverage,
+        )
+    return None
+
+
+def eth_trend_ok(entry: Decimal, fast_mean: Decimal, slow_mean: Decimal, side: str, mode: str) -> bool:
+    if mode == "none":
+        return True
+    if mode == "ema":
+        return fast_mean > slow_mean if side == "buy" else fast_mean < slow_mean
+    if mode == "price_ema":
+        return entry > slow_mean if side == "buy" else entry < slow_mean
+    if mode == "ema_price":
+        return fast_mean > slow_mean and entry > fast_mean if side == "buy" else fast_mean < slow_mean and entry < fast_mean
+    return False
+
+
+def evaluate_eth_donchian_breakdown(
+    candles: list[Candle],
+    params: dict[str, Any],
+    generated_at: datetime,
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
+    if not allowed_weekday(params["weekday_mask"], generated_at):
+        return None
+    if (
+        len(candles) < params["slow_mean_period"]
+        or len(candles) < params["breakout_lookback"] + 1
+        or len(candles) < params["stop_channel_lookback"] + 1
+        or len(candles) < params["volume_lookback"]
+        or (params.get("bearish_guard_mean_period") is not None and len(candles) < params["bearish_guard_mean_period"])
+    ):
+        return None
+
+    ending_at = len(candles) - 1
+    fast_mean = context.exponential_moving_average(params["fast_mean_period"], ending_at) if context else exponential_moving_average(candles, params["fast_mean_period"])
+    slow_mean = context.exponential_moving_average(params["slow_mean_period"], ending_at) if context else exponential_moving_average(candles, params["slow_mean_period"])
+    bearish_guard_mean = None
+    if params.get("bearish_guard_mean_period") is not None:
+        bearish_guard_mean = context.exponential_moving_average(params["bearish_guard_mean_period"], ending_at) if context else exponential_moving_average(candles, params["bearish_guard_mean_period"])
+    atr = context.average_true_range(params["atr_period"], ending_at) if context else average_true_range(candles, params["atr_period"])
+    avg_volume = context.average_volume(params["volume_lookback"], ending_at) if context else average_volume(candles, params["volume_lookback"])
+    previous_high = highest_high(candles, params["breakout_lookback"], len(candles) - 2)
+    previous_low = lowest_low(candles, params["breakout_lookback"], len(candles) - 2)
+    stop_high = highest_high(candles, params["stop_channel_lookback"], len(candles) - 2)
+    stop_low = lowest_low(candles, params["stop_channel_lookback"], len(candles) - 2)
+    if None in {fast_mean, slow_mean, atr, avg_volume, previous_high, previous_low, stop_high, stop_low}:
+        return None
+    if params.get("bearish_guard_mean_period") is not None and bearish_guard_mean is None:
+        return None
+
+    latest = candles[-1]
+    entry = latest.close
+    candle_range = latest.high - latest.low
+    if entry <= 0 or candle_range <= 0 or atr <= 0 or avg_volume <= 0:
+        return None
+    if latest.volume < avg_volume * params["volume_multiplier"]:
+        return None
+
+    atr_percent = atr / entry
+    if not (params["minimum_atr_percent"] <= atr_percent <= params["maximum_atr_percent"]):
+        return None
+    close_location = (latest.close - latest.low) / candle_range
+
+    if (
+        params["side_mode"] >= 0
+        and eth_trend_ok(entry, fast_mean, slow_mean, "buy", params["trend_mode"])
+        and entry > previous_high
+        and close_location >= params["minimum_close_location"]
+    ):
+        raw_stop = (
+            min(stop_low, entry - atr * params["stop_atr_buffer"])
+            if params["stop_mode"] == "channel"
+            else latest.low - atr * params["stop_atr_buffer"]
+        )
+        risk = entry - raw_stop
+        if risk <= 0 or not stop_percent_allowed(params, risk, entry):
+            return None
+        return Signal(
+            strategy_id=params["strategy_id"],
+            symbol=params["symbol"],
+            side="buy",
+            entry=entry,
+            stop=raw_stop,
+            take_profit=entry + risk * params["reward_risk_ratio"],
+            reason=f"{params['name']}: Donchian upside breakout",
+            leverage=params["leverage"],
+        )
+
+    if (
+        params["side_mode"] <= 0
+        and eth_trend_ok(entry, fast_mean, slow_mean, "sell", params["trend_mode"])
+        and (bearish_guard_mean is None or entry < bearish_guard_mean)
+        and entry < previous_low
+        and close_location <= dec(1) - params["minimum_close_location"]
+    ):
+        raw_stop = (
+            max(stop_high, entry + atr * params["stop_atr_buffer"])
+            if params["stop_mode"] == "channel"
+            else latest.high + atr * params["stop_atr_buffer"]
+        )
+        risk = raw_stop - entry
+        if risk <= 0 or not stop_percent_allowed(params, risk, entry):
+            return None
+        return Signal(
+            strategy_id=params["strategy_id"],
+            symbol=params["symbol"],
+            side="sell",
+            entry=entry,
+            stop=raw_stop,
+            take_profit=entry - risk * params["reward_risk_ratio"],
+            reason=f"{params['name']}: Donchian downside breakout",
+            leverage=params["leverage"],
+        )
+
+    return None
+
+
+def evaluate_eth_vol_donchian_guarded_combo(
+    candles: list[Candle],
+    params: dict[str, Any],
+    generated_at: datetime,
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
+    for component_params, evaluator in (
+        (ETH_VOL_REVERSAL_COMBO_PARAMS, evaluate_eth_volatility_reversal_combo),
+        (ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_PARAMS, evaluate_eth_donchian_breakdown),
+    ):
+        signal = evaluator(candles, component_params, generated_at, context)
+        if signal is None:
+            continue
+        return Signal(
+            strategy_id=params["strategy_id"],
+            symbol=signal.symbol,
+            side=signal.side,
+            entry=signal.entry,
+            stop=signal.stop,
+            take_profit=signal.take_profit,
+            reason=f"{params['name']}: {signal.strategy_id}",
+            leverage=signal.leverage,
+        )
+    return None
+
+
 def evaluate_strategy(
     candles: list[Candle],
     params: dict[str, Any],
@@ -813,10 +1344,28 @@ def evaluate_strategy(
 ) -> Signal | None:
     if params["strategy_id"] == BTC_PHASE_PARAMS["strategy_id"]:
         signal = evaluate_btc_phase(candles, params, generated_at, context)
+    elif params["strategy_id"] in {
+        ETH_VOL_REVERSAL_551_PARAMS["strategy_id"],
+        ETH_VOL_REVERSAL_478_L3_PARAMS["strategy_id"],
+    }:
+        signal = evaluate_eth_volatility_reversal(candles, params, generated_at, context)
+    elif params["strategy_id"] in {
+        ETH_VOL_REVERSAL_COMBO_PARAMS["strategy_id"],
+        ETH_VOL_REVERSAL_COMBO_BALANCED_PARAMS["strategy_id"],
+    }:
+        signal = evaluate_eth_volatility_reversal_combo(candles, params, generated_at, context)
+    elif params["strategy_id"] in {
+        ETH_DONCHIAN_BREAKDOWN_V2_PARAMS["strategy_id"],
+        ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_PARAMS["strategy_id"],
+        ETH_DONCHIAN_BREAKDOWN_V2_GUARDED_BALANCED_PARAMS["strategy_id"],
+    }:
+        signal = evaluate_eth_donchian_breakdown(candles, params, generated_at, context)
+    elif params["strategy_id"] == ETH_VOL_DONCHIAN_GUARDED_COMBO_PARAMS["strategy_id"]:
+        signal = evaluate_eth_vol_donchian_guarded_combo(candles, params, generated_at, context)
     else:
         signal = evaluate_vacuum_pulse(candles, params, generated_at, context)
     if signal and risk_allowed(signal):
-        return signal
+        return signal_with_strategy_sizing(signal, params)
     return None
 
 
@@ -2230,6 +2779,8 @@ class PaperRunnerAPIHandler(BaseHTTPRequestHandler):
         "averagePrice",
         "size",
         "availableBalanceRatio",
+        "orderMarginMultiplier",
+        "accountRiskPercent",
         "requestedMarginUSDT",
         "minimumTest",
         "closeSubmitted",
@@ -4660,7 +5211,8 @@ class PaperRunner:
         if self.live_order_margin_usdt <= 0:
             raise LiveExecutionError("live order margin is not configured")
         leverage = min(signal.leverage, int(contract_spec.get("maxLeverage") or signal.leverage))
-        planned_margin = min(self.live_order_margin_usdt, account_available * self.live_available_balance_ratio)
+        margin_multiplier = signal.order_margin_multiplier if signal.order_margin_multiplier > 0 else dec(1)
+        planned_margin = min(self.live_order_margin_usdt * margin_multiplier, account_available * self.live_available_balance_ratio)
         if planned_margin <= 0:
             raise LiveExecutionError("USDT available balance is not enough for live order")
         notional = planned_margin * dec(leverage)
@@ -5251,7 +5803,9 @@ class PaperRunner:
                     "averagePrice": str(detail.get("priceAvg") or "-"),
                     "entry": decimal_text(signal.entry),
                     "size": decimal_text(size),
-                    "marginUSDT": decimal_text(self.live_order_margin_usdt),
+                    "marginUSDT": decimal_text(self.live_order_margin_usdt * (signal.order_margin_multiplier if signal.order_margin_multiplier > 0 else dec(1))),
+                    "orderMarginMultiplier": decimal_text(signal.order_margin_multiplier),
+                    "accountRiskPercent": decimal_text(signal.account_risk_percent) if signal.account_risk_percent is not None else "",
                     "availableBalanceRatio": decimal_text(self.live_available_balance_ratio),
                     "leverage": f"{signal.leverage}x",
                     "tp1": decimal_text(signal.partial_take_profit),
@@ -5876,6 +6430,8 @@ class PaperRunner:
             "partialTakeProfit": decimal_text(signal.partial_take_profit),
             "takeProfit": decimal_text(signal.take_profit),
             "leverage": signal.leverage,
+            "accountRiskPercent": decimal_text(signal.account_risk_percent) if signal.account_risk_percent is not None else None,
+            "orderMarginMultiplier": decimal_text(signal.order_margin_multiplier),
             "rewardRiskRatio": decimal_text(signal.reward_risk_ratio) if signal.reward_risk_ratio else None,
             "reason": signal.reason,
         }
