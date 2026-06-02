@@ -7,7 +7,7 @@
       "allowedStrategyIDs": [
         "btc-15m-vacuum-pulse",
         "btc-15m-pulse-107",
-        "eth-15m-wick-reclaim"
+        "eth-15m-vacuum-pulse"
       ]
     }
   ]

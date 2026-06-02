@@ -40,16 +40,16 @@ class PaperRunnerBacktestTests(unittest.TestCase):
             return original(candles, params, generated_at, context=context)
 
         with patch.object(paper_runner_backtest.paper_runner, "evaluate_strategy", side_effect=wrapped):
-            result = paper_runner_backtest.run_backtest(self.config("eth-15m-wick-reclaim"))
+            result = paper_runner_backtest.run_backtest(self.config("eth-15m-vacuum-pulse"))
 
         self.assertGreater(calls, 0)
-        self.assertEqual(result["summary"]["trade_count"], 2)
+        self.assertEqual(result["summary"]["trade_count"], 1)
 
     def test_strategy_backtest_metadata_is_populated_for_web_cards(self):
         expected_returns = {
             "btc-15m-vacuum-pulse": "+634.03",
             "btc-15m-pulse-107": "+389.31",
-            "eth-15m-wick-reclaim": "+196.94",
+            "eth-15m-vacuum-pulse": "+64.78",
         }
 
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
@@ -99,10 +99,10 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 "trade_count": 6,
                 "max_drawdown_percent": Decimal("6.889340"),
             },
-            "eth-15m-wick-reclaim": {
-                "final_balance": Decimal("106.080647"),
-                "trade_count": 2,
-                "max_drawdown_percent": Decimal("4.348099"),
+            "eth-15m-vacuum-pulse": {
+                "final_balance": Decimal("97.815850"),
+                "trade_count": 1,
+                "max_drawdown_percent": Decimal("2.184150"),
             },
         }
 
