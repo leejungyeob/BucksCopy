@@ -26,7 +26,7 @@ flowchart LR
 | --- | --- | --- |
 | BTCUSDT | 15m | BTC 15m Vacuum Pulse |
 | BTCUSDT | 15m | BTC 15m Pulse 107 |
-| ETHUSDT | 15m | ETH 15m Vacuum Pulse |
+| ETHUSDT | 15m | ETH 15m Wick Reclaim |
 
 `paper_runner.py` owns the active strategy parameters and the live closed-candle evaluation loop. Backtest tools must not reimplement entry signal logic separately. Time-whitelist dependent BTC Regime/Bull candidates were deleted from the runtime registry after validation showed they depended on optimized weekly-hour filters.
 

@@ -13,7 +13,7 @@ description: >
 - Use local closed candle history from SQLite. For 15m BTC strategy validation, prefer full available history or explicitly pass `--15m-limit 0` when the user asks for 4-year or full-history validation.
 - Treat backtest validation as mandatory before judging any strategy as usable for live monitoring.
 - Keep auxiliary indicators out of the primary result unless the user explicitly asks to test them.
-- Current routed portfolio is symbol-scoped and server runtime is 15m-only. Active routes: BTCUSDT 15m BTC Vacuum Pulse, BTCUSDT 15m BTC Pulse 107, and ETHUSDT 15m ETH Vacuum Pulse. Backtest tools must call the server runtime evaluator instead of reimplementing entry logic.
+- Current routed portfolio is symbol-scoped and server runtime is 15m-only. Active routes: BTCUSDT 15m BTC Vacuum Pulse, BTCUSDT 15m BTC Pulse 107, and ETHUSDT 15m ETH Wick Reclaim. Backtest tools must call the server runtime evaluator instead of reimplementing entry logic.
 - Report practical metrics, not just final balance: final balance, net return, win rate, trade count, MDD, PF, TP1/TP2/profit-lock stop/time-exit counts.
 - Explain jargon in Korean when showing results. At minimum define MDD, PF, TP1, TP2, TP1후 SL, 순수 SL.
 

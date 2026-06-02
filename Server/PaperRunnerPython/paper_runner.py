@@ -350,33 +350,30 @@ BTC_PULSE_107_PARAMS = {
     "leverage": 5,
 }
 
-ETH_PULSE_PARAMS = {
-    "strategy_id": "eth-15m-vacuum-pulse",
-    "name": "ETH 15m Vacuum Pulse",
+ETH_WICK_RECLAIM_PARAMS = {
+    "strategy_id": "eth-15m-wick-reclaim",
+    "name": "ETH 15m Wick Reclaim",
     "symbol": "ETHUSDT",
-    "fast_mean_period": 48,
-    "slow_mean_period": 256,
-    "atr_period": 10,
-    "volume_lookback": 32,
-    "reclaim_lookback": 6,
-    "return_lookback": 6,
-    "return_threshold": dec("0.0035"),
-    "minimum_trend_spread": dec("0.001"),
-    "maximum_trend_spread": dec("0.015"),
-    "minimum_atr_percent": dec("0.0004"),
-    "maximum_atr_percent": dec("0.010"),
-    "minimum_close_location": dec("0.68"),
-    "volume_multiplier": dec("1.0"),
-    "pullback_atr_buffer": dec("-0.1"),
-    "breakout_atr_buffer": dec("0.2"),
+    "atr_period": 14,
+    "volume_lookback": 192,
+    "volume_multiplier": dec("1.2"),
+    "minimum_atr_percent": dec("0.0013"),
+    "maximum_atr_percent": dec("0.012"),
+    "sweep_lookback": 24,
+    "sweep_atr_buffer": dec("0.2"),
+    "rsi_period": 21,
+    "max_long_rsi": dec("30"),
+    "min_short_rsi": dec("55"),
+    "return_lookback": 8,
+    "return_threshold": dec("0.004"),
+    "minimum_close_location": dec("0.84"),
     "stop_atr_buffer": dec("1.25"),
-    "minimum_stop_percent": dec("0.0008"),
-    "maximum_stop_percent": dec("0.012"),
-    "reward_risk_ratio": dec("4.0"),
-    "stop_mode": 1,
-    "side_mode": -1,
+    "minimum_stop_percent": dec("0.0007"),
+    "maximum_stop_percent": dec("0.010"),
+    "reward_risk_ratio": dec("3.2"),
+    "side_mode": 0,
     "weekday_mask": 127,
-    "leverage": 2,
+    "leverage": 5,
 }
 
 ALL_STRATEGIES_BY_SYMBOL = {
@@ -384,18 +381,18 @@ ALL_STRATEGIES_BY_SYMBOL = {
         BTC_PULSE_PARAMS,
         BTC_PULSE_107_PARAMS,
     ],
-    "ETHUSDT": [ETH_PULSE_PARAMS],
+    "ETHUSDT": [ETH_WICK_RECLAIM_PARAMS],
 }
 
 ACTIVE_STRATEGIES_BY_SYMBOL = {
     "BTCUSDT": [BTC_PULSE_PARAMS, BTC_PULSE_107_PARAMS],
-    "ETHUSDT": [ETH_PULSE_PARAMS],
+    "ETHUSDT": [ETH_WICK_RECLAIM_PARAMS],
 }
 
 DEFAULT_OWNER_STRATEGY_IDS = (
     BTC_PULSE_PARAMS["strategy_id"],
     BTC_PULSE_107_PARAMS["strategy_id"],
-    ETH_PULSE_PARAMS["strategy_id"],
+    ETH_WICK_RECLAIM_PARAMS["strategy_id"],
 )
 
 STRATEGY_BACKTESTS = {
@@ -441,26 +438,26 @@ STRATEGY_BACKTESTS = {
         "robustnessCode": "MEDIUM",
         "robustnessNote": "요일·시간대 필터 없음. 전체 구간 +398.87%, MDD 34.32%, PF 1.56. 스윕 후보라 소액 forward 검증 필요.",
     },
-    "eth-15m-vacuum-pulse": {
-        "label": "최근 4년 · 공식 러너 · 전체 요일 · 2x",
+    "eth-15m-wick-reclaim": {
+        "label": "최근 4년 · 공식 러너 · 5x · no time filter",
         "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
         "source": "paper_runner.evaluate_strategy",
         "initialCapital": "100",
-        "finalBalance": "164.78",
-        "netReturnPercent": "+64.78",
-        "winRatePercent": "46.59",
-        "maxDrawdownPercent": "13.60",
-        "profitFactor": "1.56",
-        "totalTrades": 88,
-        "annualTrades": "22.0",
-        "tp1Count": 41,
-        "tp2Count": 15,
+        "finalBalance": "296.94",
+        "netReturnPercent": "+196.94",
+        "winRatePercent": "51.04",
+        "maxDrawdownPercent": "21.70",
+        "profitFactor": "1.41",
+        "totalTrades": 96,
+        "annualTrades": "24.0",
+        "tp1Count": 49,
+        "tp2Count": 23,
         "profitLockStopCount": 26,
         "pureStopCount": 47,
         "timeExitCount": 0,
-        "robustness": "중간",
-        "robustnessCode": "MEDIUM",
-        "robustnessNote": "요일 mask 제거 후 평균 이상 거래량·강한 하단 종가·0.35% impulse로 신호 품질을 강화. 전체 구간 +46.28%, MDD 21.26%, PF 1.28.",
+        "robustness": "낮음",
+        "robustnessCode": "LOWER",
+        "robustnessNote": "4개 연도 모두 플러스, 반기 7/8 플러스, 최악 반기 -0.71%. 전체 구간 +128.30%, MDD 24.95%, PF 1.29.",
     },
 }
 
@@ -513,6 +510,28 @@ def exponential_moving_average(candles: list[Candle], period: int) -> Decimal | 
     return current
 
 
+def relative_strength_index(candles: list[Candle], period: int, ending_at: int | None = None) -> Decimal | None:
+    end_index = len(candles) - 1 if ending_at is None else ending_at
+    if period <= 0 or end_index < period - 1 or end_index >= len(candles):
+        return None
+    gain_total = dec(0)
+    loss_total = dec(0)
+    for index in range(end_index - period + 1, end_index + 1):
+        if index <= 0:
+            continue
+        change = candles[index].close - candles[index - 1].close
+        if change > 0:
+            gain_total += change
+        else:
+            loss_total += -change
+    average_gain = gain_total / dec(period)
+    average_loss = loss_total / dec(period)
+    if average_loss == 0:
+        return dec(100)
+    relative_strength = average_gain / average_loss
+    return dec(100) - dec(100) / (dec(1) + relative_strength)
+
+
 class StrategyEvaluationContext:
     """Precomputed indicators for historical evaluation.
 
@@ -526,6 +545,7 @@ class StrategyEvaluationContext:
         self.close_prefix = self._prefix([candle.close for candle in candles])
         self.volume_prefix = self._prefix([candle.volume for candle in candles])
         self.true_range_prefix = self._true_range_prefix(candles)
+        self.gain_prefix, self.loss_prefix = self._gain_loss_prefix(candles)
         self.ema_by_period: dict[int, list[Decimal | None]] = {}
 
     @staticmethod
@@ -553,6 +573,23 @@ class StrategyEvaluationContext:
             total += max(candle.high - candle.low, abs(candle.high - previous_close), abs(candle.low - previous_close))
             ranges.append(total)
         return ranges
+
+    @staticmethod
+    def _gain_loss_prefix(candles: list[Candle]) -> tuple[list[Decimal], list[Decimal]]:
+        gain_prefix = [dec(0)]
+        loss_prefix = [dec(0)]
+        gain_total = dec(0)
+        loss_total = dec(0)
+        for index, candle in enumerate(candles):
+            if index > 0:
+                change = candle.close - candles[index - 1].close
+                if change > 0:
+                    gain_total += change
+                else:
+                    loss_total += -change
+            gain_prefix.append(gain_total)
+            loss_prefix.append(loss_total)
+        return gain_prefix, loss_prefix
 
     def simple_moving_average(self, period: int, ending_at: int) -> Decimal | None:
         if period <= 0 or ending_at < 0 or ending_at >= len(self.candles) or ending_at - period + 1 < 0:
@@ -582,6 +619,19 @@ class StrategyEvaluationContext:
                 values[index] = current
             self.ema_by_period[period] = values
         return self.ema_by_period[period][ending_at]
+
+    def relative_strength_index(self, period: int, ending_at: int) -> Decimal | None:
+        if period <= 0 or ending_at < period - 1 or ending_at >= len(self.candles):
+            return None
+        start = ending_at - period + 1
+        gain_total = self._range_sum(self.gain_prefix, start, ending_at)
+        loss_total = self._range_sum(self.loss_prefix, start, ending_at)
+        average_gain = gain_total / dec(period)
+        average_loss = loss_total / dec(period)
+        if average_loss == 0:
+            return dec(100)
+        relative_strength = average_gain / average_loss
+        return dec(100) - dec(100) / (dec(1) + relative_strength)
 
 def has_valid_price_layout(signal: Signal) -> bool:
     if signal.side == "buy":
@@ -805,6 +855,98 @@ def evaluate_vacuum_pulse(
     return None
 
 
+def evaluate_eth_wick_reclaim(
+    candles: list[Candle],
+    params: dict[str, Any],
+    generated_at: datetime,
+    context: StrategyEvaluationContext | None = None,
+) -> Signal | None:
+    if not allowed_weekday(params["weekday_mask"], generated_at):
+        return None
+    if (
+        len(candles) <= params["return_lookback"]
+        or len(candles) < params["sweep_lookback"] + 1
+        or len(candles) < params["volume_lookback"]
+    ):
+        return None
+
+    ending_at = len(candles) - 1
+    atr = context.average_true_range(params["atr_period"], ending_at) if context else average_true_range(candles, params["atr_period"])
+    avg_volume = context.average_volume(params["volume_lookback"], ending_at) if context else average_volume(candles, params["volume_lookback"])
+    rsi_value = context.relative_strength_index(params["rsi_period"], ending_at) if context else relative_strength_index(candles, params["rsi_period"], ending_at)
+    previous_high = highest_high(candles, params["sweep_lookback"], len(candles) - 2)
+    previous_low = lowest_low(candles, params["sweep_lookback"], len(candles) - 2)
+    if None in {atr, avg_volume, rsi_value, previous_high, previous_low}:
+        return None
+
+    latest = candles[-1]
+    base = candles[-1 - params["return_lookback"]]
+    entry = latest.close
+    candle_range = latest.high - latest.low
+    if entry <= 0 or base.close <= 0 or candle_range <= 0 or atr <= 0 or avg_volume <= 0:
+        return None
+    if latest.volume < avg_volume * params["volume_multiplier"]:
+        return None
+
+    atr_percent = atr / entry
+    if not (params["minimum_atr_percent"] <= atr_percent <= params["maximum_atr_percent"]):
+        return None
+
+    close_location = (latest.close - latest.low) / candle_range
+    return_value = (latest.close - base.close) / base.close
+    allows_long = params["side_mode"] >= 0
+    allows_short = params["side_mode"] <= 0
+    if (
+        allows_long
+        and latest.low < previous_low - atr * params["sweep_atr_buffer"]
+        and latest.close > previous_low
+        and latest.close > latest.open
+        and close_location >= params["minimum_close_location"]
+        and rsi_value <= params["max_long_rsi"]
+        and return_value <= -params["return_threshold"]
+    ):
+        stop = latest.low - atr * params["stop_atr_buffer"]
+        risk = entry - stop
+        if risk <= 0 or not stop_percent_allowed(params, risk, entry):
+            return None
+        return Signal(
+            strategy_id=params["strategy_id"],
+            symbol=params["symbol"],
+            side="buy",
+            entry=entry,
+            stop=stop,
+            take_profit=entry + risk * params["reward_risk_ratio"],
+            reason=f"{params['name']}: prior low sweep 후 강한 종가 reclaim",
+            leverage=params["leverage"],
+        )
+
+    if (
+        allows_short
+        and latest.high > previous_high + atr * params["sweep_atr_buffer"]
+        and latest.close < previous_high
+        and latest.close < latest.open
+        and close_location <= dec(1) - params["minimum_close_location"]
+        and rsi_value >= params["min_short_rsi"]
+        and return_value >= params["return_threshold"]
+    ):
+        stop = latest.high + atr * params["stop_atr_buffer"]
+        risk = stop - entry
+        if risk <= 0 or not stop_percent_allowed(params, risk, entry):
+            return None
+        return Signal(
+            strategy_id=params["strategy_id"],
+            symbol=params["symbol"],
+            side="sell",
+            entry=entry,
+            stop=stop,
+            take_profit=entry - risk * params["reward_risk_ratio"],
+            reason=f"{params['name']}: prior high sweep 후 강한 종가 reclaim",
+            leverage=params["leverage"],
+        )
+
+    return None
+
+
 def evaluate_strategy(
     candles: list[Candle],
     params: dict[str, Any],
@@ -813,6 +955,8 @@ def evaluate_strategy(
 ) -> Signal | None:
     if params["strategy_id"] == BTC_PHASE_PARAMS["strategy_id"]:
         signal = evaluate_btc_phase(candles, params, generated_at, context)
+    elif params["strategy_id"] == ETH_WICK_RECLAIM_PARAMS["strategy_id"]:
+        signal = evaluate_eth_wick_reclaim(candles, params, generated_at, context)
     else:
         signal = evaluate_vacuum_pulse(candles, params, generated_at, context)
     if signal and risk_allowed(signal):
