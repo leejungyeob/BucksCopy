@@ -25,11 +25,9 @@ flowchart LR
 | Symbol | Timeframe | Strategy |
 | --- | --- | --- |
 | BTCUSDT | 15m | BTC 15m Vacuum Pulse |
-| BTCUSDT | 15m | BTC 15m Regime Session Fade |
-| BTCUSDT | 15m | BTC 15m Bull Pullback Long |
 | ETHUSDT | 15m | ETH 15m Vacuum Pulse |
 
-`paper_runner.py` owns the active strategy parameters and the live closed-candle evaluation loop. Backtest tools must not reimplement entry signal logic separately.
+`BTC 15m Regime Session Fade` and `BTC 15m Bull Pullback Long` remain research-only strategies because their historical edge collapses when the optimized weekly-hour whitelist is removed. `paper_runner.py` owns the active strategy parameters and the live closed-candle evaluation loop. Backtest tools must not reimplement entry signal logic separately.
 
 ## Data And Safety
 
@@ -42,6 +40,6 @@ flowchart LR
 
 ## Validation Boundary
 
-- Strategy validation uses fixed market-history fixtures and checks deterministic outputs for all active strategies.
+- Strategy validation uses fixed market-history fixtures and checks deterministic outputs for active and research-only runtime strategies.
 - Live execution tests check payload shape, live gate blocking, protection-order registration, test entry/close behavior, and sanitized failure logs.
 - Swift/macOS tests are no longer part of the active validation suite.

@@ -12,7 +12,7 @@ Server-side Bitget USDT-M Futures auto-trading runner.
 | Exchange | Bitget USDT-M Futures (`productType=USDT-FUTURES`) |
 | Trading mode | Explicit-consent live auto-trading behind server live gate and order switch |
 | Active timeframe | Closed `15m` candles only |
-| Active routes | BTCUSDT Vacuum Pulse, BTCUSDT Regime Session Fade, BTCUSDT Bull Pullback Long, ETHUSDT Vacuum Pulse |
+| Active routes | BTCUSDT Vacuum Pulse, ETHUSDT Vacuum Pulse |
 
 The macOS Swift app and Swift backtest engine were removed from the active project. Strategy validation and live signal generation must use the server Python runner path so the entry-decision logic stays unified.
 

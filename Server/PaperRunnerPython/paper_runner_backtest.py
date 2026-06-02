@@ -109,13 +109,11 @@ def load_candles(config: BacktestConfig) -> list[paper_runner.Candle]:
 
 
 def strategy_params(strategy_id: str) -> dict[str, Any]:
-    for params in paper_runner.ACTIVE_STRATEGIES_BY_SYMBOL.get("BTCUSDT", []):
-        if params["strategy_id"] == strategy_id:
-            return dict(params)
-    for params in paper_runner.ACTIVE_STRATEGIES_BY_SYMBOL.get("ETHUSDT", []):
-        if params["strategy_id"] == strategy_id:
-            return dict(params)
-    raise ValueError(f"unknown active strategy: {strategy_id}")
+    for strategies in paper_runner.ALL_STRATEGIES_BY_SYMBOL.values():
+        for params in strategies:
+            if params["strategy_id"] == strategy_id:
+                return dict(params)
+    raise ValueError(f"unknown strategy: {strategy_id}")
 
 
 def sized_position_margin_ratio(signal: paper_runner.Signal) -> tuple[Decimal, Decimal]:

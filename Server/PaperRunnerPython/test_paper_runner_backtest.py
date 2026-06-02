@@ -43,14 +43,12 @@ class PaperRunnerBacktestTests(unittest.TestCase):
             result = paper_runner_backtest.run_backtest(self.config("eth-15m-vacuum-pulse"))
 
         self.assertGreater(calls, 0)
-        self.assertEqual(result["summary"]["trade_count"], 1)
+        self.assertEqual(result["summary"]["trade_count"], 2)
 
     def test_strategy_backtest_metadata_is_populated_for_web_cards(self):
         expected_returns = {
             "btc-15m-vacuum-pulse": "+634.03",
-            "btc-15m-regime-session-fade": "+27.38",
-            "btc-15m-bull-pullback-long": "+118.60",
-            "eth-15m-vacuum-pulse": "+115.07",
+            "eth-15m-vacuum-pulse": "+57.85",
         }
 
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
@@ -63,6 +61,22 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 self.assertIn("2026-05-24", metadata["period"])
                 self.assertIn(metadata["robustness"], {"낮음", "중간"})
                 self.assertTrue(metadata["robustnessNote"])
+
+    def test_time_whitelist_dependent_strategies_are_research_only(self):
+        active_ids = {
+            str(params["strategy_id"])
+            for strategies in paper_runner.ACTIVE_STRATEGIES_BY_SYMBOL.values()
+            for params in strategies
+        }
+        research_only_ids = {
+            "btc-15m-regime-session-fade",
+            "btc-15m-bull-pullback-long",
+        }
+
+        self.assertTrue(research_only_ids.isdisjoint(active_ids))
+        for strategy_id in research_only_ids:
+            with self.subTest(strategy_id=strategy_id):
+                self.assertEqual(paper_runner_backtest.strategy_params(strategy_id)["strategy_id"], strategy_id)
 
     def test_cached_strategy_context_matches_uncached_runtime_evaluator(self):
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
@@ -88,7 +102,7 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                     self.assertEqual(uncached.take_profit, cached.take_profit)
                     self.assertEqual(uncached.leverage, cached.leverage)
 
-    def test_active_strategy_backtests_are_deterministic_on_fixture_snapshot(self):
+    def test_strategy_backtests_are_deterministic_on_fixture_snapshot(self):
         expected = {
             "btc-15m-vacuum-pulse": {
                 "final_balance": Decimal("87.711678"),
@@ -106,9 +120,9 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 "max_drawdown_percent": Decimal("0.000000"),
             },
             "eth-15m-vacuum-pulse": {
-                "final_balance": Decimal("97.682018"),
-                "trade_count": 1,
-                "max_drawdown_percent": Decimal("2.317982"),
+                "final_balance": Decimal("95.548496"),
+                "trade_count": 2,
+                "max_drawdown_percent": Decimal("4.451504"),
             },
         }
 

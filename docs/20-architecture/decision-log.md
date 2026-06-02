@@ -874,3 +874,22 @@
   - 최근 4년 수익률은 크게 낮아지지만, 전체 보유 history 기준 붕괴 위험과 MDD가 감소합니다.
   - `BTC Regime`은 시간대 의존성이 남아 있어 `MEDIUM`/forward 검증 대상으로 유지합니다.
   - 활성 전략 변경은 fixture deterministic backtest와 live execution 테스트를 통과해야 합니다.
+
+## 0049. Remove Time-Whitelist Dependent Strategies From Active Trading
+
+- Status: accepted
+- Date: 2026-06-02
+- Context:
+  - 0048의 레버리지 축소는 account-risk 스케일 조정일 뿐, 전략 과최적화의 원인인 요일·시간대 whitelist 의존을 제거하지 못했습니다.
+  - `BTC 15m Regime Session Fade`는 whitelist를 제거하면 최근 4년 `-40.40%`, 전체 보유 history `-80.95%`로 붕괴했습니다.
+  - `BTC 15m Bull Pullback Long`은 whitelist를 제거하면 최근 4년 `-69.46%`, 전체 보유 history `-97.87%`로 붕괴했습니다.
+  - `ETH 15m Vacuum Pulse`는 요일 mask를 전체 요일로 제거해도 최근 4년 `+57.85%`, 전체 보유 history `+31.71%`로 플러스는 유지하지만 PF가 얇습니다.
+- Decision:
+  - 실거래 active route는 `BTC 15m Vacuum Pulse`와 `ETH 15m Vacuum Pulse`만 유지합니다.
+  - `BTC 15m Regime Session Fade`와 `BTC 15m Bull Pullback Long`은 research-only 전략으로 남기고, live 평가/전략 선택 목록에서는 제외합니다.
+  - 백테스트 registry는 active route와 분리해 research-only 전략도 `paper_runner_backtest.py`에서 계속 검증할 수 있게 합니다.
+  - `ETH 15m Vacuum Pulse`의 `weekday_mask`는 `127`로 바꿔 특정 요일 whitelist에 의존하지 않게 합니다.
+- Consequences:
+  - Regime/Bull의 기존 과거 성과는 live 근거로 사용하지 않습니다.
+  - 기존 사용자 전략 선택 파일에 제외된 전략 ID가 남아 있어도 active set에는 자동으로 포함되지 않습니다.
+  - ETH는 과최적화 위험을 줄였지만 전체 기간 PF `1.12` 수준이라 forward 검증 리스크를 계속 표시해야 합니다.

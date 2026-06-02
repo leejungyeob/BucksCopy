@@ -16,10 +16,9 @@ import recent4y_comparison_report
 
 
 ACTIVE_STRATEGIES = [
-    dict(paper_runner.BTC_PULSE_PARAMS),
-    dict(paper_runner.BTC_REGIME_SESSION_FADE_PARAMS),
-    dict(paper_runner.BTC_BULL_PULLBACK_LONG_PARAMS),
-    dict(paper_runner.ETH_PULSE_PARAMS),
+    dict(params)
+    for strategies in paper_runner.ACTIVE_STRATEGIES_BY_SYMBOL.values()
+    for params in strategies
 ]
 
 

@@ -386,11 +386,11 @@ ETH_PULSE_PARAMS = {
     "reward_risk_ratio": dec("4.0"),
     "stop_mode": 1,
     "side_mode": -1,
-    "weekday_mask": 124,
+    "weekday_mask": 127,
     "leverage": 2,
 }
 
-ACTIVE_STRATEGIES_BY_SYMBOL = {
+ALL_STRATEGIES_BY_SYMBOL = {
     "BTCUSDT": [
         BTC_PULSE_PARAMS,
         BTC_REGIME_SESSION_FADE_PARAMS,
@@ -399,10 +399,13 @@ ACTIVE_STRATEGIES_BY_SYMBOL = {
     "ETHUSDT": [ETH_PULSE_PARAMS],
 }
 
+ACTIVE_STRATEGIES_BY_SYMBOL = {
+    "BTCUSDT": [BTC_PULSE_PARAMS],
+    "ETHUSDT": [ETH_PULSE_PARAMS],
+}
+
 DEFAULT_OWNER_STRATEGY_IDS = (
     BTC_PULSE_PARAMS["strategy_id"],
-    BTC_REGIME_SESSION_FADE_PARAMS["strategy_id"],
-    BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"],
     ETH_PULSE_PARAMS["strategy_id"],
 )
 
@@ -429,7 +432,7 @@ STRATEGY_BACKTESTS = {
         "robustnessNote": "4개 연도 모두 플러스, 반기 6/8 플러스, 최악 반기 -4.41%.",
     },
     "btc-15m-regime-session-fade": {
-        "label": "최근 4년 · 공식 러너 · 보수형 · 1x",
+        "label": "비활성 연구용 · 시간대 의존 확인됨 · 1x",
         "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
         "source": "paper_runner.evaluate_strategy",
         "initialCapital": "100",
@@ -445,12 +448,12 @@ STRATEGY_BACKTESTS = {
         "profitLockStopCount": 18,
         "pureStopCount": 26,
         "timeExitCount": 10,
-        "robustness": "중간",
-        "robustnessCode": "MEDIUM",
-        "robustnessNote": "10x/0.005 임계값의 극단 복리를 제거. 전체 구간 +12.03%, MDD 14.70%. 시간대 의존은 남아 있어 forward 검증 필요.",
+        "robustness": "높음",
+        "robustnessCode": "HIGH",
+        "robustnessNote": "요일·시간대 whitelist 제거 시 최근 4년 -40.40%, 전체 -80.95%로 붕괴해 실거래 active에서 제외.",
     },
     "btc-15m-bull-pullback-long": {
-        "label": "최근 4년 · 공식 러너 · 보수형 · 2x",
+        "label": "비활성 연구용 · 시간대 의존 확인됨 · 2x",
         "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
         "source": "paper_runner.evaluate_strategy",
         "initialCapital": "100",
@@ -466,30 +469,30 @@ STRATEGY_BACKTESTS = {
         "profitLockStopCount": 22,
         "pureStopCount": 33,
         "timeExitCount": 100,
-        "robustness": "낮음",
-        "robustnessCode": "LOWER",
-        "robustnessNote": "10x를 2x로 낮춰 전체 구간 MDD를 72.56%에서 24.90%로 축소.",
+        "robustness": "높음",
+        "robustnessCode": "HIGH",
+        "robustnessNote": "요일·시간대 whitelist 제거 시 최근 4년 -69.46%, 전체 -97.87%로 붕괴해 실거래 active에서 제외.",
     },
     "eth-15m-vacuum-pulse": {
-        "label": "최근 4년 · 공식 러너 · 보수형 · 2x",
+        "label": "최근 4년 · 공식 러너 · 전체 요일 · 2x",
         "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
         "source": "paper_runner.evaluate_strategy",
         "initialCapital": "100",
-        "finalBalance": "215.07",
-        "netReturnPercent": "+115.07",
-        "winRatePercent": "49.14",
-        "maxDrawdownPercent": "5.89",
-        "profitFactor": "1.71",
-        "totalTrades": 116,
-        "annualTrades": "29.0",
-        "tp1Count": 57,
-        "tp2Count": 22,
-        "profitLockStopCount": 35,
-        "pureStopCount": 59,
+        "finalBalance": "157.85",
+        "netReturnPercent": "+57.85",
+        "winRatePercent": "42.48",
+        "maxDrawdownPercent": "13.75",
+        "profitFactor": "1.27",
+        "totalTrades": 153,
+        "annualTrades": "38.3",
+        "tp1Count": 65,
+        "tp2Count": 26,
+        "profitLockStopCount": 39,
+        "pureStopCount": 88,
         "timeExitCount": 0,
-        "robustness": "낮음",
-        "robustnessCode": "LOWER",
-        "robustnessNote": "10x를 2x로 낮춰 전체 구간 MDD를 59.17%에서 25.95%로 축소.",
+        "robustness": "중간",
+        "robustnessCode": "MEDIUM",
+        "robustnessNote": "요일 mask 제거 후에도 최근 4년 +57.85%, 전체 +31.71%. PF 1.12~1.27로 우위가 얇아 forward 검증 필요.",
     },
 }
 
@@ -4495,7 +4498,7 @@ class PaperRunner:
         if not isinstance(profiles, list):
             raise ValueError("web access profiles file must contain a profiles array.")
 
-        active_ids = set(self.active_strategy_ids())
+        known_ids = set(self.known_strategy_ids())
         loaded: dict[str, WebAccessProfile] = {}
         access_keys: set[str] = set()
         for item in profiles:
@@ -4525,7 +4528,7 @@ class PaperRunner:
                 allowed_strategy_ids = tuple(strategy_id.strip() for strategy_id in raw_allowed if strategy_id.strip())
             else:
                 raise ValueError("web access profile allowedStrategyIDs must be a string array or '*'.")
-            unknown = sorted(set(allowed_strategy_ids) - active_ids - {"*"})
+            unknown = sorted(set(allowed_strategy_ids) - known_ids - {"*"})
             if unknown:
                 raise ValueError(f"web access profile references unknown strategy id: {unknown[0]}")
             loaded[profile_id] = WebAccessProfile(
@@ -5842,6 +5845,17 @@ class PaperRunner:
             if strategy_id not in seen:
                 seen.add(strategy_id)
                 ids.append(strategy_id)
+        return ids
+
+    def known_strategy_ids(self) -> list[str]:
+        ids: list[str] = []
+        seen: set[str] = set()
+        for strategies in ALL_STRATEGIES_BY_SYMBOL.values():
+            for params in strategies:
+                strategy_id = str(params["strategy_id"])
+                if strategy_id not in seen:
+                    seen.add(strategy_id)
+                    ids.append(strategy_id)
         return ids
 
     def allowed_strategy_ids_for_user(self, user_id: str) -> list[str]:
