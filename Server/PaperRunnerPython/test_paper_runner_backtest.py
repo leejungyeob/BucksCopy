@@ -48,9 +48,9 @@ class PaperRunnerBacktestTests(unittest.TestCase):
     def test_strategy_backtest_metadata_is_populated_for_web_cards(self):
         expected_returns = {
             "btc-15m-vacuum-pulse": "+634.03",
-            "btc-15m-regime-session-fade": "+854501.14",
-            "btc-15m-bull-pullback-long": "+2054.93",
-            "eth-15m-vacuum-pulse": "+530.27",
+            "btc-15m-regime-session-fade": "+27.38",
+            "btc-15m-bull-pullback-long": "+118.60",
+            "eth-15m-vacuum-pulse": "+115.07",
         }
 
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
@@ -96,9 +96,9 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 "max_drawdown_percent": Decimal("20.472450"),
             },
             "btc-15m-regime-session-fade": {
-                "final_balance": Decimal("103.427024"),
-                "trade_count": 13,
-                "max_drawdown_percent": Decimal("14.294658"),
+                "final_balance": Decimal("101.888652"),
+                "trade_count": 2,
+                "max_drawdown_percent": Decimal("0.000000"),
             },
             "btc-15m-bull-pullback-long": {
                 "final_balance": Decimal("100.000000"),
@@ -106,9 +106,9 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 "max_drawdown_percent": Decimal("0.000000"),
             },
             "eth-15m-vacuum-pulse": {
-                "final_balance": Decimal("94.548444"),
+                "final_balance": Decimal("97.682018"),
                 "trade_count": 1,
-                "max_drawdown_percent": Decimal("5.451556"),
+                "max_drawdown_percent": Decimal("2.317982"),
             },
         }
 

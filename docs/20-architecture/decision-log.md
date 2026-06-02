@@ -855,3 +855,22 @@
   - 앞으로 live entry 판단과 backtest entry 판단은 같은 runtime strategy evaluator를 기준으로 검증합니다.
   - 그래프/백테스트 도구는 별도 전략 로직을 복사하지 않고 runtime evaluator를 import해야 합니다.
   - macOS UI/Swift build 검증은 더 이상 필수 검증 세트가 아니며, Python runner/live execution 테스트가 기본 검증입니다.
+
+## 0048. Conservative Parameters For Non-BTC-Vacuum Active Strategies
+
+- Status: accepted
+- Date: 2026-06-02
+- Context:
+  - `BTC 15m Regime Session Fade`, `BTC 15m Bull Pullback Long`, `ETH 15m Vacuum Pulse`는 최근 4년 성과는 강했지만 전체 보유 history 기준 MDD와 붕괴 위험이 커 과최적화 의심이 있었습니다.
+  - 사용자는 `BTC 15m Vacuum Pulse`는 유지하고 나머지 active 전략들의 과최적화 성격을 줄이길 원했습니다.
+  - 실거래와 백테스트 판단은 `paper_runner.evaluate_strategy(...)` 기준으로 유지해야 합니다.
+- Decision:
+  - `BTC 15m Regime Session Fade`는 `threshold=0.015`, `leverage=1`로 낮춰 극단 복리 구간을 제거합니다.
+  - `BTC 15m Bull Pullback Long`은 `leverage=2`로 낮춰 전체 history MDD를 낮춥니다.
+  - `ETH 15m Vacuum Pulse`는 `leverage=2`로 낮춰 전체 history MDD를 낮춥니다.
+  - `BTC 15m Vacuum Pulse`는 이번 변경에서 제외하고 기존 파라미터를 유지합니다.
+  - 전략 카드의 백테스트 요약은 보수형 파라미터 기준 최근 4년 공식 runner 결과로 갱신합니다.
+- Consequences:
+  - 최근 4년 수익률은 크게 낮아지지만, 전체 보유 history 기준 붕괴 위험과 MDD가 감소합니다.
+  - `BTC Regime`은 시간대 의존성이 남아 있어 `MEDIUM`/forward 검증 대상으로 유지합니다.
+  - 활성 전략 변경은 fixture deterministic backtest와 live execution 테스트를 통과해야 합니다.
