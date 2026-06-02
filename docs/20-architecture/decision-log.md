@@ -893,3 +893,23 @@
   - Regime/Bull의 기존 과거 성과는 live 근거로 사용하지 않습니다.
   - 기존 사용자 전략 선택 파일에 제외된 전략 ID가 남아 있어도 active set에는 자동으로 포함되지 않습니다.
   - ETH는 과최적화 위험을 줄였지만 전체 기간 PF `1.28` 수준이라 forward 검증 리스크를 계속 표시해야 합니다.
+
+## 0050. Activate BTC Pulse 107 And Delete Time-Whitelist Strategies
+
+- Status: accepted
+- Date: 2026-06-02
+- Context:
+  - 사용자는 BTCUSDT 실거래 판단을 `BTC 15m Vacuum Pulse`와 `BTC 15m Pulse 107` 두 개로 운용하길 원했습니다.
+  - 이전 `BTC 15m Regime Session Fade`, `BTC 15m Bull Pullback Long`은 비활성/research-only로 남기는 대신 완전히 삭제하길 원했습니다.
+  - live 판단과 백테스트 판단은 계속 `paper_runner.evaluate_strategy(...)`를 단일 기준으로 사용해야 합니다.
+- Decision:
+  - BTCUSDT active route는 `BTC 15m Vacuum Pulse`, `BTC 15m Pulse 107` 두 개로 고정합니다.
+  - ETHUSDT active route는 기존 `ETH 15m Vacuum Pulse`를 유지합니다.
+  - `BTC 15m Regime Session Fade`, `BTC 15m Bull Pullback Long`은 runtime registry, evaluator, 전략 카드, 접근 예시, deterministic fixture test에서 삭제합니다.
+  - `BTC 15m Pulse 107`은 요일·시간대 whitelist 없이 `5x` leverage, `5%` risk 기준으로 등록합니다.
+  - 공식 runner 최근 4년 결과는 `$100 -> $489.31`, `+389.31%`, `178` trades, win rate `60.67%`, MDD `21.43%`, PF `1.66`입니다.
+  - 공식 runner 전체 보유 history 결과는 `$100 -> $498.87`, `+398.87%`, `222` trades, win rate `59.46%`, MDD `34.32%`, PF `1.56`입니다.
+- Consequences:
+  - 웹 전략 목록과 서버 live closed-candle 평가에서 BTC는 두 전략만 후보로 생성됩니다.
+  - 삭제된 전략 ID는 `paper_runner_backtest.py`에서도 더 이상 선택할 수 없습니다.
+  - Pulse 107은 스윕으로 발견된 후보라 소액 forward 검증 리스크를 전략 카드에 계속 표시합니다.

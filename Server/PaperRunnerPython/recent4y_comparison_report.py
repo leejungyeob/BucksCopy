@@ -372,10 +372,9 @@ def main() -> None:
     end = parse_time(args.end)
     btc = load_candles(db, "BTCUSDT", start, end)
     strategies = [
-        dict(paper_runner.BTC_PULSE_PARAMS),
-        dict(paper_runner.BTC_REGIME_SESSION_FADE_PARAMS),
-        dict(paper_runner.BTC_BULL_PULLBACK_LONG_PARAMS),
-        dict(paper_runner.ETH_PULSE_PARAMS),
+        dict(strategy)
+        for active_strategies in paper_runner.ACTIVE_STRATEGIES_BY_SYMBOL.values()
+        for strategy in active_strategies
     ]
     results = [
         run_dynamic_top1(btc),

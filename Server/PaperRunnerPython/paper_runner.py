@@ -320,45 +320,34 @@ BTC_PULSE_PARAMS = {
     "leverage": 10,
 }
 
-BTC_REGIME_SESSION_FADE_PARAMS = {
-    "strategy_id": "btc-15m-regime-session-fade",
-    "name": "BTC 15m Regime Session Fade",
+BTC_PULSE_107_PARAMS = {
+    "strategy_id": "btc-15m-pulse-107",
+    "name": "BTC 15m Pulse 107",
     "symbol": "BTCUSDT",
-    "lookback": 8,
-    "threshold": dec("0.015"),
-    "stop_percent": dec("0.006"),
-    "reward_risk_ratio": dec("3.0"),
-    "trend_ema_period": 192,
-    "macro_ma_period": 200,
-    "macro_slope_days": 60,
-    "macro_return_days": 90,
-    "bull_return_threshold": dec("0.05"),
-    "bear_return_threshold": dec("-0.03"),
-    "bear_drawdown_threshold": dec("0.25"),
-    "near_high_drawdown_threshold": dec("-0.05"),
-    "low_atr_percent_threshold": dec("0.004"),
-    "atr_period": 14,
-    "maximum_holding_candles": 12,
-    "leverage": 1,
-}
-
-BTC_BULL_PULLBACK_LONG_PARAMS = {
-    "strategy_id": "btc-15m-bull-pullback-long",
-    "name": "BTC 15m Bull Pullback Long",
-    "symbol": "BTCUSDT",
-    "lookback": 8,
-    "threshold": dec("0.005"),
-    "stop_percent": dec("0.006"),
-    "tight_reward_risk_ratio": dec("2.2"),
-    "loose_reward_risk_ratio": dec("3.5"),
-    "loose_drawdown_threshold": dec("-0.02"),
-    "trend_ema_period": 192,
-    "macro_ma_period": 200,
-    "macro_slope_days": 60,
-    "macro_return_days": 90,
-    "bull_return_threshold": dec("0.05"),
-    "maximum_holding_candles": 12,
-    "leverage": 2,
+    "fast_mean_period": 72,
+    "slow_mean_period": 288,
+    "atr_period": 10,
+    "volume_lookback": 48,
+    "reclaim_lookback": 3,
+    "return_lookback": 3,
+    "return_threshold": dec("0"),
+    "return_filter_enabled": False,
+    "minimum_trend_spread": dec("0.0015"),
+    "maximum_trend_spread": dec("0.018"),
+    "minimum_atr_percent": dec("0.0006"),
+    "maximum_atr_percent": dec("0.009"),
+    "minimum_close_location": dec("0.82"),
+    "volume_multiplier": dec("1.8"),
+    "pullback_atr_buffer": dec("-0.1"),
+    "breakout_atr_buffer": dec("0.2"),
+    "stop_atr_buffer": dec("0.65"),
+    "minimum_stop_percent": dec("0"),
+    "maximum_stop_percent": dec("1"),
+    "reward_risk_ratio": dec("2.5"),
+    "stop_mode": 0,
+    "side_mode": 0,
+    "weekday_mask": 127,
+    "leverage": 5,
 }
 
 ETH_PULSE_PARAMS = {
@@ -393,19 +382,19 @@ ETH_PULSE_PARAMS = {
 ALL_STRATEGIES_BY_SYMBOL = {
     "BTCUSDT": [
         BTC_PULSE_PARAMS,
-        BTC_REGIME_SESSION_FADE_PARAMS,
-        BTC_BULL_PULLBACK_LONG_PARAMS,
+        BTC_PULSE_107_PARAMS,
     ],
     "ETHUSDT": [ETH_PULSE_PARAMS],
 }
 
 ACTIVE_STRATEGIES_BY_SYMBOL = {
-    "BTCUSDT": [BTC_PULSE_PARAMS],
+    "BTCUSDT": [BTC_PULSE_PARAMS, BTC_PULSE_107_PARAMS],
     "ETHUSDT": [ETH_PULSE_PARAMS],
 }
 
 DEFAULT_OWNER_STRATEGY_IDS = (
     BTC_PULSE_PARAMS["strategy_id"],
+    BTC_PULSE_107_PARAMS["strategy_id"],
     ETH_PULSE_PARAMS["strategy_id"],
 )
 
@@ -431,47 +420,26 @@ STRATEGY_BACKTESTS = {
         "robustnessCode": "LOWER",
         "robustnessNote": "4개 연도 모두 플러스, 반기 6/8 플러스, 최악 반기 -4.41%.",
     },
-    "btc-15m-regime-session-fade": {
-        "label": "비활성 연구용 · 시간대 의존 확인됨 · 1x",
+    "btc-15m-pulse-107": {
+        "label": "최근 4년 · 공식 러너 · 5x · no time filter",
         "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
         "source": "paper_runner.evaluate_strategy",
         "initialCapital": "100",
-        "finalBalance": "127.38",
-        "netReturnPercent": "+27.38",
-        "winRatePercent": "62.67",
-        "maxDrawdownPercent": "3.20",
-        "profitFactor": "2.30",
-        "totalTrades": 75,
-        "annualTrades": "18.8",
-        "tp1Count": 44,
-        "tp2Count": 21,
-        "profitLockStopCount": 18,
-        "pureStopCount": 26,
-        "timeExitCount": 10,
-        "robustness": "높음",
-        "robustnessCode": "HIGH",
-        "robustnessNote": "요일·시간대 whitelist 제거 시 최근 4년 -40.40%, 전체 -80.95%로 붕괴해 실거래 active에서 제외.",
-    },
-    "btc-15m-bull-pullback-long": {
-        "label": "비활성 연구용 · 시간대 의존 확인됨 · 2x",
-        "period": "2022-05-24 03:00 ~ 2026-05-24 03:00 UTC",
-        "source": "paper_runner.evaluate_strategy",
-        "initialCapital": "100",
-        "finalBalance": "218.60",
-        "netReturnPercent": "+118.60",
-        "winRatePercent": "68.21",
-        "maxDrawdownPercent": "5.50",
-        "profitFactor": "2.59",
-        "totalTrades": 173,
-        "annualTrades": "43.3",
-        "tp1Count": 56,
-        "tp2Count": 18,
-        "profitLockStopCount": 22,
-        "pureStopCount": 33,
-        "timeExitCount": 100,
-        "robustness": "높음",
-        "robustnessCode": "HIGH",
-        "robustnessNote": "요일·시간대 whitelist 제거 시 최근 4년 -69.46%, 전체 -97.87%로 붕괴해 실거래 active에서 제외.",
+        "finalBalance": "489.31",
+        "netReturnPercent": "+389.31",
+        "winRatePercent": "60.67",
+        "maxDrawdownPercent": "21.43",
+        "profitFactor": "1.66",
+        "totalTrades": 178,
+        "annualTrades": "44.5",
+        "tp1Count": 108,
+        "tp2Count": 47,
+        "profitLockStopCount": 61,
+        "pureStopCount": 70,
+        "timeExitCount": 0,
+        "robustness": "중간",
+        "robustnessCode": "MEDIUM",
+        "robustnessNote": "요일·시간대 필터 없음. 전체 구간 +398.87%, MDD 34.32%, PF 1.56. 스윕 후보라 소액 forward 검증 필요.",
     },
     "eth-15m-vacuum-pulse": {
         "label": "최근 4년 · 공식 러너 · 전체 요일 · 2x",
@@ -545,80 +513,11 @@ def exponential_moving_average(candles: list[Candle], period: int) -> Decimal | 
     return current
 
 
-def daily_closes(candles: list[Candle]) -> list[tuple[int, Decimal]]:
-    output: list[tuple[int, Decimal]] = []
-    for candle in candles:
-        day = candle.open_time // 86_400
-        if output and output[-1][0] == day:
-            output[-1] = (day, candle.close)
-        else:
-            output.append((day, candle.close))
-    return output
-
-
-def daily_sma(days: list[tuple[int, Decimal]], period: int, ending_at: int) -> Decimal | None:
-    if period <= 0 or ending_at < 0 or ending_at >= len(days) or ending_at - period + 1 < 0:
-        return None
-    return sum((close for _, close in days[ending_at - period + 1 : ending_at + 1]), dec(0)) / dec(period)
-
-
-def btc_macro_snapshot(
-    candles: list[Candle],
-    ma_period: int,
-    slope_days: int,
-    return_days: int,
-    bull_return_threshold: Decimal,
-    bear_return_threshold: Decimal,
-    bear_drawdown_threshold: Decimal,
-) -> dict[str, Any]:
-    days = daily_closes(candles)
-    if not candles or len(days) < 2:
-        return {"regime": 0, "drawdown": None}
-    current_day = candles[-1].open_time // 86_400
-    current_index = next((index for index, item in enumerate(days) if item[0] == current_day), len(days) - 1)
-    if current_index <= 0:
-        return {"regime": 0, "drawdown": None}
-
-    previous_index = current_index - 1
-    previous_close = days[previous_index][1]
-    rolling_high = max(close for _, close in days[: previous_index + 1])
-    drawdown = previous_close / rolling_high - dec(1) if rolling_high > 0 else dec(0)
-
-    previous_ma = daily_sma(days, ma_period, previous_index)
-    prior_ma = daily_sma(days, ma_period, previous_index - slope_days)
-    if (
-        previous_ma is None
-        or prior_ma is None
-        or previous_index - return_days < 0
-        or prior_ma <= 0
-        or previous_ma <= 0
-        or days[previous_index - return_days][1] <= 0
-    ):
-        return {"regime": 0, "drawdown": drawdown}
-
-    slope = previous_ma / prior_ma - dec(1)
-    period_return = previous_close / days[previous_index - return_days][1] - dec(1)
-    if previous_close >= previous_ma and slope > 0 and period_return >= bull_return_threshold:
-        regime = 1
-    elif previous_close <= previous_ma and (
-        slope < 0 or period_return <= bear_return_threshold or drawdown <= -bear_drawdown_threshold
-    ):
-        regime = -1
-    else:
-        regime = 0
-    return {
-        "regime": regime,
-        "drawdown": drawdown,
-        "periodReturn": period_return,
-        "slope": slope,
-    }
-
-
 class StrategyEvaluationContext:
     """Precomputed indicators for historical evaluation.
 
     Live execution calls the same strategy functions without this context. Long
-    backtests pass it in so those functions do not recalculate EMA/ATR/macro
+    backtests pass it in so those functions do not recalculate SMA/ATR/EMA
     history from the first candle on every step.
     """
 
@@ -628,21 +527,6 @@ class StrategyEvaluationContext:
         self.volume_prefix = self._prefix([candle.volume for candle in candles])
         self.true_range_prefix = self._true_range_prefix(candles)
         self.ema_by_period: dict[int, list[Decimal | None]] = {}
-        self.day_index_by_candle: list[int] = []
-        self.days: list[tuple[int, Decimal]] = []
-        for candle in candles:
-            day = candle.open_time // 86_400
-            if self.days and self.days[-1][0] == day:
-                self.days[-1] = (day, candle.close)
-            else:
-                self.days.append((day, candle.close))
-            self.day_index_by_candle.append(len(self.days) - 1)
-        self.daily_close_prefix = self._prefix([close for _, close in self.days])
-        self.daily_rolling_high: list[Decimal] = []
-        high = dec(0)
-        for _, close in self.days:
-            high = max(high, close)
-            self.daily_rolling_high.append(high)
 
     @staticmethod
     def _prefix(values: list[Decimal]) -> list[Decimal]:
@@ -698,62 +582,6 @@ class StrategyEvaluationContext:
                 values[index] = current
             self.ema_by_period[period] = values
         return self.ema_by_period[period][ending_at]
-
-    def daily_sma(self, period: int, ending_at: int) -> Decimal | None:
-        if period <= 0 or ending_at < 0 or ending_at >= len(self.days) or ending_at - period + 1 < 0:
-            return None
-        return self._range_sum(self.daily_close_prefix, ending_at - period + 1, ending_at) / dec(period)
-
-    def btc_macro_snapshot(
-        self,
-        ending_at: int,
-        ma_period: int,
-        slope_days: int,
-        return_days: int,
-        bull_return_threshold: Decimal,
-        bear_return_threshold: Decimal,
-        bear_drawdown_threshold: Decimal,
-    ) -> dict[str, Any]:
-        if not self.candles or ending_at < 0 or ending_at >= len(self.candles) or len(self.days) < 2:
-            return {"regime": 0, "drawdown": None}
-        current_index = self.day_index_by_candle[ending_at]
-        if current_index <= 0:
-            return {"regime": 0, "drawdown": None}
-
-        previous_index = current_index - 1
-        previous_close = self.days[previous_index][1]
-        rolling_high = self.daily_rolling_high[previous_index]
-        drawdown = previous_close / rolling_high - dec(1) if rolling_high > 0 else dec(0)
-
-        previous_ma = self.daily_sma(ma_period, previous_index)
-        prior_ma = self.daily_sma(ma_period, previous_index - slope_days)
-        if (
-            previous_ma is None
-            or prior_ma is None
-            or previous_index - return_days < 0
-            or prior_ma <= 0
-            or previous_ma <= 0
-            or self.days[previous_index - return_days][1] <= 0
-        ):
-            return {"regime": 0, "drawdown": drawdown}
-
-        slope = previous_ma / prior_ma - dec(1)
-        period_return = previous_close / self.days[previous_index - return_days][1] - dec(1)
-        if previous_close >= previous_ma and slope > 0 and period_return >= bull_return_threshold:
-            regime = 1
-        elif previous_close <= previous_ma and (
-            slope < 0 or period_return <= bear_return_threshold or drawdown <= -bear_drawdown_threshold
-        ):
-            regime = -1
-        else:
-            regime = 0
-        return {
-            "regime": regime,
-            "drawdown": drawdown,
-            "periodReturn": period_return,
-            "slope": slope,
-        }
-
 
 def has_valid_price_layout(signal: Signal) -> bool:
     if signal.side == "buy":
@@ -916,6 +744,7 @@ def evaluate_vacuum_pulse(
     atr_percent = atr / entry
     close_location = (latest.close - latest.low) / candle_range
     return_value = (latest.close - base.close) / base.close
+    return_filter_enabled = bool(params.get("return_filter_enabled", True))
     if not (params["minimum_trend_spread"] <= trend_spread <= params["maximum_trend_spread"]):
         return None
     if not (params["minimum_atr_percent"] <= atr_percent <= params["maximum_atr_percent"]):
@@ -926,7 +755,7 @@ def evaluate_vacuum_pulse(
     if (
         allows_long
         and fast_mean > slow_mean
-        and return_value >= params["return_threshold"]
+        and (not return_filter_enabled or return_value >= params["return_threshold"])
         and latest.low <= fast_mean + atr * params["pullback_atr_buffer"]
         and latest.close > fast_mean
         and latest.close > previous_high + atr * params["breakout_atr_buffer"]
@@ -951,7 +780,7 @@ def evaluate_vacuum_pulse(
     if (
         allows_short
         and fast_mean < slow_mean
-        and return_value <= -params["return_threshold"]
+        and (not return_filter_enabled or return_value <= -params["return_threshold"])
         and latest.high >= fast_mean - atr * params["pullback_atr_buffer"]
         and latest.close < fast_mean
         and latest.close < previous_low - atr * params["breakout_atr_buffer"]
@@ -976,193 +805,6 @@ def evaluate_vacuum_pulse(
     return None
 
 
-BTC_REGIME_BULL_HOURS = {
-    128, 135, 140, 15, 144, 16, 150, 151,
-    155, 163, 164, 165, 36, 48, 56, 59,
-    71, 72, 84, 109, 111, 120, 122, 127,
-}
-BTC_REGIME_BEAR_HOURS = {
-    137, 11, 12, 16, 145, 22, 154, 162,
-    36, 165, 166, 38, 48, 54, 55, 63,
-    75, 81, 95, 98, 100, 101, 110, 120,
-}
-BTC_REGIME_NEUTRAL_HOURS = {
-    130, 132, 5, 135, 13, 146, 147, 148,
-    18, 23, 30, 159, 162, 36, 165, 166,
-    167, 53, 63, 65, 100, 108, 113, 114,
-}
-BTC_BULL_PULLBACK_HOURS = {
-    128, 4, 135, 144, 19, 21, 150, 151,
-    32, 164, 165, 59, 69, 70, 72, 81,
-    105, 107, 109, 111, 112, 114, 122, 127,
-}
-
-
-def candle_week_hour(candle: Candle) -> int:
-    dt = datetime.fromtimestamp(candle.open_time, timezone.utc)
-    return dt.weekday() * 24 + dt.hour
-
-
-def fixed_percent_signal(
-    params: dict[str, Any],
-    side: str,
-    entry: Decimal,
-    stop_percent: Decimal,
-    reward_risk_ratio: Decimal,
-    reason: str,
-) -> Signal | None:
-    if side == "buy":
-        stop = entry * (dec(1) - stop_percent)
-        take_profit = entry + (entry - stop) * reward_risk_ratio
-    else:
-        stop = entry * (dec(1) + stop_percent)
-        take_profit = entry - (stop - entry) * reward_risk_ratio
-    return Signal(
-        strategy_id=params["strategy_id"],
-        symbol=params["symbol"],
-        side=side,
-        entry=entry,
-        stop=stop,
-        take_profit=take_profit,
-        reason=reason,
-        leverage=params["leverage"],
-    )
-
-
-def evaluate_btc_regime_session_fade(
-    candles: list[Candle],
-    params: dict[str, Any],
-    context: StrategyEvaluationContext | None = None,
-) -> Signal | None:
-    if len(candles) <= params["lookback"]:
-        return None
-    latest = candles[-1]
-    ending_at = len(candles) - 1
-    trend_ema = context.exponential_moving_average(params["trend_ema_period"], ending_at) if context else exponential_moving_average(candles, params["trend_ema_period"])
-    atr = context.average_true_range(params["atr_period"], ending_at) if context else average_true_range(candles, params["atr_period"])
-    if trend_ema is None or atr is None or latest.close <= 0:
-        return None
-
-    macro = (
-        context.btc_macro_snapshot(
-            ending_at,
-            params["macro_ma_period"],
-            params["macro_slope_days"],
-            params["macro_return_days"],
-            params["bull_return_threshold"],
-            params["bear_return_threshold"],
-            params["bear_drawdown_threshold"],
-        )
-        if context
-        else btc_macro_snapshot(
-            candles,
-            params["macro_ma_period"],
-            params["macro_slope_days"],
-            params["macro_return_days"],
-            params["bull_return_threshold"],
-            params["bear_return_threshold"],
-            params["bear_drawdown_threshold"],
-        )
-    )
-    regime = int(macro.get("regime", 0))
-    allowed_hours = BTC_REGIME_BULL_HOURS if regime == 1 else BTC_REGIME_BEAR_HOURS if regime == -1 else BTC_REGIME_NEUTRAL_HOURS
-    if candle_week_hour(latest) not in allowed_hours:
-        return None
-
-    drawdown = macro.get("drawdown")
-    atr_percent = atr / latest.close
-    if (
-        isinstance(drawdown, Decimal)
-        and drawdown >= params["near_high_drawdown_threshold"]
-        and atr_percent <= params["low_atr_percent_threshold"]
-    ):
-        return None
-
-    base = candles[-1 - params["lookback"]]
-    if base.close <= 0:
-        return None
-    return_value = latest.close / base.close - dec(1)
-    if abs(return_value) < params["threshold"]:
-        return None
-    side = "sell" if return_value > 0 else "buy"
-    trend_side = "buy" if latest.close >= trend_ema else "sell"
-    if side != trend_side:
-        return None
-
-    return fixed_percent_signal(
-        params,
-        side,
-        latest.close,
-        params["stop_percent"],
-        params["reward_risk_ratio"],
-        "BTC 15m Regime Session Fade: 장세별 허용 시간대에서 8봉 impulse를 EMA192 방향으로 fade",
-    )
-
-
-def evaluate_btc_bull_pullback_long(
-    candles: list[Candle],
-    params: dict[str, Any],
-    context: StrategyEvaluationContext | None = None,
-) -> Signal | None:
-    if len(candles) <= params["lookback"]:
-        return None
-    latest = candles[-1]
-    ending_at = len(candles) - 1
-    trend_ema = context.exponential_moving_average(params["trend_ema_period"], ending_at) if context else exponential_moving_average(candles, params["trend_ema_period"])
-    if trend_ema is None or latest.close <= 0:
-        return None
-
-    macro = (
-        context.btc_macro_snapshot(
-            ending_at,
-            params["macro_ma_period"],
-            params["macro_slope_days"],
-            params["macro_return_days"],
-            params["bull_return_threshold"],
-            dec("-0.03"),
-            dec("0.25"),
-        )
-        if context
-        else btc_macro_snapshot(
-            candles,
-            params["macro_ma_period"],
-            params["macro_slope_days"],
-            params["macro_return_days"],
-            params["bull_return_threshold"],
-            dec("-0.03"),
-            dec("0.25"),
-        )
-    )
-    if int(macro.get("regime", 0)) != 1:
-        return None
-    if candle_week_hour(latest) not in BTC_BULL_PULLBACK_HOURS:
-        return None
-    if latest.close < trend_ema:
-        return None
-
-    base = candles[-1 - params["lookback"]]
-    if base.close <= 0:
-        return None
-    return_value = latest.close / base.close - dec(1)
-    if return_value > -params["threshold"]:
-        return None
-
-    drawdown = macro.get("drawdown")
-    reward_risk_ratio = (
-        params["loose_reward_risk_ratio"]
-        if isinstance(drawdown, Decimal) and drawdown <= params["loose_drawdown_threshold"]
-        else params["tight_reward_risk_ratio"]
-    )
-    return fixed_percent_signal(
-        params,
-        "buy",
-        latest.close,
-        params["stop_percent"],
-        reward_risk_ratio,
-        "BTC 15m Bull Pullback Long: 상승장 눌림 long, 고점 대비 눌림폭에 따라 TP 동적 조정",
-    )
-
-
 def evaluate_strategy(
     candles: list[Candle],
     params: dict[str, Any],
@@ -1171,10 +813,6 @@ def evaluate_strategy(
 ) -> Signal | None:
     if params["strategy_id"] == BTC_PHASE_PARAMS["strategy_id"]:
         signal = evaluate_btc_phase(candles, params, generated_at, context)
-    elif params["strategy_id"] == BTC_REGIME_SESSION_FADE_PARAMS["strategy_id"]:
-        signal = evaluate_btc_regime_session_fade(candles, params, context)
-    elif params["strategy_id"] == BTC_BULL_PULLBACK_LONG_PARAMS["strategy_id"]:
-        signal = evaluate_btc_bull_pullback_long(candles, params, context)
     else:
         signal = evaluate_vacuum_pulse(candles, params, generated_at, context)
     if signal and risk_allowed(signal):

@@ -48,6 +48,7 @@ class PaperRunnerBacktestTests(unittest.TestCase):
     def test_strategy_backtest_metadata_is_populated_for_web_cards(self):
         expected_returns = {
             "btc-15m-vacuum-pulse": "+634.03",
+            "btc-15m-pulse-107": "+389.31",
             "eth-15m-vacuum-pulse": "+64.78",
         }
 
@@ -61,22 +62,6 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 self.assertIn("2026-05-24", metadata["period"])
                 self.assertIn(metadata["robustness"], {"낮음", "중간"})
                 self.assertTrue(metadata["robustnessNote"])
-
-    def test_time_whitelist_dependent_strategies_are_research_only(self):
-        active_ids = {
-            str(params["strategy_id"])
-            for strategies in paper_runner.ACTIVE_STRATEGIES_BY_SYMBOL.values()
-            for params in strategies
-        }
-        research_only_ids = {
-            "btc-15m-regime-session-fade",
-            "btc-15m-bull-pullback-long",
-        }
-
-        self.assertTrue(research_only_ids.isdisjoint(active_ids))
-        for strategy_id in research_only_ids:
-            with self.subTest(strategy_id=strategy_id):
-                self.assertEqual(paper_runner_backtest.strategy_params(strategy_id)["strategy_id"], strategy_id)
 
     def test_cached_strategy_context_matches_uncached_runtime_evaluator(self):
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
@@ -109,15 +94,10 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 "trade_count": 7,
                 "max_drawdown_percent": Decimal("20.472450"),
             },
-            "btc-15m-regime-session-fade": {
-                "final_balance": Decimal("101.888652"),
-                "trade_count": 2,
-                "max_drawdown_percent": Decimal("0.000000"),
-            },
-            "btc-15m-bull-pullback-long": {
-                "final_balance": Decimal("100.000000"),
-                "trade_count": 0,
-                "max_drawdown_percent": Decimal("0.000000"),
+            "btc-15m-pulse-107": {
+                "final_balance": Decimal("97.361560"),
+                "trade_count": 6,
+                "max_drawdown_percent": Decimal("6.889340"),
             },
             "eth-15m-vacuum-pulse": {
                 "final_balance": Decimal("97.815850"),
