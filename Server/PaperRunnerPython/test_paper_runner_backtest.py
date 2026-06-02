@@ -43,12 +43,12 @@ class PaperRunnerBacktestTests(unittest.TestCase):
             result = paper_runner_backtest.run_backtest(self.config("eth-15m-vacuum-pulse"))
 
         self.assertGreater(calls, 0)
-        self.assertEqual(result["summary"]["trade_count"], 2)
+        self.assertEqual(result["summary"]["trade_count"], 1)
 
     def test_strategy_backtest_metadata_is_populated_for_web_cards(self):
         expected_returns = {
             "btc-15m-vacuum-pulse": "+634.03",
-            "eth-15m-vacuum-pulse": "+57.85",
+            "eth-15m-vacuum-pulse": "+64.78",
         }
 
         for strategy_id in paper_runner.DEFAULT_OWNER_STRATEGY_IDS:
@@ -120,9 +120,9 @@ class PaperRunnerBacktestTests(unittest.TestCase):
                 "max_drawdown_percent": Decimal("0.000000"),
             },
             "eth-15m-vacuum-pulse": {
-                "final_balance": Decimal("95.548496"),
-                "trade_count": 2,
-                "max_drawdown_percent": Decimal("4.451504"),
+                "final_balance": Decimal("97.815850"),
+                "trade_count": 1,
+                "max_drawdown_percent": Decimal("2.184150"),
             },
         }
 

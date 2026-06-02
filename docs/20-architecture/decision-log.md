@@ -883,13 +883,13 @@
   - 0048의 레버리지 축소는 account-risk 스케일 조정일 뿐, 전략 과최적화의 원인인 요일·시간대 whitelist 의존을 제거하지 못했습니다.
   - `BTC 15m Regime Session Fade`는 whitelist를 제거하면 최근 4년 `-40.40%`, 전체 보유 history `-80.95%`로 붕괴했습니다.
   - `BTC 15m Bull Pullback Long`은 whitelist를 제거하면 최근 4년 `-69.46%`, 전체 보유 history `-97.87%`로 붕괴했습니다.
-  - `ETH 15m Vacuum Pulse`는 요일 mask를 전체 요일로 제거해도 최근 4년 `+57.85%`, 전체 보유 history `+31.71%`로 플러스는 유지하지만 PF가 얇습니다.
+  - `ETH 15m Vacuum Pulse`는 요일 mask를 전체 요일로 제거한 뒤 평균 이상 거래량, 더 강한 impulse, 하단 종가 조건을 적용하면 최근 4년 `+64.78%`, 전체 보유 history `+46.28%`로 플러스를 유지했습니다.
 - Decision:
   - 실거래 active route는 `BTC 15m Vacuum Pulse`와 `ETH 15m Vacuum Pulse`만 유지합니다.
   - `BTC 15m Regime Session Fade`와 `BTC 15m Bull Pullback Long`은 research-only 전략으로 남기고, live 평가/전략 선택 목록에서는 제외합니다.
   - 백테스트 registry는 active route와 분리해 research-only 전략도 `paper_runner_backtest.py`에서 계속 검증할 수 있게 합니다.
-  - `ETH 15m Vacuum Pulse`의 `weekday_mask`는 `127`로 바꿔 특정 요일 whitelist에 의존하지 않게 합니다.
+  - `ETH 15m Vacuum Pulse`의 `weekday_mask`는 `127`로 바꾸고, `return_threshold=0.0035`, `volume_multiplier=1.0`, `minimum_close_location=0.68`로 신호 품질 조건을 강화합니다.
 - Consequences:
   - Regime/Bull의 기존 과거 성과는 live 근거로 사용하지 않습니다.
   - 기존 사용자 전략 선택 파일에 제외된 전략 ID가 남아 있어도 active set에는 자동으로 포함되지 않습니다.
-  - ETH는 과최적화 위험을 줄였지만 전체 기간 PF `1.12` 수준이라 forward 검증 리스크를 계속 표시해야 합니다.
+  - ETH는 과최적화 위험을 줄였지만 전체 기간 PF `1.28` 수준이라 forward 검증 리스크를 계속 표시해야 합니다.
